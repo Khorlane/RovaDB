@@ -70,7 +70,14 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 		if err == nil {
 			return &Rows{value: value}, nil
 		}
+		if isSingleQuotedStringLiteral(tokens[1]) {
+			return &Rows{value: tokens[1][1 : len(tokens[1])-1]}, nil
+		}
 	}
 
 	return &Rows{err: ErrNotImplemented}, nil
+}
+
+func isSingleQuotedStringLiteral(s string) bool {
+	return len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\''
 }

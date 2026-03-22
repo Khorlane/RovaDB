@@ -40,11 +40,7 @@ func (r *Rows) Scan(dest ...any) error {
 		if v == nil {
 			return ErrInvalidArgument
 		}
-		switch value := r.value.(type) {
-		case int:
-			*v = value
-			return nil
-		case int64:
+		if value, ok := r.value.(int64); ok {
 			*v = int(value)
 			return nil
 		}
@@ -52,11 +48,15 @@ func (r *Rows) Scan(dest ...any) error {
 		if v == nil {
 			return ErrInvalidArgument
 		}
-		switch value := r.value.(type) {
-		case int:
-			*v = int64(value)
+		if value, ok := r.value.(int64); ok {
+			*v = value
 			return nil
-		case int64:
+		}
+	case *string:
+		if v == nil {
+			return ErrInvalidArgument
+		}
+		if value, ok := r.value.(string); ok {
 			*v = value
 			return nil
 		}

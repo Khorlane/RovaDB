@@ -15,14 +15,14 @@ func main() {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT 42")
+	rows, err := db.Query(context.Background(), "SELECT 'hello'")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var value int64
+		var value string
 		if err := rows.Scan(&value); err != nil {
 			log.Fatal(err)
 		}
