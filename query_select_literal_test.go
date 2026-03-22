@@ -195,13 +195,13 @@ func TestParseSelectLiteralDirect(t *testing.T) {
 	tests := []struct {
 		name  string
 		sql   string
-		value any
+		value parser.Value
 		ok    bool
 	}{
-		{name: "select integer", sql: "SELECT 1", value: int64(1), ok: true},
-		{name: "select negative integer", sql: "SELECT -1", value: int64(-1), ok: true},
-		{name: "select negative forty two", sql: "SELECT -42", value: int64(-42), ok: true},
-		{name: "select string", sql: "SELECT 'hello'", value: "hello", ok: true},
+		{name: "select integer", sql: "SELECT 1", value: parser.Int64Value(1), ok: true},
+		{name: "select negative integer", sql: "SELECT -1", value: parser.Int64Value(-1), ok: true},
+		{name: "select negative forty two", sql: "SELECT -42", value: parser.Int64Value(-42), ok: true},
+		{name: "select string", sql: "SELECT 'hello'", value: parser.StringValue("hello"), ok: true},
 		{name: "select identifier", sql: "SELECT abc", ok: false},
 	}
 

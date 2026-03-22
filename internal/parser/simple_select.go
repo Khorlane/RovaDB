@@ -7,7 +7,7 @@ import (
 
 // SelectLiteral is the minimal parsed form for SELECT <literal>.
 type SelectLiteral struct {
-	Value any
+	Value Value
 }
 
 // ParseSelectLiteral recognizes the tiny Stage 1 SELECT <literal> shape.
@@ -22,11 +22,11 @@ func ParseSelectLiteral(sql string) (*SelectLiteral, bool) {
 
 	value, err := strconv.ParseInt(tokens[1], 10, 64)
 	if err == nil {
-		return &SelectLiteral{Value: value}, true
+		return &SelectLiteral{Value: Int64Value(value)}, true
 	}
 
 	if len(tokens[1]) >= 2 && tokens[1][0] == '\'' && tokens[1][len(tokens[1])-1] == '\'' {
-		return &SelectLiteral{Value: tokens[1][1 : len(tokens[1])-1]}, true
+		return &SelectLiteral{Value: StringValue(tokens[1][1 : len(tokens[1])-1])}, true
 	}
 
 	return nil, false
