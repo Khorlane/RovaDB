@@ -2,6 +2,7 @@ package rovadb
 
 import (
 	"context"
+	"strconv"
 	"strings"
 )
 
@@ -63,12 +64,12 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 		return nil, ErrInvalidArgument
 	}
 
-	sqlTrim := strings.TrimSpace(strings.ToUpper(sql))
-
-	if sqlTrim == "SELECT 1" {
-		return &Rows{
-			value: int64(1),
-		}, nil
+	tokens := strings.Fields(strings.TrimSpace(sql))
+	if len(tokens) == 2 && strings.EqualFold(tokens[0], "SELECT") {
+		value, err := strconv.ParseInt(tokens[1], 10, 64)
+		if err == nil {
+			return &Rows{value: value}, nil
+		}
 	}
 
 	return &Rows{err: ErrNotImplemented}, nil
