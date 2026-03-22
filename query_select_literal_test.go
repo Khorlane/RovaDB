@@ -93,7 +93,8 @@ func TestQueryNilContext(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(nil, "SELECT 1")
+	var nilCtx context.Context
+	rows, err := db.Query(nilCtx, "SELECT 1")
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("Query() error = %v, want ErrInvalidArgument", err)
 	}
