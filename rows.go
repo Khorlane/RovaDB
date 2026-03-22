@@ -2,17 +2,73 @@ package rovadb
 
 // Rows represents a result stream from a query.
 type Rows struct {
-	err error
+	err   error
+	done  bool
+	value any
 }
 
 // Next reports whether another row is available.
 func (r *Rows) Next() bool {
-	return false
+	if r == nil {
+		return false
+	}
+	if r.err != nil {
+		return false
+	}
+	if r.done {
+		return false
+	}
+
+	r.done = true
+	return true
 }
 
 // Scan decodes the current row into destination values.
 func (r *Rows) Scan(dest ...any) error {
-	return ErrNotImplemented
+	if r == nil {
+		return ErrInvalidArgument
+	}
+	if r.err != nil {
+		return r.err
+	}
+	if len(dest) != 1 {
+		return ErrInvalidArgument
+	}
+
+	switch v := dest[0].(type) {
+	case *int:
+		if v == nil {
+			return ErrInvalidArgument
+		}
+		switch value := r.value.(type) {
+		case int:
+			*v = value
+			return nil
+		case int64:
+			*v = int(value)
+			return nil
+		}
+	case *int64:
+		if v == nil {
+			return ErrInvalidArgument
+		}
+		switch value := r.value.(type) {
+		case int:
+			*v = int64(value)
+			return nil
+		case int64:
+			*v = value
+			return nil
+		}
+	case *any:
+		if v == nil {
+			return ErrInvalidArgument
+		}
+		*v = r.value
+		return nil
+	}
+
+	return ErrInvalidArgument
 }
 
 // Close releases any resources held by the row stream.
@@ -22,9 +78,5 @@ func (r *Rows) Close() error {
 
 // Err reports any terminal row iteration error.
 func (r *Rows) Err() error {
-	if r == nil {
-		return nil
-	}
-
 	return r.err
 }

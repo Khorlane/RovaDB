@@ -35,7 +35,10 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	if ctx == nil {
 		return Result{}, ErrInvalidArgument
 	}
-	if db == nil || db.closed {
+	if db == nil {
+		return Result{}, ErrInvalidArgument
+	}
+	if db.closed {
 		return Result{}, ErrClosed
 	}
 	if strings.TrimSpace(sql) == "" {
@@ -50,12 +53,23 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 	if ctx == nil {
 		return nil, ErrInvalidArgument
 	}
-	if db == nil || db.closed {
+	if db == nil {
+		return nil, ErrInvalidArgument
+	}
+	if db.closed {
 		return nil, ErrClosed
 	}
 	if strings.TrimSpace(sql) == "" {
 		return nil, ErrInvalidArgument
 	}
 
-	return nil, ErrNotImplemented
+	sqlTrim := strings.TrimSpace(strings.ToUpper(sql))
+
+	if sqlTrim == "SELECT 1" {
+		return &Rows{
+			value: int64(1),
+		}, nil
+	}
+
+	return &Rows{err: ErrNotImplemented}, nil
 }
