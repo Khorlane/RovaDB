@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/Khorlane/RovaDB/internal/executor"
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
@@ -65,9 +66,12 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 		return nil, ErrInvalidArgument
 	}
 
-	sel, ok := parser.ParseSelectLiteral(sql)
+	sel, ok := parser.ParseSelectExpr(sql)
 	if ok {
-		return &Rows{value: sel.Value}, nil
+		value, err := executor.Eval(sel.Expr)
+		if err == nil {
+			return &Rows{value: value}, nil
+		}
 	}
 
 	return &Rows{err: ErrNotImplemented}, nil

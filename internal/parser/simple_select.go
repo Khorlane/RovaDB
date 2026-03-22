@@ -5,64 +5,120 @@ import (
 	"strings"
 )
 
-// SelectLiteral is the minimal parsed form for SELECT <literal>.
-type SelectLiteral struct {
-	Value Value
+// ExprKind identifies the parsed expression shape.
+type ExprKind int
+
+const (
+	ExprKindInvalid ExprKind = iota
+	ExprKindInt64Literal
+	ExprKindStringLiteral
+	ExprKindInt64Binary
+)
+
+// BinaryOp identifies the parsed binary operator.
+type BinaryOp int
+
+const (
+	BinaryOpInvalid BinaryOp = iota
+	BinaryOpAdd
+	BinaryOpSub
+)
+
+// Expr is the tiny Stage 1 parsed expression model.
+type Expr struct {
+	Kind  ExprKind
+	I64   int64
+	Str   string
+	Left  *Expr
+	Right *Expr
+	Op    BinaryOp
 }
 
-// ParseSelectLiteral recognizes the tiny Stage 1 SELECT <literal> shape.
-func ParseSelectLiteral(sql string) (*SelectLiteral, bool) {
+// SelectExpr is the minimal parsed form for SELECT <expr>.
+type SelectExpr struct {
+	Expr *Expr
+}
+
+// ParseSelectExpr recognizes the tiny Stage 1 SELECT <expr> shape.
+func ParseSelectExpr(sql string) (*SelectExpr, bool) {
 	tokens := strings.Fields(strings.TrimSpace(sql))
 	if len(tokens) != 2 || !strings.EqualFold(tokens[0], "SELECT") {
 		return nil, false
 	}
-	if strings.HasPrefix(tokens[1], "+") {
+
+	expr, ok := parseExpr(tokens[1])
+	if !ok {
 		return nil, false
 	}
 
-	value, err := strconv.ParseInt(tokens[1], 10, 64)
-	if err == nil {
-		return &SelectLiteral{Value: Int64Value(value)}, true
-	}
-
-	if isSingleQuotedStringLiteral(tokens[1]) {
-		return &SelectLiteral{Value: StringValue(tokens[1][1 : len(tokens[1])-1])}, true
-	}
-	if value, ok := parseIntBinaryExpr(tokens[1]); ok {
-		return &SelectLiteral{Value: Int64Value(value)}, true
-	}
-
-	return nil, false
+	return &SelectExpr{Expr: expr}, true
 }
 
-func parseIntBinaryExpr(expr string) (int64, bool) {
+func parseExpr(token string) (*Expr, bool) {
+	if strings.HasPrefix(token, "+") {
+		return nil, false
+	}
+
+	value, err := strconv.ParseInt(token, 10, 64)
+	if err == nil {
+		return &Expr{Kind: ExprKindInt64Literal, I64: value}, true
+	}
+
+	if isSingleQuotedStringLiteral(token) {
+		return &Expr{Kind: ExprKindStringLiteral, Str: token[1 : len(token)-1]}, true
+	}
+
+	return parseIntBinaryExpr(token)
+}
+
+func parseIntBinaryExpr(expr string) (*Expr, bool) {
 	for i := 1; i < len(expr); i++ {
 		if expr[i] != '+' && expr[i] != '-' {
 			continue
 		}
 
-		left := expr[:i]
-		right := expr[i+1:]
-		if left == "" || right == "" {
-			return 0, false
+		leftToken := expr[:i]
+		rightToken := expr[i+1:]
+		if leftToken == "" || rightToken == "" {
+			return nil, false
 		}
 
-		leftValue, err := strconv.ParseInt(left, 10, 64)
-		if err != nil {
-			return 0, false
+		left, ok := parseIntLiteral(leftToken)
+		if !ok {
+			return nil, false
 		}
-		rightValue, err := strconv.ParseInt(right, 10, 64)
-		if err != nil {
-			return 0, false
+		right, ok := parseIntLiteral(rightToken)
+		if !ok {
+			return nil, false
 		}
 
-		if expr[i] == '+' {
-			return leftValue + rightValue, true
+		op := BinaryOpAdd
+		if expr[i] == '-' {
+			op = BinaryOpSub
 		}
-		return leftValue - rightValue, true
+
+		return &Expr{
+			Kind:  ExprKindInt64Binary,
+			Left:  left,
+			Right: right,
+			Op:    op,
+		}, true
 	}
 
-	return 0, false
+	return nil, false
+}
+
+func parseIntLiteral(token string) (*Expr, bool) {
+	if strings.HasPrefix(token, "+") {
+		return nil, false
+	}
+
+	value, err := strconv.ParseInt(token, 10, 64)
+	if err != nil {
+		return nil, false
+	}
+
+	return &Expr{Kind: ExprKindInt64Literal, I64: value}, true
 }
 
 func isSingleQuotedStringLiteral(s string) bool {

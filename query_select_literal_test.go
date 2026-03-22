@@ -200,43 +200,81 @@ func TestRowsScanStringIntoInt64(t *testing.T) {
 	}
 }
 
-func TestParseSelectLiteralDirect(t *testing.T) {
+func TestParseSelectExprDirect(t *testing.T) {
 	tests := []struct {
-		name  string
-		sql   string
-		value parser.Value
-		ok    bool
+		name string
+		sql  string
+		ok   bool
+		want *parser.Expr
 	}{
-		{name: "select integer", sql: "SELECT 1", value: parser.Int64Value(1), ok: true},
-		{name: "select negative integer", sql: "SELECT -1", value: parser.Int64Value(-1), ok: true},
-		{name: "select negative forty two", sql: "SELECT -42", value: parser.Int64Value(-42), ok: true},
-		{name: "select one plus two", sql: "SELECT 1+2", value: parser.Int64Value(3), ok: true},
-		{name: "select minus one plus two", sql: "SELECT -1+2", value: parser.Int64Value(1), ok: true},
-		{name: "select ten plus minus three", sql: "SELECT 10+-3", value: parser.Int64Value(7), ok: true},
-		{name: "select string", sql: "SELECT 'hello'", value: parser.StringValue("hello"), ok: true},
+		{
+			name: "select integer",
+			sql:  "SELECT 1",
+			ok:   true,
+			want: &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: 1},
+		},
+		{
+			name: "select string",
+			sql:  "SELECT 'hello'",
+			ok:   true,
+			want: &parser.Expr{Kind: parser.ExprKindStringLiteral, Str: "hello"},
+		},
+		{
+			name: "select one plus two",
+			sql:  "SELECT 1+2",
+			ok:   true,
+			want: &parser.Expr{
+				Kind:  parser.ExprKindInt64Binary,
+				Op:    parser.BinaryOpAdd,
+				Left:  &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: 1},
+				Right: &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: 2},
+			},
+		},
+		{
+			name: "select minus one plus two",
+			sql:  "SELECT -1+2",
+			ok:   true,
+			want: &parser.Expr{
+				Kind:  parser.ExprKindInt64Binary,
+				Op:    parser.BinaryOpAdd,
+				Left:  &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: -1},
+				Right: &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: 2},
+			},
+		},
 		{name: "select identifier", sql: "SELECT abc", ok: false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := parser.ParseSelectLiteral(tc.sql)
+			got, ok := parser.ParseSelectExpr(tc.sql)
 			if ok != tc.ok {
-				t.Fatalf("ParseSelectLiteral() ok = %v, want %v", ok, tc.ok)
+				t.Fatalf("ParseSelectExpr() ok = %v, want %v", ok, tc.ok)
 			}
 			if !tc.ok {
 				if got != nil {
-					t.Fatalf("ParseSelectLiteral() = %#v, want nil", got)
+					t.Fatalf("ParseSelectExpr() = %#v, want nil", got)
 				}
 				return
 			}
 			if got == nil {
-				t.Fatal("ParseSelectLiteral() = nil, want value")
+				t.Fatal("ParseSelectExpr() = nil, want value")
 			}
-			if got.Value != tc.value {
-				t.Fatalf("ParseSelectLiteral().Value = %#v, want %#v", got.Value, tc.value)
+			if !equalExpr(got.Expr, tc.want) {
+				t.Fatalf("ParseSelectExpr().Expr = %#v, want %#v", got.Expr, tc.want)
 			}
 		})
 	}
+}
+
+func equalExpr(got, want *parser.Expr) bool {
+	if got == nil || want == nil {
+		return got == want
+	}
+	if got.Kind != want.Kind || got.I64 != want.I64 || got.Str != want.Str || got.Op != want.Op {
+		return false
+	}
+
+	return equalExpr(got.Left, want.Left) && equalExpr(got.Right, want.Right)
 }
 
 func TestQueryNilContext(t *testing.T) {

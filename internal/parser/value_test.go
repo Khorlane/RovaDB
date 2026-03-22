@@ -22,26 +22,32 @@ func TestStringValue(t *testing.T) {
 	}
 }
 
-func TestParseSelectLiteralValueKinds(t *testing.T) {
-	intSel, ok := ParseSelectLiteral("SELECT 1")
+func TestParseSelectExprValueKinds(t *testing.T) {
+	intSel, ok := ParseSelectExpr("SELECT 1")
 	if !ok {
-		t.Fatal("ParseSelectLiteral(SELECT 1) ok = false, want true")
+		t.Fatal("ParseSelectExpr(SELECT 1) ok = false, want true")
 	}
-	if intSel.Value.Kind != ValueKindInt64 {
-		t.Fatalf("ParseSelectLiteral(SELECT 1).Value.Kind = %v, want %v", intSel.Value.Kind, ValueKindInt64)
+	if intSel.Expr == nil {
+		t.Fatal("ParseSelectExpr(SELECT 1).Expr = nil, want value")
 	}
-	if intSel.Value.I64 != 1 {
-		t.Fatalf("ParseSelectLiteral(SELECT 1).Value.I64 = %d, want 1", intSel.Value.I64)
+	if intSel.Expr.Kind != ExprKindInt64Literal {
+		t.Fatalf("ParseSelectExpr(SELECT 1).Expr.Kind = %v, want %v", intSel.Expr.Kind, ExprKindInt64Literal)
+	}
+	if intSel.Expr.I64 != 1 {
+		t.Fatalf("ParseSelectExpr(SELECT 1).Expr.I64 = %d, want 1", intSel.Expr.I64)
 	}
 
-	strSel, ok := ParseSelectLiteral("SELECT 'hi'")
+	strSel, ok := ParseSelectExpr("SELECT 'hi'")
 	if !ok {
-		t.Fatal("ParseSelectLiteral(SELECT 'hi') ok = false, want true")
+		t.Fatal("ParseSelectExpr(SELECT 'hi') ok = false, want true")
 	}
-	if strSel.Value.Kind != ValueKindString {
-		t.Fatalf("ParseSelectLiteral(SELECT 'hi').Value.Kind = %v, want %v", strSel.Value.Kind, ValueKindString)
+	if strSel.Expr == nil {
+		t.Fatal("ParseSelectExpr(SELECT 'hi').Expr = nil, want value")
 	}
-	if strSel.Value.Str != "hi" {
-		t.Fatalf("ParseSelectLiteral(SELECT 'hi').Value.Str = %q, want %q", strSel.Value.Str, "hi")
+	if strSel.Expr.Kind != ExprKindStringLiteral {
+		t.Fatalf("ParseSelectExpr(SELECT 'hi').Expr.Kind = %v, want %v", strSel.Expr.Kind, ExprKindStringLiteral)
+	}
+	if strSel.Expr.Str != "hi" {
+		t.Fatalf("ParseSelectExpr(SELECT 'hi').Expr.Str = %q, want %q", strSel.Expr.Str, "hi")
 	}
 }
