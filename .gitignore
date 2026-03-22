@@ -1,0 +1,22 @@
+.DS_Store
+Thumbs.db
+
+# Go build artifacts
+bin/
+dist/
+cover.out
+coverage.out
+*.test
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Editor settings
+.vscode/
+
