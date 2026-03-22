@@ -42,16 +42,23 @@ type SelectExpr struct {
 // ParseSelectExpr recognizes the tiny Stage 1 SELECT <expr> shape.
 func ParseSelectExpr(sql string) (*SelectExpr, bool) {
 	tokens := strings.Fields(strings.TrimSpace(sql))
-	if len(tokens) != 2 || !strings.EqualFold(tokens[0], "SELECT") {
+	if len(tokens) != 2 && len(tokens) != 4 {
+		return nil, false
+	}
+	if !strings.EqualFold(tokens[0], "SELECT") {
 		return nil, false
 	}
 
-	expr, ok := parseExpr(tokens[1])
-	if !ok {
-		return nil, false
+	if len(tokens) == 2 {
+		expr, ok := parseExpr(tokens[1])
+		if !ok {
+			return nil, false
+		}
+
+		return &SelectExpr{Expr: expr}, true
 	}
 
-	return &SelectExpr{Expr: expr}, true
+	return parseSpacedIntBinaryExpr(tokens[1], tokens[2], tokens[3])
 }
 
 func parseExpr(token string) (*Expr, bool) {
@@ -106,6 +113,36 @@ func parseIntBinaryExpr(expr string) (*Expr, bool) {
 	}
 
 	return nil, false
+}
+
+func parseSpacedIntBinaryExpr(leftToken, opToken, rightToken string) (*SelectExpr, bool) {
+	left, ok := parseIntLiteral(leftToken)
+	if !ok {
+		return nil, false
+	}
+	right, ok := parseIntLiteral(rightToken)
+	if !ok {
+		return nil, false
+	}
+
+	op := BinaryOpInvalid
+	switch opToken {
+	case "+":
+		op = BinaryOpAdd
+	case "-":
+		op = BinaryOpSub
+	default:
+		return nil, false
+	}
+
+	return &SelectExpr{
+		Expr: &Expr{
+			Kind:  ExprKindInt64Binary,
+			Left:  left,
+			Right: right,
+			Op:    op,
+		},
+	}, true
 }
 
 func parseIntLiteral(token string) (*Expr, bool) {

@@ -22,6 +22,10 @@ func TestQuerySelectLiteral(t *testing.T) {
 		{name: "select five minus three", sql: "SELECT 5-3", value: 2},
 		{name: "select minus one plus two", sql: "SELECT -1+2", value: 1},
 		{name: "select ten plus minus three", sql: "SELECT 10+-3", value: 7},
+		{name: "select one plus two spaced", sql: "SELECT 1 + 2", value: 3},
+		{name: "select five minus three spaced", sql: "SELECT 5 - 3", value: 2},
+		{name: "select minus one plus two spaced", sql: "SELECT -1 + 2", value: 1},
+		{name: "select ten plus minus three spaced", sql: "SELECT 10 + -3", value: 7},
 		{name: "select trimmed mixed case", sql: " select 999 ", value: 999},
 	}
 
@@ -115,9 +119,12 @@ func TestQueryUnsupportedLiteral(t *testing.T) {
 	}{
 		{name: "select identifier", sql: "SELECT abc"},
 		{name: "select plus one", sql: "SELECT +1"},
-		{name: "select spaced expression", sql: "SELECT 1 + 2"},
 		{name: "select chained expression", sql: "SELECT 1+2+3"},
+		{name: "select chained expression spaced", sql: "SELECT 1 + 2 + 3"},
+		{name: "select incomplete expression", sql: "SELECT 1 +"},
+		{name: "select missing left operand", sql: "SELECT + 1"},
 		{name: "select string expression", sql: "SELECT 'a'+'b'"},
+		{name: "select multiply expression spaced", sql: "SELECT 1 * 2"},
 		{name: "select multiply expression", sql: "SELECT 1*2"},
 		{name: "select parenthesized expression", sql: "SELECT (1+2)"},
 		{name: "select double quoted string", sql: `SELECT "hello"`},
@@ -233,6 +240,28 @@ func TestParseSelectExprDirect(t *testing.T) {
 		{
 			name: "select minus one plus two",
 			sql:  "SELECT -1+2",
+			ok:   true,
+			want: &parser.Expr{
+				Kind:  parser.ExprKindInt64Binary,
+				Op:    parser.BinaryOpAdd,
+				Left:  &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: -1},
+				Right: &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: 2},
+			},
+		},
+		{
+			name: "select one plus two spaced",
+			sql:  "SELECT 1 + 2",
+			ok:   true,
+			want: &parser.Expr{
+				Kind:  parser.ExprKindInt64Binary,
+				Op:    parser.BinaryOpAdd,
+				Left:  &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: 1},
+				Right: &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: 2},
+			},
+		},
+		{
+			name: "select minus one plus two spaced",
+			sql:  "SELECT -1 + 2",
 			ok:   true,
 			want: &parser.Expr{
 				Kind:  parser.ExprKindInt64Binary,
