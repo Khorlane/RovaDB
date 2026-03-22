@@ -13,6 +13,7 @@ const (
 	ExprKindInt64Literal
 	ExprKindStringLiteral
 	ExprKindInt64Binary
+	ExprKindParen
 )
 
 // BinaryOp identifies the parsed binary operator.
@@ -32,6 +33,7 @@ type Expr struct {
 	Left  *Expr
 	Right *Expr
 	Op    BinaryOp
+	Inner *Expr
 }
 
 // SelectExpr is the minimal parsed form for SELECT <expr>.
@@ -48,6 +50,9 @@ func ParseSelectExpr(sql string) (*SelectExpr, bool) {
 	if !strings.EqualFold(tokens[0], "SELECT") {
 		return nil, false
 	}
+	if expr, ok := parseParenExpr(strings.Join(tokens[1:], " ")); ok {
+		return &SelectExpr{Expr: expr}, true
+	}
 
 	if len(tokens) == 2 {
 		expr, ok := parseExpr(tokens[1])
@@ -59,6 +64,20 @@ func ParseSelectExpr(sql string) (*SelectExpr, bool) {
 	}
 
 	return parseSpacedIntBinaryExpr(tokens[1], tokens[2], tokens[3])
+}
+
+func parseParenExpr(expr string) (*Expr, bool) {
+	if len(expr) < 2 || expr[0] != '(' || expr[len(expr)-1] != ')' {
+		return nil, false
+	}
+
+	inner := expr[1 : len(expr)-1]
+	innerExpr, ok := parseInnerExpr(inner)
+	if !ok {
+		return nil, false
+	}
+
+	return &Expr{Kind: ExprKindParen, Inner: innerExpr}, true
 }
 
 func parseExpr(token string) (*Expr, bool) {
@@ -76,6 +95,26 @@ func parseExpr(token string) (*Expr, bool) {
 	}
 
 	return parseIntBinaryExpr(token)
+}
+
+func parseInnerExpr(expr string) (*Expr, bool) {
+	if strings.Contains(expr, "(") || strings.Contains(expr, ")") {
+		return nil, false
+	}
+
+	innerTokens := strings.Fields(strings.TrimSpace(expr))
+	switch len(innerTokens) {
+	case 1:
+		return parseExpr(innerTokens[0])
+	case 3:
+		sel, ok := parseSpacedIntBinaryExpr(innerTokens[0], innerTokens[1], innerTokens[2])
+		if !ok {
+			return nil, false
+		}
+		return sel.Expr, true
+	default:
+		return nil, false
+	}
 }
 
 func parseIntBinaryExpr(expr string) (*Expr, bool) {

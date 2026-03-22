@@ -19,6 +19,8 @@ func Eval(expr *parser.Expr) (parser.Value, error) {
 		return parser.Int64Value(expr.I64), nil
 	case parser.ExprKindStringLiteral:
 		return parser.StringValue(expr.Str), nil
+	case parser.ExprKindParen:
+		return Eval(expr.Inner)
 	case parser.ExprKindInt64Binary:
 		left, err := Eval(expr.Left)
 		if err != nil {

@@ -26,6 +26,9 @@ func TestQuerySelectLiteral(t *testing.T) {
 		{name: "select five minus three spaced", sql: "SELECT 5 - 3", value: 2},
 		{name: "select minus one plus two spaced", sql: "SELECT -1 + 2", value: 1},
 		{name: "select ten plus minus three spaced", sql: "SELECT 10 + -3", value: 7},
+		{name: "select parenthesized one plus two", sql: "SELECT (1+2)", value: 3},
+		{name: "select parenthesized one plus two spaced", sql: "SELECT (1 + 2)", value: 3},
+		{name: "select parenthesized minus one plus two", sql: "SELECT (-1+2)", value: 1},
 		{name: "select trimmed mixed case", sql: " select 999 ", value: 999},
 	}
 
@@ -126,7 +129,9 @@ func TestQueryUnsupportedLiteral(t *testing.T) {
 		{name: "select string expression", sql: "SELECT 'a'+'b'"},
 		{name: "select multiply expression spaced", sql: "SELECT 1 * 2"},
 		{name: "select multiply expression", sql: "SELECT 1*2"},
-		{name: "select parenthesized expression", sql: "SELECT (1+2)"},
+		{name: "select nested parenthesized expression", sql: "SELECT ((1+2))"},
+		{name: "select unterminated parenthesized expression", sql: "SELECT (1+2"},
+		{name: "select trailing parenthesized expression", sql: "SELECT 1+2)"},
 		{name: "select double quoted string", sql: `SELECT "hello"`},
 		{name: "select string with spaces", sql: "SELECT 'hello world'"},
 		{name: "select unterminated string", sql: "SELECT 'unterminated"},
@@ -270,6 +275,20 @@ func TestParseSelectExprDirect(t *testing.T) {
 				Right: &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: 2},
 			},
 		},
+		{
+			name: "select parenthesized one plus two",
+			sql:  "SELECT (1+2)",
+			ok:   true,
+			want: &parser.Expr{
+				Kind: parser.ExprKindParen,
+				Inner: &parser.Expr{
+					Kind:  parser.ExprKindInt64Binary,
+					Op:    parser.BinaryOpAdd,
+					Left:  &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: 1},
+					Right: &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: 2},
+				},
+			},
+		},
 		{name: "select identifier", sql: "SELECT abc", ok: false},
 	}
 
@@ -303,7 +322,7 @@ func equalExpr(got, want *parser.Expr) bool {
 		return false
 	}
 
-	return equalExpr(got.Left, want.Left) && equalExpr(got.Right, want.Right)
+	return equalExpr(got.Left, want.Left) && equalExpr(got.Right, want.Right) && equalExpr(got.Inner, want.Inner)
 }
 
 func TestQueryNilContext(t *testing.T) {
