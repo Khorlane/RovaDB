@@ -15,7 +15,7 @@ func main() {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT -42")
+	rows, err := db.Query(context.Background(), "SELECT 1+2")
 	if err != nil {
 		log.Fatal(err)
 	}

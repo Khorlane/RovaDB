@@ -18,6 +18,10 @@ func TestQuerySelectLiteral(t *testing.T) {
 		{name: "select forty two", sql: "SELECT 42", value: 42},
 		{name: "select minus one", sql: "SELECT -1", value: -1},
 		{name: "select minus forty two", sql: "SELECT -42", value: -42},
+		{name: "select one plus two", sql: "SELECT 1+2", value: 3},
+		{name: "select five minus three", sql: "SELECT 5-3", value: 2},
+		{name: "select minus one plus two", sql: "SELECT -1+2", value: 1},
+		{name: "select ten plus minus three", sql: "SELECT 10+-3", value: 7},
 		{name: "select trimmed mixed case", sql: " select 999 ", value: 999},
 	}
 
@@ -111,6 +115,11 @@ func TestQueryUnsupportedLiteral(t *testing.T) {
 	}{
 		{name: "select identifier", sql: "SELECT abc"},
 		{name: "select plus one", sql: "SELECT +1"},
+		{name: "select spaced expression", sql: "SELECT 1 + 2"},
+		{name: "select chained expression", sql: "SELECT 1+2+3"},
+		{name: "select string expression", sql: "SELECT 'a'+'b'"},
+		{name: "select multiply expression", sql: "SELECT 1*2"},
+		{name: "select parenthesized expression", sql: "SELECT (1+2)"},
 		{name: "select double quoted string", sql: `SELECT "hello"`},
 		{name: "select string with spaces", sql: "SELECT 'hello world'"},
 		{name: "select unterminated string", sql: "SELECT 'unterminated"},
@@ -201,6 +210,9 @@ func TestParseSelectLiteralDirect(t *testing.T) {
 		{name: "select integer", sql: "SELECT 1", value: parser.Int64Value(1), ok: true},
 		{name: "select negative integer", sql: "SELECT -1", value: parser.Int64Value(-1), ok: true},
 		{name: "select negative forty two", sql: "SELECT -42", value: parser.Int64Value(-42), ok: true},
+		{name: "select one plus two", sql: "SELECT 1+2", value: parser.Int64Value(3), ok: true},
+		{name: "select minus one plus two", sql: "SELECT -1+2", value: parser.Int64Value(1), ok: true},
+		{name: "select ten plus minus three", sql: "SELECT 10+-3", value: parser.Int64Value(7), ok: true},
 		{name: "select string", sql: "SELECT 'hello'", value: parser.StringValue("hello"), ok: true},
 		{name: "select identifier", sql: "SELECT abc", ok: false},
 	}

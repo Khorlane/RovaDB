@@ -25,9 +25,50 @@ func ParseSelectLiteral(sql string) (*SelectLiteral, bool) {
 		return &SelectLiteral{Value: Int64Value(value)}, true
 	}
 
-	if len(tokens[1]) >= 2 && tokens[1][0] == '\'' && tokens[1][len(tokens[1])-1] == '\'' {
+	if isSingleQuotedStringLiteral(tokens[1]) {
 		return &SelectLiteral{Value: StringValue(tokens[1][1 : len(tokens[1])-1])}, true
+	}
+	if value, ok := parseIntBinaryExpr(tokens[1]); ok {
+		return &SelectLiteral{Value: Int64Value(value)}, true
 	}
 
 	return nil, false
+}
+
+func parseIntBinaryExpr(expr string) (int64, bool) {
+	for i := 1; i < len(expr); i++ {
+		if expr[i] != '+' && expr[i] != '-' {
+			continue
+		}
+
+		left := expr[:i]
+		right := expr[i+1:]
+		if left == "" || right == "" {
+			return 0, false
+		}
+
+		leftValue, err := strconv.ParseInt(left, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		rightValue, err := strconv.ParseInt(right, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+
+		if expr[i] == '+' {
+			return leftValue + rightValue, true
+		}
+		return leftValue - rightValue, true
+	}
+
+	return 0, false
+}
+
+func isSingleQuotedStringLiteral(s string) bool {
+	if len(s) < 2 || s[0] != '\'' || s[len(s)-1] != '\'' {
+		return false
+	}
+
+	return !strings.Contains(s[1:len(s)-1], "'")
 }
