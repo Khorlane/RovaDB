@@ -16,6 +16,9 @@ func ParseSelectLiteral(sql string) (*SelectLiteral, bool) {
 	if len(tokens) != 2 || !strings.EqualFold(tokens[0], "SELECT") {
 		return nil, false
 	}
+	if strings.HasPrefix(tokens[1], "+") {
+		return nil, false
+	}
 
 	value, err := strconv.ParseInt(tokens[1], 10, 64)
 	if err == nil {
