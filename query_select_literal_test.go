@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
 func TestQuerySelectLiteral(t *testing.T) {
@@ -183,6 +185,40 @@ func TestRowsScanStringIntoInt64(t *testing.T) {
 	err = rows.Scan(&got)
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("Scan() error = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestParseSelectLiteralDirect(t *testing.T) {
+	tests := []struct {
+		name  string
+		sql   string
+		value any
+		ok    bool
+	}{
+		{name: "select integer", sql: "SELECT 1", value: int64(1), ok: true},
+		{name: "select string", sql: "SELECT 'hello'", value: "hello", ok: true},
+		{name: "select identifier", sql: "SELECT abc", ok: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parser.ParseSelectLiteral(tc.sql)
+			if ok != tc.ok {
+				t.Fatalf("ParseSelectLiteral() ok = %v, want %v", ok, tc.ok)
+			}
+			if !tc.ok {
+				if got != nil {
+					t.Fatalf("ParseSelectLiteral() = %#v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("ParseSelectLiteral() = nil, want value")
+			}
+			if got.Value != tc.value {
+				t.Fatalf("ParseSelectLiteral().Value = %#v, want %#v", got.Value, tc.value)
+			}
+		})
 	}
 }
 

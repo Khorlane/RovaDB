@@ -2,8 +2,9 @@ package rovadb
 
 import (
 	"context"
-	"strconv"
 	"strings"
+
+	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
 // DB is the top-level handle for a RovaDB database.
@@ -64,20 +65,10 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 		return nil, ErrInvalidArgument
 	}
 
-	tokens := strings.Fields(strings.TrimSpace(sql))
-	if len(tokens) == 2 && strings.EqualFold(tokens[0], "SELECT") {
-		value, err := strconv.ParseInt(tokens[1], 10, 64)
-		if err == nil {
-			return &Rows{value: value}, nil
-		}
-		if isSingleQuotedStringLiteral(tokens[1]) {
-			return &Rows{value: tokens[1][1 : len(tokens[1])-1]}, nil
-		}
+	sel, ok := parser.ParseSelectLiteral(sql)
+	if ok {
+		return &Rows{value: sel.Value}, nil
 	}
 
 	return &Rows{err: ErrNotImplemented}, nil
-}
-
-func isSingleQuotedStringLiteral(s string) bool {
-	return len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\''
 }
