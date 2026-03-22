@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -13,6 +15,15 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+
+	_, err = db.Exec(context.Background(), "create table users (id integer)")
+	if errors.Is(err, rovadb.ErrNotImplemented) {
+		fmt.Println("exec is not implemented yet, which is expected at this stage")
+		return
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	fmt.Printf("opened %T\n", db)
 }
