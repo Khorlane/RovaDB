@@ -303,6 +303,24 @@ func TestParseSelectExprDirect(t *testing.T) {
 			ok:   true,
 			want: &parser.Expr{},
 		},
+		{
+			name: "select table columns no space after comma",
+			sql:  "SELECT id,name FROM users",
+			ok:   true,
+			want: &parser.Expr{},
+		},
+		{
+			name: "select table star mixed spacing",
+			sql:  "SELECT  *  FROM  users",
+			ok:   true,
+			want: &parser.Expr{},
+		},
+		{
+			name: "select table columns mixed spacing",
+			sql:  "SELECT  id ,name  FROM  users",
+			ok:   true,
+			want: &parser.Expr{},
+		},
 		{name: "select identifier", sql: "SELECT abc", ok: false},
 	}
 
@@ -321,13 +339,13 @@ func TestParseSelectExprDirect(t *testing.T) {
 			if got == nil {
 				t.Fatal("ParseSelectExpr() = nil, want value")
 			}
-			if tc.name == "select table columns" {
+			if tc.name == "select table columns" || tc.name == "select table columns no space after comma" || tc.name == "select table columns mixed spacing" {
 				if got.TableName != "users" || len(got.Columns) != 2 || got.Columns[0] != "id" || got.Columns[1] != "name" || got.SelectAll {
 					t.Fatalf("ParseSelectExpr() = %#v, want table users columns [id name]", got)
 				}
 				return
 			}
-			if tc.name == "select table star" {
+			if tc.name == "select table star" || tc.name == "select table star mixed spacing" {
 				if got.TableName != "users" || !got.SelectAll || len(got.Columns) != 0 {
 					t.Fatalf("ParseSelectExpr() = %#v, want table users select all", got)
 				}

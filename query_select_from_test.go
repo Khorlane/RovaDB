@@ -2,6 +2,7 @@ package rovadb
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -115,5 +116,114 @@ func TestQuerySelectInvalidColumn(t *testing.T) {
 	}
 	if rows.Err() == nil {
 		t.Fatal("Err() = nil, want column error")
+	}
+}
+
+func TestQuerySelectFromEmptyTable(t *testing.T) {
+	db, err := Open("test.db")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id, name)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT * FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() != nil {
+		t.Fatalf("Err() = %v, want nil", rows.Err())
+	}
+}
+
+func TestQuerySelectSubsetOrder(t *testing.T) {
+	db, err := Open("test.db")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id, name)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT name, id FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+	var name string
+	var id int64
+	if err := rows.Scan(&name, &id); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if name != "steve" || id != 1 {
+		t.Fatalf("row = (%q, %d), want (%q, %d)", name, id, "steve", 1)
+	}
+}
+
+func TestQuerySelectMissingTable(t *testing.T) {
+	db, err := Open("test.db")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query(context.Background(), "SELECT * FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() == nil {
+		t.Fatal("Err() = nil, want missing table error")
+	}
+}
+
+func TestQuerySelectWrongScanShape(t *testing.T) {
+	db, err := Open("test.db")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id, name)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT id, name FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+	var id int64
+	err = rows.Scan(&id)
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("Scan() error = %v, want ErrInvalidArgument", err)
 	}
 }

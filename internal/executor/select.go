@@ -1,19 +1,17 @@
 package executor
 
 import (
-	"errors"
-
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
 func Select(sel *parser.SelectExpr, tables map[string]*Table) ([][]parser.Value, error) {
 	if sel == nil || sel.TableName == "" {
-		return nil, errors.New("executor: invalid select")
+		return nil, errUnsupportedStatement
 	}
 
 	table, ok := tables[sel.TableName]
 	if !ok {
-		return nil, errors.New("executor: table does not exist")
+		return nil, errTableDoesNotExist
 	}
 
 	indexes, err := resolveSelectColumns(sel, table)
@@ -52,7 +50,7 @@ func resolveSelectColumns(sel *parser.SelectExpr, table *Table) ([]int, error) {
 			}
 		}
 		if idx < 0 {
-			return nil, errors.New("executor: column does not exist")
+			return nil, errColumnDoesNotExist
 		}
 		indexes = append(indexes, idx)
 	}
