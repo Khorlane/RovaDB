@@ -18,24 +18,17 @@ func Select(sel *parser.SelectExpr, tables map[string]*Table) ([][]parser.Value,
 	if err != nil {
 		return nil, err
 	}
-	whereIndex := -1
-	if sel.Where != nil {
-		whereIndex, err = resolveColumnIndex(sel.Where.Left, table)
+	if err := validateWhereColumns(sel.Where, table); err != nil {
+		return nil, err
+	}
+	rows := make([][]parser.Value, 0, len(table.Rows))
+	for _, row := range table.Rows {
+		match, err := evalWhere(row, table, sel.Where)
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	rows := make([][]parser.Value, 0, len(table.Rows))
-	for _, row := range table.Rows {
-		if whereIndex >= 0 {
-			match, err := compareValues(sel.Where.Operator, row[whereIndex], sel.Where.Right)
-			if err != nil {
-				return nil, err
-			}
-			if !match {
-				continue
-			}
+		if !match {
+			continue
 		}
 		out := make([]parser.Value, 0, len(indexes))
 		for _, idx := range indexes {
@@ -98,4 +91,41 @@ func resolveColumnIndex(name string, table *Table) (int, error) {
 	}
 
 	return -1, errColumnDoesNotExist
+}
+
+func evalWhere(row []parser.Value, table *Table, where *parser.WhereClause) (bool, error) {
+	if where == nil {
+		return true, nil
+	}
+
+	for _, cond := range where.Conditions {
+		idx, err := resolveColumnIndex(cond.Left, table)
+		if err != nil {
+			return false, err
+		}
+
+		match, err := compareValues(cond.Operator, row[idx], cond.Right)
+		if err != nil {
+			return false, err
+		}
+		if !match {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+func validateWhereColumns(where *parser.WhereClause, table *Table) error {
+	if where == nil {
+		return nil
+	}
+
+	for _, cond := range where.Conditions {
+		if _, err := resolveColumnIndex(cond.Left, table); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

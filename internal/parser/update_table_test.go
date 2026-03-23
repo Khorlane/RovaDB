@@ -25,7 +25,7 @@ func TestParseUpdate(t *testing.T) {
 			assignments: []UpdateAssignment{
 				{Column: "name", Value: StringValue("bob")},
 			},
-			where: &WhereClause{Left: "id", Operator: "=", Right: Int64Value(1)},
+			where: &WhereClause{Conditions: []Condition{{Left: "id", Operator: "=", Right: Int64Value(1)}}},
 		},
 		{
 			name:      "update multiple assignments where string",
@@ -35,7 +35,19 @@ func TestParseUpdate(t *testing.T) {
 				{Column: "name", Value: StringValue("bob")},
 				{Column: "id", Value: Int64Value(2)},
 			},
-			where: &WhereClause{Left: "name", Operator: "=", Right: StringValue("alice")},
+			where: &WhereClause{Conditions: []Condition{{Left: "name", Operator: "=", Right: StringValue("alice")}}},
+		},
+		{
+			name:      "update where and",
+			input:     "UPDATE users SET name = 'bob' WHERE id > 1 AND name != 'sam'",
+			tableName: "users",
+			assignments: []UpdateAssignment{
+				{Column: "name", Value: StringValue("bob")},
+			},
+			where: &WhereClause{Conditions: []Condition{
+				{Left: "id", Operator: ">", Right: Int64Value(1)},
+				{Left: "name", Operator: "!=", Right: StringValue("sam")},
+			}},
 		},
 	}
 
@@ -48,9 +60,21 @@ func TestParseUpdate(t *testing.T) {
 			if got.TableName != tc.tableName {
 				t.Fatalf("parseUpdate().TableName = %q, want %q", got.TableName, tc.tableName)
 			}
-			if (got.Where == nil) != (tc.where == nil) || (got.Where != nil && *got.Where != *tc.where) {
+			if (got.Where == nil) != (tc.where == nil) {
 				t.Fatalf("parseUpdate().Where = %#v, want %#v", got.Where, tc.where)
 			}
+			if got.Where == nil {
+				goto assignments
+			}
+			if len(got.Where.Conditions) != len(tc.where.Conditions) {
+				t.Fatalf("len(parseUpdate().Where.Conditions) = %d, want %d", len(got.Where.Conditions), len(tc.where.Conditions))
+			}
+			for i := range tc.where.Conditions {
+				if got.Where.Conditions[i] != tc.where.Conditions[i] {
+					t.Fatalf("parseUpdate().Where.Conditions[%d] = %#v, want %#v", i, got.Where.Conditions[i], tc.where.Conditions[i])
+				}
+			}
+		assignments:
 			if len(got.Assignments) != len(tc.assignments) {
 				t.Fatalf("parseUpdate().Assignments len = %d, want %d", len(got.Assignments), len(tc.assignments))
 			}
@@ -72,7 +96,6 @@ func TestParseUpdateInvalid(t *testing.T) {
 		{name: "missing assignment value", input: "UPDATE users SET name ="},
 		{name: "missing equals", input: "UPDATE users SET name 'bob'"},
 		{name: "duplicate assignment column", input: "UPDATE users SET name = 'bob', name = 'sam'"},
-		{name: "extra condition text", input: "UPDATE users SET name = 'bob' WHERE id = 1 AND name = 'alice'"},
 	}
 
 	for _, tc := range tests {

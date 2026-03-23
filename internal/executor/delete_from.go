@@ -13,16 +13,14 @@ func executeDelete(stmt *parser.DeleteStmt, tables map[string]*Table) (int64, er
 		table.Rows = nil
 		return affected, nil
 	}
-
-	whereIndex, err := resolveColumnIndex(stmt.Where.Left, table)
-	if err != nil {
+	if err := validateWhereColumns(stmt.Where, table); err != nil {
 		return 0, err
 	}
 
 	kept := make([][]parser.Value, 0, len(table.Rows))
 	var affected int64
 	for _, row := range table.Rows {
-		match, err := compareValues(stmt.Where.Operator, row[whereIndex], stmt.Where.Right)
+		match, err := evalWhere(row, table, stmt.Where)
 		if err != nil {
 			return 0, err
 		}

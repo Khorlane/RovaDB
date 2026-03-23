@@ -69,9 +69,36 @@ func TestParseSelectExprWhereOperators(t *testing.T) {
 			if got == nil || got.Where == nil {
 				t.Fatalf("ParseSelectExpr() = %#v, want WHERE clause", got)
 			}
-			if got.Where.Left != tc.left || got.Where.Operator != tc.operator || got.Where.Right != tc.right {
-				t.Fatalf("Where = %#v, want left=%q op=%q right=%#v", got.Where, tc.left, tc.operator, tc.right)
+			if len(got.Where.Conditions) != 1 {
+				t.Fatalf("len(Where.Conditions) = %d, want 1", len(got.Where.Conditions))
+			}
+			cond := got.Where.Conditions[0]
+			if cond.Left != tc.left || cond.Operator != tc.operator || cond.Right != tc.right {
+				t.Fatalf("Condition = %#v, want left=%q op=%q right=%#v", cond, tc.left, tc.operator, tc.right)
 			}
 		})
+	}
+}
+
+func TestParseSelectExprWhereAndConditions(t *testing.T) {
+	got, ok := ParseSelectExpr("SELECT id FROM users WHERE id > 1 AND name != 'bob' AND id < 10")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	if got == nil || got.Where == nil {
+		t.Fatalf("ParseSelectExpr() = %#v, want WHERE clause", got)
+	}
+	if len(got.Where.Conditions) != 3 {
+		t.Fatalf("len(Where.Conditions) = %d, want 3", len(got.Where.Conditions))
+	}
+	want := []Condition{
+		{Left: "id", Operator: ">", Right: Int64Value(1)},
+		{Left: "name", Operator: "!=", Right: StringValue("bob")},
+		{Left: "id", Operator: "<", Right: Int64Value(10)},
+	}
+	for i := range want {
+		if got.Where.Conditions[i] != want[i] {
+			t.Fatalf("Where.Conditions[%d] = %#v, want %#v", i, got.Where.Conditions[i], want[i])
+		}
 	}
 }

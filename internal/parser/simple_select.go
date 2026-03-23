@@ -36,11 +36,16 @@ type Expr struct {
 	Inner *Expr
 }
 
-// WhereClause is the minimal parsed WHERE <column> <op> <literal> shape.
-type WhereClause struct {
+// Condition is one parsed WHERE <column> <op> <literal> clause.
+type Condition struct {
 	Left     string
 	Operator string
 	Right    Value
+}
+
+// WhereClause is a flat AND-only WHERE shape.
+type WhereClause struct {
+	Conditions []Condition
 }
 
 // SelectExpr is the minimal parsed form for SELECT <expr>.
@@ -138,20 +143,41 @@ func parseSelectFrom(sql, upper string) (*SelectExpr, bool) {
 
 func parseWhereClause(input string) (*WhereClause, bool) {
 	tokens := strings.Fields(strings.TrimSpace(input))
-	if len(tokens) != 3 || tokens[0] == "" || !isWhereOperator(tokens[1]) {
+	if len(tokens) < 3 || len(tokens)%4 != 3 {
 		return nil, false
 	}
 
-	value, ok := parseLiteralValue(tokens[2])
-	if !ok {
+	conditions := parseWhereConditions(tokens)
+	if len(conditions) == 0 {
 		return nil, false
 	}
 
-	return &WhereClause{
-		Left:     tokens[0],
-		Operator: tokens[1],
-		Right:    value,
-	}, true
+	return &WhereClause{Conditions: conditions}, true
+}
+
+func parseWhereConditions(tokens []string) []Condition {
+	conditions := make([]Condition, 0, len(tokens)/4+1)
+	for i := 0; i < len(tokens); i += 4 {
+		if i > 0 && !strings.EqualFold(tokens[i-1], "AND") {
+			return nil
+		}
+		if tokens[i] == "" || !isWhereOperator(tokens[i+1]) {
+			return nil
+		}
+
+		value, ok := parseLiteralValue(tokens[i+2])
+		if !ok {
+			return nil
+		}
+
+		conditions = append(conditions, Condition{
+			Left:     tokens[i],
+			Operator: tokens[i+1],
+			Right:    value,
+		})
+	}
+
+	return conditions
 }
 
 func isWhereOperator(op string) bool {

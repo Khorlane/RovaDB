@@ -25,26 +25,18 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 			value parser.Value
 		}{index: idx, value: assignment.Value})
 	}
-
-	whereIndex := -1
-	if stmt.Where != nil {
-		var err error
-		whereIndex, err = resolveColumnIndex(stmt.Where.Left, table)
-		if err != nil {
-			return 0, err
-		}
+	if err := validateWhereColumns(stmt.Where, table); err != nil {
+		return 0, err
 	}
 
 	var affected int64
 	for _, row := range table.Rows {
-		if whereIndex >= 0 {
-			match, err := compareValues(stmt.Where.Operator, row[whereIndex], stmt.Where.Right)
-			if err != nil {
-				return 0, err
-			}
-			if !match {
-				continue
-			}
+		match, err := evalWhere(row, table, stmt.Where)
+		if err != nil {
+			return 0, err
+		}
+		if !match {
+			continue
 		}
 		for _, assignment := range assignments {
 			row[assignment.index] = assignment.value
