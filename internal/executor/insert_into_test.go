@@ -130,8 +130,8 @@ func TestExecuteInsertWrongType(t *testing.T) {
 		TableName: "users",
 		Values:    []parser.Value{parser.StringValue("steve"), parser.StringValue("bob")},
 	}, tables)
-	if err != errWrongValueCount {
-		t.Fatalf("Execute() error = %v, want %v", err, errWrongValueCount)
+	if err != errTypeMismatch {
+		t.Fatalf("Execute() error = %v, want %v", err, errTypeMismatch)
 	}
 }
 
@@ -145,7 +145,7 @@ func TestExecuteInsertColumnListWrongType(t *testing.T) {
 		Columns:   []string{"name", "id"},
 		Values:    []parser.Value{parser.StringValue("steve"), parser.StringValue("oops")},
 	}, tables)
-	if err != errWrongValueCount {
-		t.Fatalf("Execute() error = %v, want %v", err, errWrongValueCount)
+	if err != errTypeMismatch {
+		t.Fatalf("Execute() error = %v, want %v", err, errTypeMismatch)
 	}
 }

@@ -11,6 +11,7 @@ var (
 	errTableDoesNotExist    = errors.New("executor: table does not exist")
 	errWrongValueCount      = errors.New("executor: wrong value count")
 	errColumnDoesNotExist   = errors.New("executor: column does not exist")
+	errTypeMismatch         = errors.New("executor: type mismatch")
 	errUnsupportedStatement = errors.New("executor: unsupported statement")
 )
 

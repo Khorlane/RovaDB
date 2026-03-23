@@ -18,6 +18,7 @@ func (r *Rows) Next() bool {
 		return false
 	}
 	if r.index+1 >= len(r.values) {
+		r.index = len(r.values)
 		return false
 	}
 

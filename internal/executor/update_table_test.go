@@ -199,7 +199,7 @@ func TestExecuteUpdateWrongType(t *testing.T) {
 			{Column: "id", Value: parser.StringValue("oops")},
 		},
 	}, tables)
-	if err != errWrongValueCount {
-		t.Fatalf("executeUpdate() error = %v, want %v", err, errWrongValueCount)
+	if err != errTypeMismatch {
+		t.Fatalf("executeUpdate() error = %v, want %v", err, errTypeMismatch)
 	}
 }

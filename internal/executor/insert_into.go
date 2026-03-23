@@ -16,7 +16,7 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 		}
 		for i, value := range stmt.Values {
 			if !valueMatchesColumnType(value, table.Columns[i].Type) {
-				return 0, errWrongValueCount
+				return 0, errTypeMismatch
 			}
 		}
 
@@ -46,7 +46,7 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 			return 0, errWrongValueCount
 		}
 		if !valueMatchesColumnType(stmt.Values[i], table.Columns[idx].Type) {
-			return 0, errWrongValueCount
+			return 0, errTypeMismatch
 		}
 		seen[idx] = struct{}{}
 		row[idx] = stmt.Values[i]
