@@ -108,9 +108,11 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	if err != nil {
 		return Result{}, err
 	}
-	if _, ok := stmt.(*parser.CreateTableStmt); ok {
+	if createStmt, ok := stmt.(*parser.CreateTableStmt); ok {
+		rootPage := db.pager.NewPage()
+		db.tables[createStmt.Name].SetStorageMeta(rootPage.ID(), 0)
 		if err := db.persistCatalog(); err != nil {
-			delete(db.tables, stmt.(*parser.CreateTableStmt).Name)
+			delete(db.tables, createStmt.Name)
 			return Result{}, err
 		}
 	}
@@ -176,8 +178,10 @@ func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
 	for _, name := range names {
 		table := tables[name]
 		entry := storage.CatalogTable{
-			Name:    table.Name,
-			Columns: make([]storage.CatalogColumn, 0, len(table.Columns)),
+			Name:       table.Name,
+			RootPageID: uint32(table.RootPageID()),
+			RowCount:   table.PersistedRowCount(),
+			Columns:    make([]storage.CatalogColumn, 0, len(table.Columns)),
 		}
 		for _, column := range table.Columns {
 			entry.Columns = append(entry.Columns, storage.CatalogColumn{
@@ -209,6 +213,7 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 			Name:    table.Name,
 			Columns: columns,
 		}
+		tables[table.Name].SetStorageMeta(storage.PageID(table.RootPageID), table.RowCount)
 	}
 
 	return tables, nil

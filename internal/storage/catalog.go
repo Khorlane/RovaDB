@@ -25,8 +25,10 @@ type CatalogData struct {
 
 // CatalogTable is a persisted table schema entry.
 type CatalogTable struct {
-	Name    string
-	Columns []CatalogColumn
+	Name       string
+	RootPageID uint32
+	RowCount   uint32
+	Columns    []CatalogColumn
 }
 
 // CatalogColumn is a persisted typed column entry.
@@ -61,14 +63,24 @@ func LoadCatalog(pager *Pager) (*CatalogData, error) {
 		if !ok || name == "" {
 			return nil, errInvalidCatalog
 		}
+		rootPageID, ok := readUint32(page.data, &offset)
+		if !ok || rootPageID < 1 {
+			return nil, errInvalidCatalog
+		}
+		rowCount, ok := readUint32(page.data, &offset)
+		if !ok {
+			return nil, errInvalidCatalog
+		}
 		columnCount, ok := readUint16(page.data, &offset)
 		if !ok {
 			return nil, errInvalidCatalog
 		}
 
 		table := CatalogTable{
-			Name:    name,
-			Columns: make([]CatalogColumn, 0, columnCount),
+			Name:       name,
+			RootPageID: rootPageID,
+			RowCount:   rowCount,
+			Columns:    make([]CatalogColumn, 0, columnCount),
 		}
 		for j := uint16(0); j < columnCount; j++ {
 			columnName, ok := readString(page.data, &offset)
@@ -107,10 +119,12 @@ func SaveCatalog(pager *Pager, cat *CatalogData) error {
 	buf = appendUint32(buf, uint32(len(cat.Tables)))
 
 	for _, table := range cat.Tables {
-		if table.Name == "" || len(table.Columns) == 0 {
+		if table.Name == "" || table.RootPageID < 1 || len(table.Columns) == 0 {
 			return errInvalidCatalog
 		}
 		buf = appendString(buf, table.Name)
+		buf = appendUint32(buf, table.RootPageID)
+		buf = appendUint32(buf, table.RowCount)
 		buf = appendUint16(buf, uint16(len(table.Columns)))
 
 		for _, column := range table.Columns {
