@@ -11,8 +11,8 @@ func TestPagerNewPage(t *testing.T) {
 	defer dbFile.Close()
 
 	page := pager.NewPage()
-	if got := page.ID(); got != 0 {
-		t.Fatalf("page.ID() = %d, want 0", got)
+	if got := page.ID(); got != 1 {
+		t.Fatalf("page.ID() = %d, want 1", got)
 	}
 	if !page.Dirty() {
 		t.Fatal("page.Dirty() = false, want true")

@@ -7,7 +7,7 @@ import (
 )
 
 func TestRowsScanBeforeNext(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -27,7 +27,7 @@ func TestRowsScanBeforeNext(t *testing.T) {
 }
 
 func TestRowsScanAfterIterationEnds(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -57,7 +57,7 @@ func TestRowsScanAfterIterationEnds(t *testing.T) {
 }
 
 func TestResultRowsAffectedCleanup(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -93,7 +93,7 @@ func TestResultRowsAffectedCleanup(t *testing.T) {
 }
 
 func TestQueryZeroRowSelectCleanup(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}

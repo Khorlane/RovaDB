@@ -6,7 +6,7 @@ import (
 )
 
 func TestExecDeleteFromWhere(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}

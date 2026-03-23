@@ -6,7 +6,7 @@ import (
 )
 
 func TestExecCreateTable(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -25,7 +25,7 @@ func TestExecCreateTable(t *testing.T) {
 }
 
 func TestExecCreateTableDuplicate(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}

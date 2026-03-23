@@ -19,10 +19,13 @@ func NewPager(f *os.File) (*Pager, error) {
 		return nil, err
 	}
 
-	var nextPageID PageID
+	nextPageID := PageID(1)
 	size := info.Size()
 	if size > HeaderSize {
 		nextPageID = PageID((size - HeaderSize) / PageSize)
+		if nextPageID < 1 {
+			nextPageID = 1
+		}
 	}
 
 	return &Pager{

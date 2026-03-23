@@ -2,6 +2,8 @@ package rovadb
 
 import (
 	"context"
+	"errors"
+	"sort"
 	"strings"
 
 	"github.com/Khorlane/RovaDB/internal/executor"
@@ -33,8 +35,25 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
+	catalog, err := storage.LoadCatalog(pager)
+	if err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, err
+	}
+	tables, err := tablesFromCatalog(catalog)
+	if err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, err
+	}
 
-	return &DB{path: path, file: file, pager: pager}, nil
+	return &DB{
+		path:   path,
+		file:   file,
+		pager:  pager,
+		tables: tables,
+	}, nil
 }
 
 // Close releases database resources.
@@ -89,6 +108,12 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	if err != nil {
 		return Result{}, err
 	}
+	if _, ok := stmt.(*parser.CreateTableStmt); ok {
+		if err := db.persistCatalog(); err != nil {
+			delete(db.tables, stmt.(*parser.CreateTableStmt).Name)
+			return Result{}, err
+		}
+	}
 
 	return Result{rowsAffected: rowsAffected}, nil
 }
@@ -128,4 +153,83 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 	}
 
 	return &Rows{err: ErrNotImplemented, index: -1}, nil
+}
+
+func (db *DB) persistCatalog() error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+	if err := storage.SaveCatalog(db.pager, catalogFromTables(db.tables)); err != nil {
+		return err
+	}
+	return db.pager.Flush()
+}
+
+func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
+	names := make([]string, 0, len(tables))
+	for name := range tables {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	catalog := &storage.CatalogData{Tables: make([]storage.CatalogTable, 0, len(names))}
+	for _, name := range names {
+		table := tables[name]
+		entry := storage.CatalogTable{
+			Name:    table.Name,
+			Columns: make([]storage.CatalogColumn, 0, len(table.Columns)),
+		}
+		for _, column := range table.Columns {
+			entry.Columns = append(entry.Columns, storage.CatalogColumn{
+				Name: column.Name,
+				Type: catalogColumnType(column.Type),
+			})
+		}
+		catalog.Tables = append(catalog.Tables, entry)
+	}
+	return catalog
+}
+
+func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table, error) {
+	tables := make(map[string]*executor.Table)
+	if catalog == nil {
+		return tables, nil
+	}
+
+	for _, table := range catalog.Tables {
+		columns := make([]parser.ColumnDef, 0, len(table.Columns))
+		for _, column := range table.Columns {
+			columnType, err := parserColumnType(column.Type)
+			if err != nil {
+				return nil, err
+			}
+			columns = append(columns, parser.ColumnDef{Name: column.Name, Type: columnType})
+		}
+		tables[table.Name] = &executor.Table{
+			Name:    table.Name,
+			Columns: columns,
+		}
+	}
+
+	return tables, nil
+}
+
+func catalogColumnType(columnType string) uint8 {
+	switch columnType {
+	case parser.ColumnTypeInt:
+		return storage.CatalogColumnTypeInt
+	default:
+		return storage.CatalogColumnTypeText
+	}
+}
+
+func parserColumnType(columnType uint8) (string, error) {
+	switch columnType {
+	case storage.CatalogColumnTypeInt:
+		return parser.ColumnTypeInt, nil
+	case storage.CatalogColumnTypeText:
+		return parser.ColumnTypeText, nil
+	default:
+		return "", errors.New("rovadb: invalid catalog column type")
+	}
 }

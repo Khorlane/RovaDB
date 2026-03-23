@@ -7,7 +7,7 @@ import (
 )
 
 func TestQuerySelectFromTable(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -62,7 +62,7 @@ func TestQuerySelectFromTable(t *testing.T) {
 }
 
 func TestQuerySelectAllFromTable(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -95,7 +95,7 @@ func TestQuerySelectAllFromTable(t *testing.T) {
 }
 
 func TestQuerySelectInvalidColumn(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -120,7 +120,7 @@ func TestQuerySelectInvalidColumn(t *testing.T) {
 }
 
 func TestQuerySelectFromEmptyTable(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -145,7 +145,7 @@ func TestQuerySelectFromEmptyTable(t *testing.T) {
 }
 
 func TestQuerySelectSubsetOrder(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -178,7 +178,7 @@ func TestQuerySelectSubsetOrder(t *testing.T) {
 }
 
 func TestQuerySelectMissingTable(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -199,7 +199,7 @@ func TestQuerySelectMissingTable(t *testing.T) {
 }
 
 func TestQuerySelectWrongScanShape(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -229,7 +229,7 @@ func TestQuerySelectWrongScanShape(t *testing.T) {
 }
 
 func TestQuerySelectWhereIntEquality(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -267,7 +267,7 @@ func TestQuerySelectWhereIntEquality(t *testing.T) {
 }
 
 func TestQuerySelectWhereStringEquality(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -305,7 +305,7 @@ func TestQuerySelectWhereStringEquality(t *testing.T) {
 }
 
 func TestQuerySelectWhereNoMatches(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}

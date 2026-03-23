@@ -34,7 +34,7 @@ func TestQuerySelectLiteral(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			db, err := Open("test.db")
+			db, err := Open(testDBPath(t))
 			if err != nil {
 				t.Fatalf("Open() error = %v", err)
 			}
@@ -81,7 +81,7 @@ func TestQuerySelectStringLiteral(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			db, err := Open("test.db")
+			db, err := Open(testDBPath(t))
 			if err != nil {
 				t.Fatalf("Open() error = %v", err)
 			}
@@ -142,7 +142,7 @@ func TestQueryUnsupportedLiteral(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			db, err := Open("test.db")
+			db, err := Open(testDBPath(t))
 			if err != nil {
 				t.Fatalf("Open() error = %v", err)
 			}
@@ -165,7 +165,7 @@ func TestQueryUnsupportedLiteral(t *testing.T) {
 }
 
 func TestRowsScanStringIntoAny(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -191,7 +191,7 @@ func TestRowsScanStringIntoAny(t *testing.T) {
 }
 
 func TestRowsScanStringIntoInt64(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -394,7 +394,7 @@ func equalExpr(got, want *parser.Expr) bool {
 }
 
 func TestQueryNilContext(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -411,7 +411,7 @@ func TestQueryNilContext(t *testing.T) {
 }
 
 func TestQueryClosedDB(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}

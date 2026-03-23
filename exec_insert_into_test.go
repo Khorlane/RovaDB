@@ -6,7 +6,7 @@ import (
 )
 
 func TestExecInsertInto(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -26,7 +26,7 @@ func TestExecInsertInto(t *testing.T) {
 }
 
 func TestExecInsertIntoWithColumnListReordered(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -59,7 +59,7 @@ func TestExecInsertIntoWithColumnListReordered(t *testing.T) {
 }
 
 func TestExecInsertIntoWrongType(t *testing.T) {
-	db, err := Open("test.db")
+	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
