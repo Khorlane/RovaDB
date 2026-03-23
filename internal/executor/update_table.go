@@ -43,6 +43,9 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 		}
 		affected++
 	}
+	if err := rebuildIndexesForTable(table); err != nil {
+		return 0, err
+	}
 
 	return affected, nil
 }

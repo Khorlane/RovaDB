@@ -11,6 +11,9 @@ func executeDelete(stmt *parser.DeleteStmt, tables map[string]*Table) (int64, er
 	if stmt.Where == nil {
 		affected := int64(len(table.Rows))
 		table.Rows = nil
+		if err := rebuildIndexesForTable(table); err != nil {
+			return 0, err
+		}
 		return affected, nil
 	}
 	if err := validateWhereColumns(stmt.Where, table); err != nil {
@@ -32,5 +35,8 @@ func executeDelete(stmt *parser.DeleteStmt, tables map[string]*Table) (int64, er
 	}
 
 	table.Rows = kept
+	if err := rebuildIndexesForTable(table); err != nil {
+		return 0, err
+	}
 	return affected, nil
 }

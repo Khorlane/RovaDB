@@ -22,6 +22,9 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 
 		row := append([]parser.Value(nil), stmt.Values...)
 		table.Rows = append(table.Rows, row)
+		if err := rebuildIndexesForTable(table); err != nil {
+			return 0, err
+		}
 		return 1, nil
 	}
 
@@ -56,6 +59,9 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 	}
 
 	table.Rows = append(table.Rows, row)
+	if err := rebuildIndexesForTable(table); err != nil {
+		return 0, err
+	}
 	return 1, nil
 }
 
