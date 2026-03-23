@@ -9,6 +9,7 @@ import (
 	"github.com/Khorlane/RovaDB/internal/executor"
 	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/storage"
+	"github.com/Khorlane/RovaDB/internal/txn"
 )
 
 var (
@@ -24,6 +25,7 @@ type DB struct {
 	tables map[string]*executor.Table
 	file   *storage.DBFile
 	pager  *storage.Pager
+	txn    *txn.Txn
 }
 
 // Open returns a database handle for the given path.
@@ -64,6 +66,7 @@ func Open(path string) (*DB, error) {
 		file:   file,
 		pager:  pager,
 		tables: tables,
+		txn:    nil,
 	}, nil
 }
 
@@ -115,6 +118,9 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	default:
 		return Result{}, ErrNotImplemented
 	}
+	db.beginTxn()
+	defer db.clearTxn()
+
 	rowsAffected, err := executor.Execute(stmt, db.tables)
 	if err != nil {
 		return Result{}, err
@@ -142,6 +148,9 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 		if err := db.rewritePersistedTable(deleteStmt.TableName); err != nil {
 			return Result{}, err
 		}
+	}
+	if db.txn != nil {
+		db.txn.MarkDirty()
 	}
 
 	return Result{rowsAffected: rowsAffected}, nil
@@ -249,6 +258,22 @@ func (db *DB) rewritePersistedTable(tableName string) error {
 
 	table.SetStorageMeta(table.RootPageID(), storage.TablePageRowCount(page))
 	return db.persistCatalog()
+}
+
+func (db *DB) beginTxn() {
+	if db == nil {
+		return
+	}
+	if db.txn == nil || !db.txn.IsActive() {
+		db.txn = txn.NewTxn()
+	}
+}
+
+func (db *DB) clearTxn() {
+	if db == nil {
+		return
+	}
+	db.txn = nil
 }
 
 func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
