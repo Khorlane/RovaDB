@@ -49,6 +49,15 @@ func TestParseUpdate(t *testing.T) {
 				{Left: "name", Operator: "!=", Right: StringValue("sam")},
 			}},
 		},
+		{
+			name:      "update set null",
+			input:     "UPDATE users SET name = NULL WHERE id = 1",
+			tableName: "users",
+			assignments: []UpdateAssignment{
+				{Column: "name", Value: NullValue()},
+			},
+			where: &WhereClause{Conditions: []Condition{{Left: "id", Operator: "=", Right: Int64Value(1)}}},
+		},
 	}
 
 	for _, tc := range tests {

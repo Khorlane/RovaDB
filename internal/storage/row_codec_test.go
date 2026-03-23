@@ -66,6 +66,45 @@ func TestEncodeDecodeRowMixed(t *testing.T) {
 	assertRowValuesEqual(t, decoded, values)
 }
 
+func TestEncodeDecodeRowWithNull(t *testing.T) {
+	values := []parser.Value{
+		parser.Int64Value(7),
+		parser.NullValue(),
+		parser.StringValue("alice"),
+	}
+
+	encoded, err := EncodeRow(values)
+	if err != nil {
+		t.Fatalf("EncodeRow() error = %v", err)
+	}
+
+	decoded, err := DecodeRow(encoded)
+	if err != nil {
+		t.Fatalf("DecodeRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+}
+
+func TestEncodeDecodeRowExistingIntStringRegression(t *testing.T) {
+	values := []parser.Value{
+		parser.Int64Value(1),
+		parser.StringValue("legacy"),
+	}
+
+	encoded, err := EncodeRow(values)
+	if err != nil {
+		t.Fatalf("EncodeRow() error = %v", err)
+	}
+
+	decoded, err := DecodeRow(encoded)
+	if err != nil {
+		t.Fatalf("DecodeRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+}
+
 func TestDecodeRowUnknownTag(t *testing.T) {
 	data := []byte{1, 0, 99}
 

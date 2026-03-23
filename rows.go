@@ -58,6 +58,9 @@ func scanValue(dest any, value parser.Value) error {
 		if v == nil {
 			return ErrInvalidArgument
 		}
+		if value.Kind == parser.ValueKindNull {
+			return ErrInvalidArgument
+		}
 		if value.Kind == parser.ValueKindInt64 {
 			*v = int(value.I64)
 			return nil
@@ -66,12 +69,18 @@ func scanValue(dest any, value parser.Value) error {
 		if v == nil {
 			return ErrInvalidArgument
 		}
+		if value.Kind == parser.ValueKindNull {
+			return ErrInvalidArgument
+		}
 		if value.Kind == parser.ValueKindInt64 {
 			*v = value.I64
 			return nil
 		}
 	case *string:
 		if v == nil {
+			return ErrInvalidArgument
+		}
+		if value.Kind == parser.ValueKindNull {
 			return ErrInvalidArgument
 		}
 		if value.Kind == parser.ValueKindString {

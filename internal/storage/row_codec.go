@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	rowTypeNull   = 0
 	rowTypeInt64  = 1
 	rowTypeString = 2
 )
@@ -21,6 +22,8 @@ func EncodeRow(values []parser.Value) ([]byte, error) {
 
 	for _, value := range values {
 		switch value.Kind {
+		case parser.ValueKindNull:
+			buf = append(buf, rowTypeNull)
 		case parser.ValueKindInt64:
 			var raw [8]byte
 			buf = append(buf, rowTypeInt64)
@@ -60,6 +63,8 @@ func DecodeRow(data []byte) ([]parser.Value, error) {
 		offset++
 
 		switch tag {
+		case rowTypeNull:
+			values = append(values, parser.NullValue())
 		case rowTypeInt64:
 			if offset+8 > len(data) {
 				return nil, errInvalidRowData

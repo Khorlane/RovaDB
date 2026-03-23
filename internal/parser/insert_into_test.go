@@ -33,6 +33,12 @@ func TestParseInsert(t *testing.T) {
 			cols:   []string{"name", "id"},
 			values: []Value{StringValue("steve"), Int64Value(1)},
 		},
+		{
+			name:   "null literal",
+			input:  "INSERT INTO users VALUES (1, NULL)",
+			cols:   nil,
+			values: []Value{Int64Value(1), NullValue()},
+		},
 	}
 
 	for _, tc := range tests {

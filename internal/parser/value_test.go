@@ -12,6 +12,16 @@ func TestInt64Value(t *testing.T) {
 	}
 }
 
+func TestNullValue(t *testing.T) {
+	got := NullValue()
+	if got.Kind != ValueKindNull {
+		t.Fatalf("NullValue().Kind = %v, want %v", got.Kind, ValueKindNull)
+	}
+	if got.Any() != nil {
+		t.Fatalf("NullValue().Any() = %#v, want nil", got.Any())
+	}
+}
+
 func TestStringValue(t *testing.T) {
 	got := StringValue("hello")
 	if got.Kind != ValueKindString {
@@ -49,5 +59,16 @@ func TestParseSelectExprValueKinds(t *testing.T) {
 	}
 	if strSel.Expr.Str != "hi" {
 		t.Fatalf("ParseSelectExpr(SELECT 'hi').Expr.Str = %q, want %q", strSel.Expr.Str, "hi")
+	}
+
+	nullSel, ok := ParseSelectExpr("SELECT * FROM users WHERE name = NULL")
+	if !ok {
+		t.Fatal("ParseSelectExpr(SELECT * FROM users WHERE name = NULL) ok = false, want true")
+	}
+	if nullSel.Where == nil || len(nullSel.Where.Conditions) != 1 {
+		t.Fatalf("ParseSelectExpr(...).Where = %#v, want one condition", nullSel.Where)
+	}
+	if nullSel.Where.Conditions[0].Right.Kind != ValueKindNull {
+		t.Fatalf("ParseSelectExpr(...).Where.Conditions[0].Right.Kind = %v, want %v", nullSel.Where.Conditions[0].Right.Kind, ValueKindNull)
 	}
 }

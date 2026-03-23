@@ -5,6 +5,7 @@ type ValueKind int
 
 const (
 	ValueKindInvalid ValueKind = iota
+	ValueKindNull
 	ValueKindInt64
 	ValueKindString
 )
@@ -14,6 +15,11 @@ type Value struct {
 	Kind ValueKind
 	I64  int64
 	Str  string
+}
+
+// NullValue builds a NULL Value.
+func NullValue() Value {
+	return Value{Kind: ValueKindNull}
 }
 
 // Int64Value builds an int64 Value.
@@ -29,6 +35,8 @@ func StringValue(v string) Value {
 // Any converts the internal value to its Go representation.
 func (v Value) Any() any {
 	switch v.Kind {
+	case ValueKindNull:
+		return nil
 	case ValueKindInt64:
 		return v.I64
 	case ValueKindString:

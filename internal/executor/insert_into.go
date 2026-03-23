@@ -60,6 +60,9 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 }
 
 func valueMatchesColumnType(value parser.Value, typeName string) bool {
+	if value.Kind == parser.ValueKindNull {
+		return true
+	}
 	switch typeName {
 	case parser.ColumnTypeInt:
 		return value.Kind == parser.ValueKindInt64

@@ -87,6 +87,9 @@ func parseLiteralValue(token string) (Value, bool) {
 	if strings.HasPrefix(token, "+") {
 		return Value{}, false
 	}
+	if strings.EqualFold(token, "NULL") {
+		return NullValue(), true
+	}
 
 	value, err := strconv.ParseInt(token, 10, 64)
 	if err == nil {

@@ -149,3 +149,23 @@ func TestExecuteInsertColumnListWrongType(t *testing.T) {
 		t.Fatalf("Execute() error = %v, want %v", err, errTypeMismatch)
 	}
 }
+
+func TestExecuteInsertNullValue(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}}},
+	}
+
+	affected, err := Execute(&parser.InsertStmt{
+		TableName: "users",
+		Values:    []parser.Value{parser.Int64Value(1), parser.NullValue()},
+	}, tables)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("Execute() affected = %d, want 1", affected)
+	}
+	if tables["users"].Rows[0][1] != parser.NullValue() {
+		t.Fatalf("Execute() row[1] = %#v, want NULL", tables["users"].Rows[0][1])
+	}
+}

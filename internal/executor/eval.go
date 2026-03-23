@@ -50,6 +50,16 @@ func Eval(expr *parser.Expr) (parser.Value, error) {
 }
 
 func compareValues(op string, left, right parser.Value) (bool, error) {
+	if left.Kind == parser.ValueKindNull || right.Kind == parser.ValueKindNull {
+		switch op {
+		case "=":
+			return left.Kind == parser.ValueKindNull && right.Kind == parser.ValueKindNull, nil
+		case "!=":
+			return !(left.Kind == parser.ValueKindNull && right.Kind == parser.ValueKindNull), nil
+		default:
+			return false, errTypeMismatch
+		}
+	}
 	if left.Kind != right.Kind {
 		return false, errTypeMismatch
 	}
@@ -95,6 +105,9 @@ func compareValues(op string, left, right parser.Value) (bool, error) {
 }
 
 func compareSortableValues(left, right parser.Value) (int, error) {
+	if left.Kind == parser.ValueKindNull || right.Kind == parser.ValueKindNull {
+		return 0, errTypeMismatch
+	}
 	if left.Kind != right.Kind {
 		return 0, errTypeMismatch
 	}
