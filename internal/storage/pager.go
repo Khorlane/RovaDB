@@ -72,6 +72,26 @@ func (p *Pager) NewPage() *Page {
 	return page
 }
 
+// NextPageID reports the next page identifier that NewPage would allocate.
+func (p *Pager) NextPageID() PageID {
+	if p == nil {
+		return 0
+	}
+	return p.nextPageID
+}
+
+// DiscardNewPage removes the most recently allocated unflushed page.
+func (p *Pager) DiscardNewPage(id PageID) {
+	if p == nil {
+		return
+	}
+	if p.nextPageID == 0 || id+1 != p.nextPageID {
+		return
+	}
+	delete(p.pages, id)
+	p.nextPageID = id
+}
+
 // Flush writes all dirty pages to disk.
 func (p *Pager) Flush() error {
 	for _, page := range p.pages {

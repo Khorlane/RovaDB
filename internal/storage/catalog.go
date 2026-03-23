@@ -110,39 +110,9 @@ func LoadCatalog(pager *Pager) (*CatalogData, error) {
 
 // SaveCatalog encodes the catalog into page 0.
 func SaveCatalog(pager *Pager, cat *CatalogData) error {
-	if cat == nil {
-		cat = &CatalogData{}
-	}
-
-	buf := make([]byte, 0, PageSize)
-	buf = appendUint32(buf, catalogVersion)
-	buf = appendUint32(buf, uint32(len(cat.Tables)))
-
-	for _, table := range cat.Tables {
-		if table.Name == "" || table.RootPageID < 1 || len(table.Columns) == 0 {
-			return errInvalidCatalog
-		}
-		buf = appendString(buf, table.Name)
-		buf = appendUint32(buf, table.RootPageID)
-		buf = appendUint32(buf, table.RowCount)
-		buf = appendUint16(buf, uint16(len(table.Columns)))
-
-		for _, column := range table.Columns {
-			if column.Name == "" {
-				return errInvalidCatalog
-			}
-			if column.Type != CatalogColumnTypeInt && column.Type != CatalogColumnTypeText {
-				return errInvalidCatalog
-			}
-			buf = appendString(buf, column.Name)
-			buf = append(buf, column.Type)
-			if len(buf) > PageSize {
-				return errCatalogTooLarge
-			}
-		}
-		if len(buf) > PageSize {
-			return errCatalogTooLarge
-		}
+	buf, err := BuildCatalogPageData(cat)
+	if err != nil {
+		return err
 	}
 
 	page, err := pager.Get(catalogPageID)
@@ -153,6 +123,48 @@ func SaveCatalog(pager *Pager, cat *CatalogData) error {
 	copy(page.data, buf)
 	page.MarkDirty()
 	return nil
+}
+
+// BuildCatalogPageData encodes the catalog into a full catalog page image.
+func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
+	if cat == nil {
+		cat = &CatalogData{}
+	}
+
+	buf := make([]byte, 0, PageSize)
+	buf = appendUint32(buf, catalogVersion)
+	buf = appendUint32(buf, uint32(len(cat.Tables)))
+
+	for _, table := range cat.Tables {
+		if table.Name == "" || table.RootPageID < 1 || len(table.Columns) == 0 {
+			return nil, errInvalidCatalog
+		}
+		buf = appendString(buf, table.Name)
+		buf = appendUint32(buf, table.RootPageID)
+		buf = appendUint32(buf, table.RowCount)
+		buf = appendUint16(buf, uint16(len(table.Columns)))
+
+		for _, column := range table.Columns {
+			if column.Name == "" {
+				return nil, errInvalidCatalog
+			}
+			if column.Type != CatalogColumnTypeInt && column.Type != CatalogColumnTypeText {
+				return nil, errInvalidCatalog
+			}
+			buf = appendString(buf, column.Name)
+			buf = append(buf, column.Type)
+			if len(buf) > PageSize {
+				return nil, errCatalogTooLarge
+			}
+		}
+		if len(buf) > PageSize {
+			return nil, errCatalogTooLarge
+		}
+	}
+
+	pageData := make([]byte, PageSize)
+	copy(pageData, buf)
+	return pageData, nil
 }
 
 func isZeroPage(data []byte) bool {

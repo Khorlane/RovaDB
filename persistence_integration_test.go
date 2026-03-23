@@ -263,6 +263,135 @@ func TestSuccessfulMutatingStatementClearsTxn(t *testing.T) {
 	}
 }
 
+func TestFailedInsertDoesNotChangeState(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert baseline) error = %v", err)
+	}
+
+	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1, 2)"); err == nil {
+		t.Fatal("Exec(failing insert) error = nil, want failure")
+	}
+
+	assertSelectIntRows(t, db, "SELECT * FROM t", 1)
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+	assertSelectIntRows(t, db, "SELECT * FROM t", 1)
+}
+
+func TestFailedUpdateDoesNotChangeState(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO t VALUES (1)",
+		"INSERT INTO t VALUES (2)",
+	} {
+		if _, err := db.Exec(context.Background(), sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	if _, err := db.Exec(context.Background(), "UPDATE t SET missing = 10 WHERE id = 1"); err == nil {
+		t.Fatal("Exec(failing update) error = nil, want failure")
+	}
+
+	assertSelectIntRows(t, db, "SELECT * FROM t", 1, 2)
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+	assertSelectIntRows(t, db, "SELECT * FROM t", 1, 2)
+}
+
+func TestFailedDeleteDoesNotChangeState(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO t VALUES (1)",
+		"INSERT INTO t VALUES (2)",
+	} {
+		if _, err := db.Exec(context.Background(), sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	if _, err := db.Exec(context.Background(), "DELETE FROM t WHERE missing = 2"); err == nil {
+		t.Fatal("Exec(failing delete) error = nil, want failure")
+	}
+
+	assertSelectIntRows(t, db, "SELECT * FROM t", 1, 2)
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+	assertSelectIntRows(t, db, "SELECT * FROM t", 1, 2)
+}
+
+func TestFailedCreateTableDoesNotPartiallyRegisterTable(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err == nil {
+		t.Fatal("Exec(duplicate create) error = nil, want failure")
+	}
+	if len(db.tables) != 1 {
+		t.Fatalf("len(db.tables) = %d, want 1", len(db.tables))
+	}
+	assertSelectIntRows(t, db, "SELECT * FROM t")
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	if len(db.tables) != 1 {
+		t.Fatalf("len(reopened db.tables) = %d, want 1", len(db.tables))
+	}
+	assertSelectIntRows(t, db, "SELECT * FROM t")
+}
+
 func assertIntRows(t *testing.T, rows *Rows, want ...int64) {
 	t.Helper()
 
@@ -285,4 +414,16 @@ func assertIntRows(t *testing.T, rows *Rows, want ...int64) {
 			t.Fatalf("row %d = %d, want %d (rows = %v)", i, got[i], want[i], got)
 		}
 	}
+}
+
+func assertSelectIntRows(t *testing.T, db *DB, sql string, want ...int64) {
+	t.Helper()
+
+	rows, err := db.Query(context.Background(), sql)
+	if err != nil {
+		t.Fatalf("Query(%q) error = %v", sql, err)
+	}
+	defer rows.Close()
+
+	assertIntRows(t, rows, want...)
 }

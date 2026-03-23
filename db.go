@@ -28,6 +28,12 @@ type DB struct {
 	txn    *txn.Txn
 }
 
+type stagedPage struct {
+	id    storage.PageID
+	data  []byte
+	isNew bool
+}
+
 // Open returns a database handle for the given path.
 func Open(path string) (*DB, error) {
 	if strings.TrimSpace(path) == "" {
@@ -117,20 +123,15 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	case *parser.CreateTableStmt:
 		var rowsAffected int64
 		err := db.execMutatingStatement(func() error {
+			stagedTables := cloneTables(db.tables)
+
 			var err error
-			rowsAffected, err = executor.Execute(stmt, db.tables)
+			rowsAffected, err = executor.Execute(stmt, stagedTables)
 			if err != nil {
 				return err
 			}
 
-			rootPage := db.pager.NewPage()
-			storage.InitTableRootPage(rootPage)
-			db.tables[stmt.Name].SetStorageMeta(rootPage.ID(), 0)
-			if err := db.persistCatalog(); err != nil {
-				delete(db.tables, stmt.Name)
-				return err
-			}
-			return nil
+			return db.applyStagedCreate(stagedTables, stmt.Name)
 		})
 		if err != nil {
 			return Result{}, err
@@ -139,12 +140,15 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	case *parser.InsertStmt:
 		var rowsAffected int64
 		err := db.execMutatingStatement(func() error {
+			stagedTables := cloneTables(db.tables)
+
 			var err error
-			rowsAffected, err = executor.Execute(stmt, db.tables)
+			rowsAffected, err = executor.Execute(stmt, stagedTables)
 			if err != nil {
 				return err
 			}
-			return db.persistInsertedRow(stmt.TableName)
+
+			return db.applyStagedTableRewrite(stagedTables, stmt.TableName)
 		})
 		if err != nil {
 			return Result{}, err
@@ -153,12 +157,15 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	case *parser.UpdateStmt:
 		var rowsAffected int64
 		err := db.execMutatingStatement(func() error {
+			stagedTables := cloneTables(db.tables)
+
 			var err error
-			rowsAffected, err = executor.Execute(stmt, db.tables)
+			rowsAffected, err = executor.Execute(stmt, stagedTables)
 			if err != nil {
 				return err
 			}
-			return db.rewritePersistedTable(stmt.TableName)
+
+			return db.applyStagedTableRewrite(stagedTables, stmt.TableName)
 		})
 		if err != nil {
 			return Result{}, err
@@ -167,12 +174,15 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	case *parser.DeleteStmt:
 		var rowsAffected int64
 		err := db.execMutatingStatement(func() error {
+			stagedTables := cloneTables(db.tables)
+
 			var err error
-			rowsAffected, err = executor.Execute(stmt, db.tables)
+			rowsAffected, err = executor.Execute(stmt, stagedTables)
 			if err != nil {
 				return err
 			}
-			return db.rewritePersistedTable(stmt.TableName)
+
+			return db.applyStagedTableRewrite(stagedTables, stmt.TableName)
 		})
 		if err != nil {
 			return Result{}, err
@@ -220,73 +230,6 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 	return &Rows{err: ErrNotImplemented, index: -1}, nil
 }
 
-func (db *DB) persistCatalog() error {
-	if db == nil || db.pager == nil {
-		return nil
-	}
-	if err := storage.SaveCatalog(db.pager, catalogFromTables(db.tables)); err != nil {
-		return err
-	}
-	return db.pager.Flush()
-}
-
-func (db *DB) persistInsertedRow(tableName string) error {
-	if db == nil || db.pager == nil {
-		return nil
-	}
-
-	table := db.tables[tableName]
-	if table == nil || len(table.Rows) == 0 {
-		return nil
-	}
-
-	page, err := db.pager.Get(table.RootPageID())
-	if err != nil {
-		return err
-	}
-	row, err := storage.EncodeRow(table.Rows[len(table.Rows)-1])
-	if err != nil {
-		return err
-	}
-	if err := storage.AppendRowToTablePage(page, row); err != nil {
-		return err
-	}
-
-	table.SetStorageMeta(table.RootPageID(), storage.TablePageRowCount(page))
-	return db.persistCatalog()
-}
-
-func (db *DB) rewritePersistedTable(tableName string) error {
-	if db == nil || db.pager == nil {
-		return nil
-	}
-
-	table := db.tables[tableName]
-	if table == nil {
-		return nil
-	}
-
-	encodedRows := make([][]byte, 0, len(table.Rows))
-	for _, row := range table.Rows {
-		encoded, err := storage.EncodeRow(row)
-		if err != nil {
-			return err
-		}
-		encodedRows = append(encodedRows, encoded)
-	}
-
-	page, err := db.pager.Get(table.RootPageID())
-	if err != nil {
-		return err
-	}
-	if err := storage.RewriteTablePage(page, encodedRows); err != nil {
-		return err
-	}
-
-	table.SetStorageMeta(table.RootPageID(), storage.TablePageRowCount(page))
-	return db.persistCatalog()
-}
-
 func (db *DB) beginTxn() {
 	if db == nil {
 		return
@@ -327,6 +270,195 @@ func (db *DB) execMutatingStatement(apply func() error) error {
 	}
 	db.clearTxn()
 	return nil
+}
+
+func (db *DB) applyStagedCreate(stagedTables map[string]*executor.Table, tableName string) error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+
+	table := stagedTables[tableName]
+	if table == nil {
+		return nil
+	}
+
+	rootPageID := db.pager.NextPageID()
+	table.SetStorageMeta(rootPageID, 0)
+
+	catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
+	if err != nil {
+		return err
+	}
+	rootPageData, err := storage.BuildTablePageData(nil)
+	if err != nil {
+		return err
+	}
+
+	if err := db.flushStagedState(catalogData, []stagedPage{{
+		id:    rootPageID,
+		data:  rootPageData,
+		isNew: true,
+	}}); err != nil {
+		return err
+	}
+
+	db.tables = stagedTables
+	return nil
+}
+
+func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, tableName string) error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+
+	table := stagedTables[tableName]
+	if table == nil {
+		return nil
+	}
+
+	table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
+
+	encodedRows, err := encodeRows(table.Rows)
+	if err != nil {
+		return err
+	}
+	tablePageData, err := storage.BuildTablePageData(encodedRows)
+	if err != nil {
+		return err
+	}
+	catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
+	if err != nil {
+		return err
+	}
+
+	if err := db.flushStagedState(catalogData, []stagedPage{{
+		id:   table.RootPageID(),
+		data: tablePageData,
+	}}); err != nil {
+		return err
+	}
+
+	db.tables = stagedTables
+	return nil
+}
+
+// Stage 5 correctness requires proposal/staging before apply so a single
+// statement cannot leak mixed committed and uncommitted visibility. Crash-safe
+// durability is still future work.
+func (db *DB) flushStagedState(catalogData []byte, pages []stagedPage) error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+
+	catalogPage, err := db.pager.Get(0)
+	if err != nil {
+		return err
+	}
+	originalCatalogData := append([]byte(nil), catalogPage.Data()...)
+
+	type pageRestore struct {
+		page      *storage.Page
+		original  []byte
+		allocated bool
+	}
+	restores := make([]pageRestore, 0, len(pages))
+
+	for _, staged := range pages {
+		var page *storage.Page
+		if staged.isNew {
+			page = db.pager.NewPage()
+			if page.ID() != staged.id {
+				db.pager.DiscardNewPage(page.ID())
+				return errors.New("rovadb: unexpected new page id")
+			}
+			restores = append(restores, pageRestore{
+				page:      page,
+				allocated: true,
+			})
+		} else {
+			var err error
+			page, err = db.pager.Get(staged.id)
+			if err != nil {
+				return err
+			}
+			restores = append(restores, pageRestore{
+				page:     page,
+				original: append([]byte(nil), page.Data()...),
+			})
+		}
+
+		clear(page.Data())
+		copy(page.Data(), staged.data)
+		page.MarkDirty()
+	}
+
+	clear(catalogPage.Data())
+	copy(catalogPage.Data(), catalogData)
+	catalogPage.MarkDirty()
+
+	if err := db.pager.Flush(); err != nil {
+		clear(catalogPage.Data())
+		copy(catalogPage.Data(), originalCatalogData)
+		catalogPage.MarkDirty()
+
+		for _, restore := range restores {
+			if restore.allocated {
+				db.pager.DiscardNewPage(restore.page.ID())
+				continue
+			}
+			clear(restore.page.Data())
+			copy(restore.page.Data(), restore.original)
+			restore.page.MarkDirty()
+		}
+		return err
+	}
+
+	return nil
+}
+
+func encodeRows(rows [][]parser.Value) ([][]byte, error) {
+	encodedRows := make([][]byte, 0, len(rows))
+	for _, row := range rows {
+		encoded, err := storage.EncodeRow(row)
+		if err != nil {
+			return nil, err
+		}
+		encodedRows = append(encodedRows, encoded)
+	}
+	return encodedRows, nil
+}
+
+func cloneTables(tables map[string]*executor.Table) map[string]*executor.Table {
+	cloned := make(map[string]*executor.Table, len(tables))
+	for name, table := range tables {
+		cloned[name] = cloneTable(table)
+	}
+	return cloned
+}
+
+func cloneTable(table *executor.Table) *executor.Table {
+	if table == nil {
+		return nil
+	}
+
+	columns := append([]parser.ColumnDef(nil), table.Columns...)
+	rows := cloneRows(table.Rows)
+
+	cloned := &executor.Table{
+		Name:    table.Name,
+		Columns: columns,
+		Rows:    rows,
+	}
+	cloned.SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
+	return cloned
+}
+
+func cloneRows(rows [][]parser.Value) [][]parser.Value {
+	cloned := make([][]parser.Value, 0, len(rows))
+	for _, row := range rows {
+		cloned = append(cloned, append([]parser.Value(nil), row...))
+	}
+	return cloned
 }
 
 func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
