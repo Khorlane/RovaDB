@@ -57,7 +57,7 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 		return Result{}, ErrNotImplemented
 	}
 	switch stmt.(type) {
-	case *parser.CreateTableStmt, *parser.InsertStmt, *parser.DeleteStmt:
+	case *parser.CreateTableStmt, *parser.InsertStmt, *parser.DeleteStmt, *parser.UpdateStmt:
 	default:
 		return Result{}, ErrNotImplemented
 	}

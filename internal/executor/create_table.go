@@ -37,6 +37,8 @@ func Execute(stmt any, tables map[string]*Table) (int64, error) {
 		return executeInsert(s, tables)
 	case *parser.DeleteStmt:
 		return executeDelete(s, tables)
+	case *parser.UpdateStmt:
+		return executeUpdate(s, tables)
 	default:
 		return 0, errUnsupportedStatement
 	}
