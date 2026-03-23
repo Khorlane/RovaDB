@@ -28,6 +28,16 @@ func (t *Txn) IsActive() bool {
 	return t != nil && t.state == TxnStateActive
 }
 
+// CanCommit reports whether the transaction is currently eligible to commit.
+func (t *Txn) CanCommit() bool {
+	return t != nil && t.state == TxnStateActive
+}
+
+// IsDirty reports whether the transaction has staged writes.
+func (t *Txn) IsDirty() bool {
+	return t != nil && t.dirty
+}
+
 // MarkDirty records that work occurred within the transaction.
 func (t *Txn) MarkDirty() {
 	if t == nil {

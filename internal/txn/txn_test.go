@@ -13,6 +13,9 @@ func TestNewTxnStartsActive(t *testing.T) {
 	if txn.state != TxnStateActive {
 		t.Fatalf("state = %v, want %v", txn.state, TxnStateActive)
 	}
+	if !txn.CanCommit() {
+		t.Fatal("CanCommit() = false, want true")
+	}
 }
 
 func TestCommitTransitionsToCommitted(t *testing.T) {
@@ -25,6 +28,9 @@ func TestCommitTransitionsToCommitted(t *testing.T) {
 	if txn.IsActive() {
 		t.Fatal("IsActive() = true, want false")
 	}
+	if txn.CanCommit() {
+		t.Fatal("CanCommit() = true, want false")
+	}
 }
 
 func TestRollbackTransitionsToRolledBack(t *testing.T) {
@@ -36,6 +42,9 @@ func TestRollbackTransitionsToRolledBack(t *testing.T) {
 	}
 	if txn.IsActive() {
 		t.Fatal("IsActive() = true, want false")
+	}
+	if txn.CanCommit() {
+		t.Fatal("CanCommit() = true, want false")
 	}
 }
 

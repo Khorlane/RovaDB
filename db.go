@@ -122,6 +122,7 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	switch stmt := stmt.(type) {
 	case *parser.CreateTableStmt:
 		var rowsAffected int64
+		var committedTables map[string]*executor.Table
 		err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
 
@@ -131,14 +132,20 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 				return err
 			}
 
-			return db.applyStagedCreate(stagedTables, stmt.Name)
+			if err := db.applyStagedCreate(stagedTables, stmt.Name); err != nil {
+				return err
+			}
+			committedTables = stagedTables
+			return nil
 		})
 		if err != nil {
 			return Result{}, err
 		}
+		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.InsertStmt:
 		var rowsAffected int64
+		var committedTables map[string]*executor.Table
 		err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
 
@@ -148,14 +155,20 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 				return err
 			}
 
-			return db.applyStagedTableRewrite(stagedTables, stmt.TableName)
+			if err := db.applyStagedTableRewrite(stagedTables, stmt.TableName); err != nil {
+				return err
+			}
+			committedTables = stagedTables
+			return nil
 		})
 		if err != nil {
 			return Result{}, err
 		}
+		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.UpdateStmt:
 		var rowsAffected int64
+		var committedTables map[string]*executor.Table
 		err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
 
@@ -165,14 +178,20 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 				return err
 			}
 
-			return db.applyStagedTableRewrite(stagedTables, stmt.TableName)
+			if err := db.applyStagedTableRewrite(stagedTables, stmt.TableName); err != nil {
+				return err
+			}
+			committedTables = stagedTables
+			return nil
 		})
 		if err != nil {
 			return Result{}, err
 		}
+		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.DeleteStmt:
 		var rowsAffected int64
+		var committedTables map[string]*executor.Table
 		err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
 
@@ -182,11 +201,16 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 				return err
 			}
 
-			return db.applyStagedTableRewrite(stagedTables, stmt.TableName)
+			if err := db.applyStagedTableRewrite(stagedTables, stmt.TableName); err != nil {
+				return err
+			}
+			committedTables = stagedTables
+			return nil
 		})
 		if err != nil {
 			return Result{}, err
 		}
+		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	default:
 		return Result{}, ErrNotImplemented
@@ -265,10 +289,33 @@ func (db *DB) execMutatingStatement(apply func() error) error {
 	if db.txn != nil {
 		db.txn.MarkDirty()
 	}
-	if db.txn != nil && db.txn.IsActive() {
-		db.txn.Commit()
+	if err := db.commitTxn(); err != nil {
+		if db.txn != nil && db.txn.IsActive() {
+			db.txn.Rollback()
+		}
+		db.clearTxn()
+		return err
 	}
 	db.clearTxn()
+	return nil
+}
+
+// commitTxn defines the durability boundary for an internal transaction.
+// Dirty pages are flushed in deterministic order via pager dirty tracking.
+// Crash safety is still future work and will arrive with journaling.
+func (db *DB) commitTxn() error {
+	if db == nil || db.txn == nil {
+		return nil
+	}
+	if !db.txn.CanCommit() {
+		return nil
+	}
+	if db.txn.IsDirty() {
+		if err := db.pager.FlushDirty(); err != nil {
+			return err
+		}
+	}
+	db.txn.Commit()
 	return nil
 }
 
@@ -294,15 +341,13 @@ func (db *DB) applyStagedCreate(stagedTables map[string]*executor.Table, tableNa
 		return err
 	}
 
-	if err := db.flushStagedState(catalogData, []stagedPage{{
+	if err := db.stageDirtyState(catalogData, []stagedPage{{
 		id:    rootPageID,
 		data:  rootPageData,
 		isNew: true,
 	}}); err != nil {
 		return err
 	}
-
-	db.tables = stagedTables
 	return nil
 }
 
@@ -331,37 +376,22 @@ func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, t
 		return err
 	}
 
-	if err := db.flushStagedState(catalogData, []stagedPage{{
+	if err := db.stageDirtyState(catalogData, []stagedPage{{
 		id:   table.RootPageID(),
 		data: tablePageData,
 	}}); err != nil {
 		return err
 	}
-
-	db.tables = stagedTables
 	return nil
 }
 
 // Stage 5 correctness requires proposal/staging before apply so a single
 // statement cannot leak mixed committed and uncommitted visibility. Crash-safe
 // durability is still future work.
-func (db *DB) flushStagedState(catalogData []byte, pages []stagedPage) error {
+func (db *DB) stageDirtyState(catalogData []byte, pages []stagedPage) error {
 	if db == nil || db.pager == nil {
 		return nil
 	}
-
-	catalogPage, err := db.pager.Get(0)
-	if err != nil {
-		return err
-	}
-	originalCatalogData := append([]byte(nil), catalogPage.Data()...)
-
-	type pageRestore struct {
-		page      *storage.Page
-		original  []byte
-		allocated bool
-	}
-	restores := make([]pageRestore, 0, len(pages))
 
 	for _, staged := range pages {
 		var page *storage.Page
@@ -371,20 +401,12 @@ func (db *DB) flushStagedState(catalogData []byte, pages []stagedPage) error {
 				db.pager.DiscardNewPage(page.ID())
 				return errors.New("rovadb: unexpected new page id")
 			}
-			restores = append(restores, pageRestore{
-				page:      page,
-				allocated: true,
-			})
 		} else {
 			var err error
 			page, err = db.pager.Get(staged.id)
 			if err != nil {
 				return err
 			}
-			restores = append(restores, pageRestore{
-				page:     page,
-				original: append([]byte(nil), page.Data()...),
-			})
 		}
 
 		clear(page.Data())
@@ -392,29 +414,15 @@ func (db *DB) flushStagedState(catalogData []byte, pages []stagedPage) error {
 		db.pager.MarkDirty(page)
 	}
 
+	catalogPage, err := db.pager.Get(0)
+	if err != nil {
+		return err
+	}
 	clear(catalogPage.Data())
 	copy(catalogPage.Data(), catalogData)
 	// Page mutation requires explicit dirty marking; commit-oriented flush
 	// eligibility is driven by dirty tracking.
 	db.pager.MarkDirty(catalogPage)
-
-	if err := db.pager.FlushDirty(); err != nil {
-		clear(catalogPage.Data())
-		copy(catalogPage.Data(), originalCatalogData)
-		db.pager.MarkDirty(catalogPage)
-
-		for _, restore := range restores {
-			if restore.allocated {
-				db.pager.DiscardNewPage(restore.page.ID())
-				continue
-			}
-			clear(restore.page.Data())
-			copy(restore.page.Data(), restore.original)
-			db.pager.MarkDirty(restore.page)
-		}
-		return err
-	}
-
 	return nil
 }
 
