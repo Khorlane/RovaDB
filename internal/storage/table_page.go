@@ -93,6 +93,26 @@ func ReadRowsFromTablePage(page *Page) ([][]byte, error) {
 	return rows, nil
 }
 
+// RewriteTablePage rebuilds a table root page from the provided encoded rows.
+func RewriteTablePage(page *Page, encodedRows [][]byte) error {
+	if page == nil {
+		return errInvalidRowData
+	}
+
+	clear(page.data)
+	binary.LittleEndian.PutUint32(page.data[0:4], 0)
+	binary.LittleEndian.PutUint32(page.data[4:8], tablePageHeaderSize)
+	page.MarkDirty()
+
+	for _, row := range encodedRows {
+		if err := AppendRowToTablePage(page, row); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func tablePageFreeOffset(page *Page) uint32 {
 	if page == nil || len(page.data) < tablePageHeaderSize {
 		return 0

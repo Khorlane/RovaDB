@@ -59,6 +59,63 @@ func TestAppendRowToTablePageFull(t *testing.T) {
 	}
 }
 
+func TestRewriteTablePage(t *testing.T) {
+	page := NewPage(1)
+
+	row1, err := EncodeRow([]parser.Value{parser.Int64Value(1), parser.StringValue("alice")})
+	if err != nil {
+		t.Fatalf("EncodeRow(row1) error = %v", err)
+	}
+	row2, err := EncodeRow([]parser.Value{parser.Int64Value(2), parser.StringValue("bob")})
+	if err != nil {
+		t.Fatalf("EncodeRow(row2) error = %v", err)
+	}
+	row3, err := EncodeRow([]parser.Value{parser.Int64Value(3), parser.StringValue("carol")})
+	if err != nil {
+		t.Fatalf("EncodeRow(row3) error = %v", err)
+	}
+
+	if err := AppendRowToTablePage(page, row1); err != nil {
+		t.Fatalf("AppendRowToTablePage(initial) error = %v", err)
+	}
+	if err := AppendRowToTablePage(page, row2); err != nil {
+		t.Fatalf("AppendRowToTablePage(initial second) error = %v", err)
+	}
+
+	if err := RewriteTablePage(page, [][]byte{row3}); err != nil {
+		t.Fatalf("RewriteTablePage() error = %v", err)
+	}
+
+	if got := TablePageRowCount(page); got != 1 {
+		t.Fatalf("TablePageRowCount() = %d, want 1", got)
+	}
+	wantOffset := uint32(tablePageHeaderSize + 4 + len(row3))
+	if got := binary.LittleEndian.Uint32(page.Data()[4:8]); got != wantOffset {
+		t.Fatalf("free offset = %d, want %d", got, wantOffset)
+	}
+
+	payloads, err := ReadRowsFromTablePage(page)
+	if err != nil {
+		t.Fatalf("ReadRowsFromTablePage() error = %v", err)
+	}
+	if len(payloads) != 1 {
+		t.Fatalf("len(payloads) = %d, want 1", len(payloads))
+	}
+	values, err := DecodeRow(payloads[0])
+	if err != nil {
+		t.Fatalf("DecodeRow() error = %v", err)
+	}
+	wantValues := []parser.Value{parser.Int64Value(3), parser.StringValue("carol")}
+	if len(values) != len(wantValues) {
+		t.Fatalf("len(values) = %d, want %d", len(values), len(wantValues))
+	}
+	for i := range wantValues {
+		if values[i] != wantValues[i] {
+			t.Fatalf("values[%d] = %#v, want %#v", i, values[i], wantValues[i])
+		}
+	}
+}
+
 func TestReadRowsFromTablePageMalformedFreeOffset(t *testing.T) {
 	page := NewPage(1)
 	binary.LittleEndian.PutUint32(page.Data()[4:8], 7)

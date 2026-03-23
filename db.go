@@ -127,6 +127,16 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 			return Result{}, err
 		}
 	}
+	if updateStmt, ok := stmt.(*parser.UpdateStmt); ok {
+		if err := db.rewritePersistedTable(updateStmt.TableName); err != nil {
+			return Result{}, err
+		}
+	}
+	if deleteStmt, ok := stmt.(*parser.DeleteStmt); ok {
+		if err := db.rewritePersistedTable(deleteStmt.TableName); err != nil {
+			return Result{}, err
+		}
+	}
 
 	return Result{rowsAffected: rowsAffected}, nil
 }
@@ -197,6 +207,37 @@ func (db *DB) persistInsertedRow(tableName string) error {
 		return err
 	}
 	if err := storage.AppendRowToTablePage(page, row); err != nil {
+		return err
+	}
+
+	table.SetStorageMeta(table.RootPageID(), storage.TablePageRowCount(page))
+	return db.persistCatalog()
+}
+
+func (db *DB) rewritePersistedTable(tableName string) error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+
+	table := db.tables[tableName]
+	if table == nil {
+		return nil
+	}
+
+	encodedRows := make([][]byte, 0, len(table.Rows))
+	for _, row := range table.Rows {
+		encoded, err := storage.EncodeRow(row)
+		if err != nil {
+			return err
+		}
+		encodedRows = append(encodedRows, encoded)
+	}
+
+	page, err := db.pager.Get(table.RootPageID())
+	if err != nil {
+		return err
+	}
+	if err := storage.RewriteTablePage(page, encodedRows); err != nil {
 		return err
 	}
 
