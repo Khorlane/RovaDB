@@ -7,4 +7,5 @@ type SelectPlan struct {
 	Stmt      *parser.SelectExpr
 	ScanType  ScanType
 	TableScan *TableScan
+	IndexScan *IndexScan
 }

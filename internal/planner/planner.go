@@ -2,15 +2,68 @@ package planner
 
 import "github.com/Khorlane/RovaDB/internal/parser"
 
+// TableMetadata is the minimal planner-side table info used for scan choice.
+type TableMetadata struct {
+	Indexes map[string]*BasicIndex
+}
+
 // PlanSelect creates a basic execution plan for SELECT.
-// Current behavior is pass-through.
-func PlanSelect(stmt *parser.SelectExpr) (*SelectPlan, error) {
+// Current behavior defaults to table scan unless optional metadata supports
+// a simple equality index scan decision.
+func PlanSelect(stmt *parser.SelectExpr, tables ...map[string]*TableMetadata) (*SelectPlan, error) {
 	plan := &SelectPlan{
 		Stmt: stmt,
 	}
 	if stmt != nil && stmt.TableName != "" {
+		if indexScan := chooseIndexScan(stmt, firstTableMetadata(tables)); indexScan != nil {
+			plan.ScanType = ScanTypeIndex
+			plan.IndexScan = indexScan
+			return plan, nil
+		}
 		plan.ScanType = ScanTypeTable
 		plan.TableScan = &TableScan{TableName: stmt.TableName}
 	}
 	return plan, nil
+}
+
+func firstTableMetadata(tables []map[string]*TableMetadata) map[string]*TableMetadata {
+	if len(tables) == 0 {
+		return nil
+	}
+	return tables[0]
+}
+
+func chooseIndexScan(stmt *parser.SelectExpr, tables map[string]*TableMetadata) *IndexScan {
+	if stmt == nil || stmt.TableName == "" || tables == nil {
+		return nil
+	}
+
+	columnName, value, ok := simpleEqualityPredicate(stmt.Where)
+	if !ok {
+		return nil
+	}
+
+	table := tables[stmt.TableName]
+	if table == nil || table.Indexes == nil || table.Indexes[columnName] == nil {
+		return nil
+	}
+
+	return &IndexScan{
+		TableName:  stmt.TableName,
+		ColumnName: columnName,
+		Value:      value,
+	}
+}
+
+func simpleEqualityPredicate(where *parser.WhereClause) (string, parser.Value, bool) {
+	if where == nil || len(where.Items) != 1 {
+		return "", parser.Value{}, false
+	}
+
+	item := where.Items[0]
+	if item.Op != "" || item.Condition.Operator != "=" {
+		return "", parser.Value{}, false
+	}
+
+	return item.Condition.Left, item.Condition.Right, true
 }
