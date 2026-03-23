@@ -58,3 +58,43 @@ func TestAppendRowToTablePageFull(t *testing.T) {
 		t.Fatalf("AppendRowToTablePage() error = %v, want %v", err, errTablePageFull)
 	}
 }
+
+func TestReadRowsFromTablePageMalformedFreeOffset(t *testing.T) {
+	page := NewPage(1)
+	binary.LittleEndian.PutUint32(page.Data()[4:8], 7)
+
+	_, err := ReadRowsFromTablePage(page)
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("ReadRowsFromTablePage() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestReadRowsFromTablePageTruncatedRow(t *testing.T) {
+	page := NewPage(1)
+	InitTableRootPage(page)
+	binary.LittleEndian.PutUint32(page.Data()[0:4], 1)
+	binary.LittleEndian.PutUint32(page.Data()[4:8], 20)
+	binary.LittleEndian.PutUint32(page.Data()[8:12], 12)
+
+	_, err := ReadRowsFromTablePage(page)
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("ReadRowsFromTablePage() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestReadRowsFromTablePageCountMismatch(t *testing.T) {
+	page := NewPage(1)
+	row, err := EncodeRow([]parser.Value{parser.Int64Value(1)})
+	if err != nil {
+		t.Fatalf("EncodeRow() error = %v", err)
+	}
+	if err := AppendRowToTablePage(page, row); err != nil {
+		t.Fatalf("AppendRowToTablePage() error = %v", err)
+	}
+	binary.LittleEndian.PutUint32(page.Data()[0:4], 2)
+
+	_, err = ReadRowsFromTablePage(page)
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("ReadRowsFromTablePage() error = %v, want %v", err, errInvalidRowData)
+	}
+}

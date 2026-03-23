@@ -1,0 +1,133 @@
+package rovadb
+
+import (
+	"context"
+	"testing"
+)
+
+func TestInsertSelectAfterReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+		t.Fatalf("Exec(insert 1) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (2, 'bob')"); err != nil {
+		t.Fatalf("Exec(insert 2) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query(context.Background(), "SELECT * FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() first = false, want true")
+	}
+	var id1 int64
+	var name1 string
+	if err := rows.Scan(&id1, &name1); err != nil {
+		t.Fatalf("Scan() first error = %v", err)
+	}
+	if id1 != 1 || name1 != "steve" {
+		t.Fatalf("first row = (%d, %q), want (1, %q)", id1, name1, "steve")
+	}
+
+	if !rows.Next() {
+		t.Fatal("Next() second = false, want true")
+	}
+	var id2 int64
+	var name2 string
+	if err := rows.Scan(&id2, &name2); err != nil {
+		t.Fatalf("Scan() second error = %v", err)
+	}
+	if id2 != 2 || name2 != "bob" {
+		t.Fatalf("second row = (%d, %q), want (2, %q)", id2, name2, "bob")
+	}
+
+	if rows.Next() {
+		t.Fatal("Next() third = true, want false")
+	}
+}
+
+func TestMultipleTablesReloadRowsOnOpen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create users) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "CREATE TABLE teams (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create teams) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+		t.Fatalf("Exec(insert users) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO teams VALUES (10, 'ravens')"); err != nil {
+		t.Fatalf("Exec(insert teams) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+
+	userRows, err := db.Query(context.Background(), "SELECT * FROM users")
+	if err != nil {
+		t.Fatalf("Query(users) error = %v", err)
+	}
+	defer userRows.Close()
+
+	if !userRows.Next() {
+		t.Fatal("users Next() = false, want true")
+	}
+	var userID int64
+	var userName string
+	if err := userRows.Scan(&userID, &userName); err != nil {
+		t.Fatalf("users Scan() error = %v", err)
+	}
+	if userID != 1 || userName != "steve" {
+		t.Fatalf("users row = (%d, %q), want (1, %q)", userID, userName, "steve")
+	}
+
+	teamRows, err := db.Query(context.Background(), "SELECT * FROM teams")
+	if err != nil {
+		t.Fatalf("Query(teams) error = %v", err)
+	}
+	defer teamRows.Close()
+
+	if !teamRows.Next() {
+		t.Fatal("teams Next() = false, want true")
+	}
+	var teamID int64
+	var teamName string
+	if err := teamRows.Scan(&teamID, &teamName); err != nil {
+		t.Fatalf("teams Scan() error = %v", err)
+	}
+	if teamID != 10 || teamName != "ravens" {
+		t.Fatalf("teams row = (%d, %q), want (10, %q)", teamID, teamName, "ravens")
+	}
+}

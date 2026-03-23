@@ -47,6 +47,11 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
+	if err := loadPersistedRows(pager, tables); err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, err
+	}
 
 	return &DB{
 		path:   path,
@@ -249,6 +254,37 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 	}
 
 	return tables, nil
+}
+
+func loadPersistedRows(pager *storage.Pager, tables map[string]*executor.Table) error {
+	for _, table := range tables {
+		if table == nil || table.PersistedRowCount() == 0 {
+			continue
+		}
+
+		page, err := pager.Get(table.RootPageID())
+		if err != nil {
+			return err
+		}
+		payloads, err := storage.ReadRowsFromTablePage(page)
+		if err != nil {
+			return err
+		}
+		if uint32(len(payloads)) != table.PersistedRowCount() {
+			return errors.New("rovadb: persisted row count mismatch")
+		}
+
+		table.Rows = table.Rows[:0]
+		for _, payload := range payloads {
+			row, err := storage.DecodeRow(payload)
+			if err != nil {
+				return err
+			}
+			table.Rows = append(table.Rows, row)
+		}
+	}
+
+	return nil
 }
 
 func catalogColumnType(columnType string) uint8 {
