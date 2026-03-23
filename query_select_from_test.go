@@ -512,6 +512,222 @@ func TestQuerySelectWhereAndConditions(t *testing.T) {
 	}
 }
 
+func TestQuerySelectOrderByIntAsc(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (3, 'cara')",
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+	} {
+		if _, err := db.Exec(context.Background(), sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT id FROM users ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsIntSequence(t, rows, 1, 2, 3)
+}
+
+func TestQuerySelectOrderByIntDesc(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (3, 'cara')",
+		"INSERT INTO users VALUES (2, 'bob')",
+	} {
+		if _, err := db.Exec(context.Background(), sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT id FROM users ORDER BY id DESC")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsIntSequence(t, rows, 3, 2, 1)
+}
+
+func TestQuerySelectOrderByStringAsc(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (3, 'cara')",
+	} {
+		if _, err := db.Exec(context.Background(), sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT name FROM users ORDER BY name ASC")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsStringSequence(t, rows, "alice", "bob", "cara")
+}
+
+func TestQuerySelectOrderByStringDesc(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (3, 'cara')",
+	} {
+		if _, err := db.Exec(context.Background(), sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT name FROM users ORDER BY name DESC")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsStringSequence(t, rows, "cara", "bob", "alice")
+}
+
+func TestQuerySelectOrderByWithWhere(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (3, 'cara')",
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+	} {
+		if _, err := db.Exec(context.Background(), sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT name FROM users WHERE id > 1 ORDER BY id DESC")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsStringSequence(t, rows, "cara", "bob")
+}
+
+func TestQuerySelectOrderByUnknownColumn(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT * FROM users ORDER BY age")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() == nil {
+		t.Fatal("Err() = nil, want order by column error")
+	}
+}
+
+func assertRowsIntSequence(t *testing.T, rows *Rows, want ...int64) {
+	t.Helper()
+
+	for i, wantValue := range want {
+		if !rows.Next() {
+			t.Fatalf("Next() row %d = false, want true", i)
+		}
+		var got int64
+		if err := rows.Scan(&got); err != nil {
+			t.Fatalf("Scan() row %d error = %v", i, err)
+		}
+		if got != wantValue {
+			t.Fatalf("row %d = %d, want %d", i, got, wantValue)
+		}
+	}
+	if rows.Next() {
+		t.Fatal("Next() after expected rows = true, want false")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil", err)
+	}
+}
+
+func assertRowsStringSequence(t *testing.T, rows *Rows, want ...string) {
+	t.Helper()
+
+	for i, wantValue := range want {
+		if !rows.Next() {
+			t.Fatalf("Next() row %d = false, want true", i)
+		}
+		var got string
+		if err := rows.Scan(&got); err != nil {
+			t.Fatalf("Scan() row %d error = %v", i, err)
+		}
+		if got != wantValue {
+			t.Fatalf("row %d = %q, want %q", i, got, wantValue)
+		}
+	}
+	if rows.Next() {
+		t.Fatal("Next() after expected rows = true, want false")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil", err)
+	}
+}
+
 func TestQuerySelectWhereNoMatches(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

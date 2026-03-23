@@ -102,3 +102,32 @@ func TestParseSelectExprWhereAndConditions(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSelectExprOrderBy(t *testing.T) {
+	tests := []struct {
+		name   string
+		sql    string
+		column string
+		desc   bool
+	}{
+		{name: "default asc", sql: "SELECT * FROM users ORDER BY id", column: "id", desc: false},
+		{name: "explicit asc", sql: "SELECT * FROM users ORDER BY id ASC", column: "id", desc: false},
+		{name: "desc", sql: "SELECT * FROM users ORDER BY id DESC", column: "id", desc: true},
+		{name: "with where", sql: "SELECT name FROM users WHERE id > 1 ORDER BY name DESC", column: "name", desc: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ParseSelectExpr(tc.sql)
+			if !ok {
+				t.Fatal("ParseSelectExpr() ok = false, want true")
+			}
+			if got == nil || got.OrderBy == nil {
+				t.Fatalf("ParseSelectExpr() = %#v, want ORDER BY clause", got)
+			}
+			if got.OrderBy.Column != tc.column || got.OrderBy.Desc != tc.desc {
+				t.Fatalf("OrderBy = %#v, want column=%q desc=%v", got.OrderBy, tc.column, tc.desc)
+			}
+		})
+	}
+}

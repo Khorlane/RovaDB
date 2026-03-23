@@ -256,6 +256,133 @@ func TestSelectWithAndMixedTypes(t *testing.T) {
 	}
 }
 
+func TestSelectOrderByIntAsc(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(3), parser.StringValue("cara")},
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+		}},
+	}
+
+	rows, err := Select(&parser.SelectExpr{
+		TableName: "users",
+		Columns:   []string{"id"},
+		OrderBy:   &parser.OrderByClause{Column: "id"},
+	}, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if rows[0][0] != parser.Int64Value(1) || rows[1][0] != parser.Int64Value(2) || rows[2][0] != parser.Int64Value(3) {
+		t.Fatalf("Select() rows = %#v, want [[1] [2] [3]]", rows)
+	}
+}
+
+func TestSelectOrderByIntDesc(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(3), parser.StringValue("cara")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+		}},
+	}
+
+	rows, err := Select(&parser.SelectExpr{
+		TableName: "users",
+		Columns:   []string{"id"},
+		OrderBy:   &parser.OrderByClause{Column: "id", Desc: true},
+	}, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if rows[0][0] != parser.Int64Value(3) || rows[1][0] != parser.Int64Value(2) || rows[2][0] != parser.Int64Value(1) {
+		t.Fatalf("Select() rows = %#v, want [[3] [2] [1]]", rows)
+	}
+}
+
+func TestSelectOrderByStringAsc(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(3), parser.StringValue("cara")},
+		}},
+	}
+
+	rows, err := Select(&parser.SelectExpr{
+		TableName: "users",
+		Columns:   []string{"name"},
+		OrderBy:   &parser.OrderByClause{Column: "name"},
+	}, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if rows[0][0] != parser.StringValue("alice") || rows[1][0] != parser.StringValue("bob") || rows[2][0] != parser.StringValue("cara") {
+		t.Fatalf("Select() rows = %#v, want [[alice] [bob] [cara]]", rows)
+	}
+}
+
+func TestSelectOrderByStringDesc(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(3), parser.StringValue("cara")},
+		}},
+	}
+
+	rows, err := Select(&parser.SelectExpr{
+		TableName: "users",
+		Columns:   []string{"name"},
+		OrderBy:   &parser.OrderByClause{Column: "name", Desc: true},
+	}, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if rows[0][0] != parser.StringValue("cara") || rows[1][0] != parser.StringValue("bob") || rows[2][0] != parser.StringValue("alice") {
+		t.Fatalf("Select() rows = %#v, want [[cara] [bob] [alice]]", rows)
+	}
+}
+
+func TestSelectOrderByWithWhereAndProjection(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(3), parser.StringValue("cara")},
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+		}},
+	}
+
+	rows, err := Select(&parser.SelectExpr{
+		TableName: "users",
+		Columns:   []string{"name"},
+		Where: &parser.WhereClause{Conditions: []parser.Condition{
+			{Left: "id", Operator: ">", Right: parser.Int64Value(1)},
+		}},
+		OrderBy: &parser.OrderByClause{Column: "id", Desc: true},
+	}, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if rows[0][0] != parser.StringValue("cara") || rows[1][0] != parser.StringValue("bob") {
+		t.Fatalf("Select() rows = %#v, want [[cara] [bob]]", rows)
+	}
+}
+
+func TestSelectOrderByUnknownColumn(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("alice")}}},
+	}
+
+	_, err := Select(&parser.SelectExpr{
+		TableName: "users",
+		OrderBy:   &parser.OrderByClause{Column: "age"},
+	}, tables)
+	if err != errColumnDoesNotExist {
+		t.Fatalf("Select() error = %v, want %v", err, errColumnDoesNotExist)
+	}
+}
+
 func TestSelectMissingTable(t *testing.T) {
 	_, err := Select(&parser.SelectExpr{TableName: "users"}, map[string]*Table{})
 	if err != errTableDoesNotExist {

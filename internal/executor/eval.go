@@ -93,3 +93,32 @@ func compareValues(op string, left, right parser.Value) (bool, error) {
 		return false, errTypeMismatch
 	}
 }
+
+func compareSortableValues(left, right parser.Value) (int, error) {
+	if left.Kind != right.Kind {
+		return 0, errTypeMismatch
+	}
+
+	switch left.Kind {
+	case parser.ValueKindInt64:
+		switch {
+		case left.I64 < right.I64:
+			return -1, nil
+		case left.I64 > right.I64:
+			return 1, nil
+		default:
+			return 0, nil
+		}
+	case parser.ValueKindString:
+		switch {
+		case left.Str < right.Str:
+			return -1, nil
+		case left.Str > right.Str:
+			return 1, nil
+		default:
+			return 0, nil
+		}
+	default:
+		return 0, errTypeMismatch
+	}
+}

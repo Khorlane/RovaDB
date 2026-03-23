@@ -1,6 +1,8 @@
 package executor
 
 import (
+	"sort"
+
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
@@ -21,7 +23,7 @@ func Select(sel *parser.SelectExpr, tables map[string]*Table) ([][]parser.Value,
 	if err := validateWhereColumns(sel.Where, table); err != nil {
 		return nil, err
 	}
-	rows := make([][]parser.Value, 0, len(table.Rows))
+	baseRows := make([][]parser.Value, 0, len(table.Rows))
 	for _, row := range table.Rows {
 		match, err := evalWhere(row, table, sel.Where)
 		if err != nil {
@@ -30,6 +32,14 @@ func Select(sel *parser.SelectExpr, tables map[string]*Table) ([][]parser.Value,
 		if !match {
 			continue
 		}
+		baseRows = append(baseRows, row)
+	}
+	if err := sortRows(baseRows, table, sel.OrderBy); err != nil {
+		return nil, err
+	}
+
+	rows := make([][]parser.Value, 0, len(baseRows))
+	for _, row := range baseRows {
 		out := make([]parser.Value, 0, len(indexes))
 		for _, idx := range indexes {
 			out = append(out, row[idx])
@@ -128,4 +138,34 @@ func validateWhereColumns(where *parser.WhereClause, table *Table) error {
 	}
 
 	return nil
+}
+
+func sortRows(rows [][]parser.Value, table *Table, orderBy *parser.OrderByClause) error {
+	if orderBy == nil {
+		return nil
+	}
+
+	idx, err := resolveColumnIndex(orderBy.Column, table)
+	if err != nil {
+		return err
+	}
+
+	var sortErr error
+	sort.SliceStable(rows, func(i, j int) bool {
+		if sortErr != nil {
+			return false
+		}
+
+		cmp, err := compareSortableValues(rows[i][idx], rows[j][idx])
+		if err != nil {
+			sortErr = err
+			return false
+		}
+		if orderBy.Desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+
+	return sortErr
 }

@@ -333,6 +333,12 @@ func TestParseSelectExprDirect(t *testing.T) {
 			ok:   true,
 			want: &parser.Expr{},
 		},
+		{
+			name: "select table order by desc",
+			sql:  "SELECT * FROM users ORDER BY id DESC",
+			ok:   true,
+			want: &parser.Expr{},
+		},
 		{name: "select identifier", sql: "SELECT abc", ok: false},
 	}
 
@@ -372,6 +378,12 @@ func TestParseSelectExprDirect(t *testing.T) {
 				}
 				if got.TableName != "users" || got.Columns != nil {
 					t.Fatalf("ParseSelectExpr() = %#v, want table users select all", got)
+				}
+				return
+			}
+			if tc.name == "select table order by desc" {
+				if got.TableName != "users" || got.Columns != nil || got.OrderBy == nil || got.OrderBy.Column != "id" || !got.OrderBy.Desc {
+					t.Fatalf("ParseSelectExpr() = %#v, want table users order by id desc", got)
 				}
 				return
 			}

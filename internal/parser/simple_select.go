@@ -48,12 +48,19 @@ type WhereClause struct {
 	Conditions []Condition
 }
 
+// OrderByClause is a single-column ORDER BY clause.
+type OrderByClause struct {
+	Column string
+	Desc   bool
+}
+
 // SelectExpr is the minimal parsed form for SELECT <expr>.
 type SelectExpr struct {
 	Expr      *Expr
 	TableName string
 	Columns   []string
 	Where     *WhereClause
+	OrderBy   *OrderByClause
 }
 
 // ParseSelectExpr recognizes the tiny Stage 1 SELECT <expr> shape.
@@ -97,6 +104,12 @@ func parseSelectFrom(sql, upper string) (*SelectExpr, bool) {
 
 	selectList := strings.TrimSpace(sql[len("SELECT "):fromIndex])
 	fromPart := strings.TrimSpace(sql[fromIndex+len(" FROM "):])
+	upperFromPart := strings.ToUpper(fromPart)
+	orderByPart := ""
+	if orderByIndex := strings.Index(upperFromPart, " ORDER BY "); orderByIndex >= 0 {
+		orderByPart = strings.TrimSpace(fromPart[orderByIndex+len(" ORDER BY "):])
+		fromPart = strings.TrimSpace(fromPart[:orderByIndex])
+	}
 	whereUpper := strings.ToUpper(fromPart)
 	tableName := fromPart
 	var where *WhereClause
@@ -109,6 +122,14 @@ func parseSelectFrom(sql, upper string) (*SelectExpr, bool) {
 		}
 		where = parsedWhere
 	}
+	var orderBy *OrderByClause
+	if orderByPart != "" {
+		parsedOrderBy, ok := parseOrderByClause(orderByPart)
+		if !ok {
+			return nil, false
+		}
+		orderBy = parsedOrderBy
+	}
 
 	if selectList == "" || tableName == "" || strings.ContainsAny(tableName, " \t\r\n,") {
 		return nil, false
@@ -118,6 +139,7 @@ func parseSelectFrom(sql, upper string) (*SelectExpr, bool) {
 		return &SelectExpr{
 			TableName: tableName,
 			Where:     where,
+			OrderBy:   orderBy,
 		}, true
 	}
 
@@ -138,7 +160,30 @@ func parseSelectFrom(sql, upper string) (*SelectExpr, bool) {
 		TableName: tableName,
 		Columns:   columns,
 		Where:     where,
+		OrderBy:   orderBy,
 	}, true
+}
+
+func parseOrderByClause(input string) (*OrderByClause, bool) {
+	tokens := strings.Fields(strings.TrimSpace(input))
+	if len(tokens) < 1 || len(tokens) > 2 || tokens[0] == "" || strings.ContainsAny(tokens[0], " \t\r\n,") {
+		return nil, false
+	}
+
+	orderBy := &OrderByClause{Column: tokens[0]}
+	if len(tokens) == 1 {
+		return orderBy, true
+	}
+
+	switch {
+	case strings.EqualFold(tokens[1], "ASC"):
+		return orderBy, true
+	case strings.EqualFold(tokens[1], "DESC"):
+		orderBy.Desc = true
+		return orderBy, true
+	default:
+		return nil, false
+	}
 }
 
 func parseWhereClause(input string) (*WhereClause, bool) {
