@@ -20,7 +20,9 @@ func TestCommitFlushesDirtyPages(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 
-	db.beginTxn()
+	if err := db.beginTxn(); err != nil {
+		t.Fatalf("beginTxn() error = %v", err)
+	}
 	stagedTables := cloneTables(db.tables)
 	if _, err := executor.Execute(&parser.CreateTableStmt{
 		Name: "t",
@@ -39,7 +41,9 @@ func TestCommitFlushesDirtyPages(t *testing.T) {
 		t.Fatal("len(db.pager.DirtyPages()) = 0, want dirty pages before commit")
 	}
 
-	db.txn.MarkDirty()
+	if err := db.txn.MarkDirty(); err != nil {
+		t.Fatalf("txn.MarkDirty() error = %v", err)
+	}
 	if err := db.commitTxn(); err != nil {
 		t.Fatalf("commitTxn() error = %v", err)
 	}
@@ -79,7 +83,9 @@ func TestCommitWithoutDirtyIsNoOp(t *testing.T) {
 	}
 	defer db.Close()
 
-	db.beginTxn()
+	if err := db.beginTxn(); err != nil {
+		t.Fatalf("beginTxn() error = %v", err)
+	}
 	if err := db.commitTxn(); err != nil {
 		t.Fatalf("commitTxn() error = %v", err)
 	}
@@ -104,7 +110,9 @@ func TestCommitErrorPropagates(t *testing.T) {
 	copy(page.Data(), []byte("boom"))
 	db.pager.MarkDirty(page)
 	db.txn = txn.NewTxn()
-	db.txn.MarkDirty()
+	if err := db.txn.MarkDirty(); err != nil {
+		t.Fatalf("txn.MarkDirty() error = %v", err)
+	}
 
 	if err := db.file.File().Close(); err != nil {
 		t.Fatalf("file.Close() error = %v", err)
@@ -251,10 +259,14 @@ func TestCommitWithoutOriginalPagesSkipsJournal(t *testing.T) {
 	}
 	defer db.Close()
 
-	db.beginTxn()
+	if err := db.beginTxn(); err != nil {
+		t.Fatalf("beginTxn() error = %v", err)
+	}
 	page := db.pager.NewPage()
 	copy(page.Data(), []byte("new"))
-	db.txn.MarkDirty()
+	if err := db.txn.MarkDirty(); err != nil {
+		t.Fatalf("txn.MarkDirty() error = %v", err)
+	}
 	if err := db.commitTxn(); err != nil {
 		t.Fatalf("commitTxn() error = %v", err)
 	}
@@ -274,19 +286,25 @@ func TestRollbackRestoresDirtyPages(t *testing.T) {
 	page := db.pager.NewPage()
 	copy(page.Data(), []byte("before"))
 	db.txn = txn.NewTxn()
-	db.txn.MarkDirty()
+	if err := db.txn.MarkDirty(); err != nil {
+		t.Fatalf("txn.MarkDirty() error = %v", err)
+	}
 	if err := db.commitTxn(); err != nil {
 		t.Fatalf("commitTxn() error = %v", err)
 	}
 
 	db.pager.MarkDirtyWithOriginal(page)
 	copy(page.Data(), []byte("after!"))
-	db.beginTxn()
+	if err := db.beginTxn(); err != nil {
+		t.Fatalf("beginTxn() error = %v", err)
+	}
 	if !db.pager.IsDirty(page) {
 		t.Fatal("page not dirty before rollback")
 	}
 
-	db.rollbackTxn()
+	if err := db.rollbackTxn(); err != nil {
+		t.Fatalf("rollbackTxn() error = %v", err)
+	}
 
 	if db.pager.IsDirty(page) {
 		t.Fatal("page still dirty after rollback")
@@ -362,7 +380,9 @@ func TestCommitClearsRollbackSnapshots(t *testing.T) {
 	}
 	defer db.Close()
 
-	db.beginTxn()
+	if err := db.beginTxn(); err != nil {
+		t.Fatalf("beginTxn() error = %v", err)
+	}
 	stagedTables := cloneTables(db.tables)
 	if _, err := executor.Execute(&parser.CreateTableStmt{
 		Name: "t",
@@ -379,7 +399,9 @@ func TestCommitClearsRollbackSnapshots(t *testing.T) {
 		t.Fatal("no dirty pages before commit")
 	}
 
-	db.txn.MarkDirty()
+	if err := db.txn.MarkDirty(); err != nil {
+		t.Fatalf("txn.MarkDirty() error = %v", err)
+	}
 	if err := db.commitTxn(); err != nil {
 		t.Fatalf("commitTxn() error = %v", err)
 	}
@@ -456,4 +478,114 @@ func TestRollbackAfterFailedCommitRestoresState(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 	assertSelectIntRows(t, db, "SELECT * FROM t", 1)
+}
+
+func TestBeginTxnWhileActiveReturnsError(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if err := db.beginTxn(); err != nil {
+		t.Fatalf("first beginTxn() error = %v", err)
+	}
+	if err := db.beginTxn(); !errors.Is(err, ErrTxnAlreadyActive) {
+		t.Fatalf("second beginTxn() error = %v, want %v", err, ErrTxnAlreadyActive)
+	}
+}
+
+func TestCommitTxnWithoutActiveTxnReturnsError(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	db.txn = txn.NewTxn()
+	if err := db.txn.Commit(); err != nil {
+		t.Fatalf("txn.Commit() error = %v", err)
+	}
+	if err := db.commitTxn(); !errors.Is(err, ErrTxnCommitWithoutActive) {
+		t.Fatalf("commitTxn() error = %v, want %v", err, ErrTxnCommitWithoutActive)
+	}
+}
+
+func TestRollbackTxnWithoutActiveTxnIsHandled(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if err := db.rollbackTxn(); err != nil {
+		t.Fatalf("rollbackTxn() nil txn error = %v", err)
+	}
+
+	db.txn = txn.NewTxn()
+	if err := db.txn.Commit(); err != nil {
+		t.Fatalf("txn.Commit() error = %v", err)
+	}
+	if err := db.rollbackTxn(); err != nil {
+		t.Fatalf("rollbackTxn() terminal txn error = %v", err)
+	}
+}
+
+func TestSuccessfulCommitLeavesNoTxnAndNoTracking(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if db.txn != nil {
+		t.Fatalf("db.txn = %#v, want nil", db.txn)
+	}
+	if len(db.pager.DirtyPages()) != 0 || len(db.pager.DirtyPagesWithOriginals()) != 0 {
+		t.Fatal("dirty/original tracking remained after successful commit")
+	}
+	if _, err := os.Stat(storage.JournalPath(path)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("journal stat error = %v, want not exists", err)
+	}
+}
+
+func TestSuccessfulRollbackLeavesNoTxnAndNoTracking(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	err = db.execMutatingStatement(func() error {
+		stagedTables := cloneTables(db.tables)
+		table := stagedTables["t"]
+		table.Rows[0][0] = parser.Int64Value(2)
+		if err := db.applyStagedTableRewrite(stagedTables, "t"); err != nil {
+			return err
+		}
+		return errors.New("boom")
+	})
+	if err == nil {
+		t.Fatal("execMutatingStatement() error = nil, want failure")
+	}
+	if db.txn != nil {
+		t.Fatalf("db.txn = %#v, want nil", db.txn)
+	}
+	if len(db.pager.DirtyPages()) != 0 || len(db.pager.DirtyPagesWithOriginals()) != 0 {
+		t.Fatal("dirty/original tracking remained after successful rollback")
+	}
 }

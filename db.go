@@ -17,6 +17,10 @@ var (
 	errDuplicateRootPageID       = errors.New("rovadb: duplicate root page id")
 	errPersistedRowCountMismatch = errors.New("rovadb: persisted row count mismatch")
 	errInvalidStoredTableMeta    = errors.New("rovadb: invalid stored table metadata")
+	ErrTxnAlreadyActive          = errors.New("rovadb: transaction already active")
+	ErrTxnCommitWithoutActive    = errors.New("rovadb: commit requires active transaction")
+	ErrTxnRollbackWithoutActive  = errors.New("rovadb: rollback requires active transaction")
+	ErrTxnInvariantViolation     = errors.New("rovadb: transaction invariant violation")
 )
 
 // DB is the top-level handle for a RovaDB database.
@@ -264,13 +268,17 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 	return &Rows{err: ErrNotImplemented, index: -1}, nil
 }
 
-func (db *DB) beginTxn() {
+func (db *DB) beginTxn() error {
 	if db == nil {
-		return
+		return ErrInvalidArgument
 	}
-	if db.txn == nil || !db.txn.IsActive() {
-		db.txn = txn.NewTxn()
+	// Transaction state transitions are explicit. Terminal txn objects are not
+	// reused; a fresh internal txn is created for each mutating statement.
+	if db.txn != nil && db.txn.IsActive() {
+		return ErrTxnAlreadyActive
 	}
+	db.txn = txn.NewTxn()
+	return nil
 }
 
 func (db *DB) clearTxn() {
@@ -282,15 +290,36 @@ func (db *DB) clearTxn() {
 
 // rollbackTxn restores pre-commit page images in memory. Commit remains the
 // only durability boundary; crash recovery is still future journal work.
-func (db *DB) rollbackTxn() {
-	if db == nil || db.txn == nil {
-		return
+func (db *DB) rollbackTxn() error {
+	if db == nil {
+		return ErrInvalidArgument
+	}
+	if db.txn == nil {
+		return nil
+	}
+	if db.pager == nil {
+		return ErrTxnInvariantViolation
 	}
 	if db.txn.IsActive() {
 		db.pager.RestoreDirtyPages()
-		db.txn.Rollback()
+		if err := db.txn.Rollback(); err != nil {
+			return err
+		}
+		db.pager.ClearDirtyTracking()
+		if len(db.pager.DirtyPages()) != 0 {
+			return ErrTxnInvariantViolation
+		}
+		for _, page := range db.pager.DirtyPagesWithOriginals() {
+			if db.pager.HasOriginal(page) {
+				return ErrTxnInvariantViolation
+			}
+		}
+		return nil
 	}
-	db.pager.ClearDirtyTracking()
+	if db.txn.CanCommit() {
+		return ErrTxnInvariantViolation
+	}
+	return nil
 }
 
 // execMutatingStatement enforces the internal autocommit shape for mutating
@@ -300,18 +329,30 @@ func (db *DB) execMutatingStatement(apply func() error) error {
 		return ErrInvalidArgument
 	}
 
-	db.beginTxn()
+	if err := db.beginTxn(); err != nil {
+		return err
+	}
 	if err := apply(); err != nil {
-		db.rollbackTxn()
+		if rollbackErr := db.rollbackTxn(); rollbackErr != nil {
+			return errors.Join(err, rollbackErr)
+		}
 		db.clearTxn()
 		return err
 	}
 
 	if db.txn != nil {
-		db.txn.MarkDirty()
+		if err := db.txn.MarkDirty(); err != nil {
+			if rollbackErr := db.rollbackTxn(); rollbackErr != nil {
+				return errors.Join(err, rollbackErr)
+			}
+			db.clearTxn()
+			return err
+		}
 	}
 	if err := db.commitTxn(); err != nil {
-		db.rollbackTxn()
+		if rollbackErr := db.rollbackTxn(); rollbackErr != nil {
+			return errors.Join(err, rollbackErr)
+		}
 		db.clearTxn()
 		return err
 	}
@@ -324,11 +365,17 @@ func (db *DB) execMutatingStatement(apply func() error) error {
 // overwrite. Commit is not complete until database pages are synced and the
 // journal is removed. Later recovery will use any surviving journal files.
 func (db *DB) commitTxn() error {
-	if db == nil || db.txn == nil {
+	if db == nil {
+		return ErrInvalidArgument
+	}
+	if db.txn == nil {
 		return nil
 	}
+	if db.pager == nil {
+		return ErrTxnInvariantViolation
+	}
 	if !db.txn.CanCommit() {
-		return nil
+		return ErrTxnCommitWithoutActive
 	}
 	if db.txn.IsDirty() {
 		journalPages := db.pager.DirtyPagesWithOriginals()
@@ -360,7 +407,20 @@ func (db *DB) commitTxn() error {
 		}
 	}
 	db.pager.ClearDirtyTracking()
-	db.txn.Commit()
+	if len(db.pager.DirtyPages()) != 0 || len(db.pager.DirtyPagesWithOriginals()) != 0 {
+		return ErrTxnInvariantViolation
+	}
+	if _, err := os.Stat(storage.JournalPath(db.path)); err == nil {
+		return ErrTxnInvariantViolation
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := db.txn.Commit(); err != nil {
+		if errors.Is(err, txn.ErrNoActiveTxn) || errors.Is(err, txn.ErrInvalidCommitState) {
+			return ErrTxnCommitWithoutActive
+		}
+		return err
+	}
 	return nil
 }
 

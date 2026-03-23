@@ -1,5 +1,7 @@
 package txn
 
+import "errors"
+
 // TxnState describes the lifecycle state of an internal transaction.
 type TxnState int
 
@@ -8,6 +10,13 @@ const (
 	TxnStateActive
 	TxnStateCommitted
 	TxnStateRolledBack
+)
+
+var (
+	ErrNoActiveTxn          = errors.New("txn: no active transaction")
+	ErrInvalidCommitState   = errors.New("txn: commit requires active transaction")
+	ErrInvalidRollbackState = errors.New("txn: rollback requires active transaction")
+	ErrDirtyNonActiveTxn    = errors.New("txn: dirty mark requires active transaction")
 )
 
 // Txn is the minimal internal transaction state holder.
@@ -39,25 +48,37 @@ func (t *Txn) IsDirty() bool {
 }
 
 // MarkDirty records that work occurred within the transaction.
-func (t *Txn) MarkDirty() {
+func (t *Txn) MarkDirty() error {
 	if t == nil {
-		return
+		return ErrNoActiveTxn
+	}
+	if t.state != TxnStateActive {
+		return ErrDirtyNonActiveTxn
 	}
 	t.dirty = true
+	return nil
 }
 
 // Commit transitions an active transaction to committed.
-func (t *Txn) Commit() {
-	if t == nil || t.state != TxnStateActive {
-		return
+func (t *Txn) Commit() error {
+	if t == nil {
+		return ErrNoActiveTxn
+	}
+	if t.state != TxnStateActive {
+		return ErrInvalidCommitState
 	}
 	t.state = TxnStateCommitted
+	return nil
 }
 
 // Rollback transitions an active transaction to rolled back.
-func (t *Txn) Rollback() {
-	if t == nil || t.state != TxnStateActive {
-		return
+func (t *Txn) Rollback() error {
+	if t == nil {
+		return ErrNoActiveTxn
+	}
+	if t.state != TxnStateActive {
+		return ErrInvalidRollbackState
 	}
 	t.state = TxnStateRolledBack
+	return nil
 }
