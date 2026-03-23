@@ -4,10 +4,16 @@ import (
 	"sort"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
+	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
-func Select(sel *parser.SelectExpr, tables map[string]*Table) ([][]parser.Value, error) {
-	if sel == nil || sel.TableName == "" {
+func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Value, error) {
+	if plan == nil || plan.Stmt == nil {
+		return nil, errUnsupportedStatement
+	}
+
+	sel := plan.Stmt
+	if sel.TableName == "" {
 		return nil, errUnsupportedStatement
 	}
 
@@ -66,10 +72,12 @@ func Select(sel *parser.SelectExpr, tables map[string]*Table) ([][]parser.Value,
 	return rows, nil
 }
 
-func ProjectedColumnNames(sel *parser.SelectExpr, table *Table) ([]string, error) {
-	if sel == nil || table == nil {
+func ProjectedColumnNames(plan *planner.SelectPlan, table *Table) ([]string, error) {
+	if plan == nil || plan.Stmt == nil || table == nil {
 		return nil, errUnsupportedStatement
 	}
+
+	sel := plan.Stmt
 	if sel.IsCountStar {
 		return []string{"count"}, nil
 	}

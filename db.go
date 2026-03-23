@@ -9,6 +9,7 @@ import (
 
 	"github.com/Khorlane/RovaDB/internal/executor"
 	"github.com/Khorlane/RovaDB/internal/parser"
+	"github.com/Khorlane/RovaDB/internal/planner"
 	"github.com/Khorlane/RovaDB/internal/storage"
 	"github.com/Khorlane/RovaDB/internal/txn"
 )
@@ -250,11 +251,15 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 	sel, ok := parser.ParseSelectExpr(sql)
 	if ok {
 		if sel.TableName != "" {
-			rows, err := executor.Select(sel, db.tables)
+			plan, err := planner.PlanSelect(sel)
 			if err != nil {
 				return &Rows{err: err, index: -1}, nil
 			}
-			columns, err := executor.ProjectedColumnNames(sel, db.tables[sel.TableName])
+			rows, err := executor.Select(plan, db.tables)
+			if err != nil {
+				return &Rows{err: err, index: -1}, nil
+			}
+			columns, err := executor.ProjectedColumnNames(plan, db.tables[sel.TableName])
 			if err != nil {
 				return &Rows{err: err, index: -1}, nil
 			}

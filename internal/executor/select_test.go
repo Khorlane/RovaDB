@@ -4,12 +4,23 @@ import (
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
+	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
 func where(condition parser.Condition, rest ...parser.ConditionChainItem) *parser.WhereClause {
 	items := []parser.ConditionChainItem{{Condition: condition}}
 	items = append(items, rest...)
 	return &parser.WhereClause{Items: items}
+}
+
+func planSelect(t *testing.T, stmt *parser.SelectExpr) *planner.SelectPlan {
+	t.Helper()
+
+	plan, err := planner.PlanSelect(stmt)
+	if err != nil {
+		t.Fatalf("PlanSelect() error = %v", err)
+	}
+	return plan
 }
 
 func typedCols() []parser.ColumnDef {
@@ -28,7 +39,7 @@ func TestSelectAllColumns(t *testing.T) {
 		},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users"}, tables)
+	rows, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users"}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -42,7 +53,7 @@ func TestSelectSubsetColumns(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("steve")}}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", Columns: []string{"name"}}, tables)
+	rows, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", Columns: []string{"name"}}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -56,7 +67,7 @@ func TestSelectEmptyTable(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols()},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users"}, tables)
+	rows, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users"}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -70,7 +81,7 @@ func TestSelectRequestedOrder(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("steve")}}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", Columns: []string{"name", "id"}}, tables)
+	rows, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", Columns: []string{"name", "id"}}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -84,7 +95,7 @@ func TestSelectInvalidColumn(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols()},
 	}
 
-	_, err := Select(&parser.SelectExpr{TableName: "users", Columns: []string{"email"}}, tables)
+	_, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", Columns: []string{"email"}}), tables)
 	if err != errColumnDoesNotExist {
 		t.Fatalf("Select() error = %v, want %v", err, errColumnDoesNotExist)
 	}
@@ -95,7 +106,7 @@ func TestSelectWithIntWhere(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("steve")}, {parser.Int64Value(2), parser.StringValue("bob")}}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", Where: where(parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(1)})}, tables)
+	rows, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", Where: where(parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(1)})}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -109,7 +120,7 @@ func TestSelectWithStringWhere(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("steve")}, {parser.Int64Value(2), parser.StringValue("bob")}}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", Columns: []string{"name"}, Where: where(parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("bob")})}, tables)
+	rows, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", Columns: []string{"name"}, Where: where(parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("bob")})}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -123,7 +134,7 @@ func TestSelectWithUnknownWhereColumn(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols()},
 	}
 
-	_, err := Select(&parser.SelectExpr{TableName: "users", Where: where(parser.Condition{Left: "email", Operator: "=", Right: parser.StringValue("bob")})}, tables)
+	_, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", Where: where(parser.Condition{Left: "email", Operator: "=", Right: parser.StringValue("bob")})}), tables)
 	if err != errColumnDoesNotExist {
 		t.Fatalf("Select() error = %v, want %v", err, errColumnDoesNotExist)
 	}
@@ -134,7 +145,7 @@ func TestSelectWithNoMatches(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("steve")}}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", Where: where(parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("bob")})}, tables)
+	rows, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", Where: where(parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("bob")})}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -167,7 +178,7 @@ func TestSelectWithNumericComparisons(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			rows, err := Select(&parser.SelectExpr{TableName: "users", Columns: []string{"id"}, Where: tc.where}, tables)
+			rows, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", Columns: []string{"id"}, Where: tc.where}), tables)
 			if err != nil {
 				t.Fatalf("Select() error = %v", err)
 			}
@@ -191,7 +202,7 @@ func TestSelectWithStringNotEqual(t *testing.T) {
 		}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", Columns: []string{"name"}, Where: where(parser.Condition{Left: "name", Operator: "!=", Right: parser.StringValue("bob")})}, tables)
+	rows, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", Columns: []string{"name"}, Where: where(parser.Condition{Left: "name", Operator: "!=", Right: parser.StringValue("bob")})}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -205,7 +216,7 @@ func TestSelectWhereTypeMismatch(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("alice")}}},
 	}
 
-	_, err := Select(&parser.SelectExpr{TableName: "users", Where: where(parser.Condition{Left: "id", Operator: "=", Right: parser.StringValue("abc")})}, tables)
+	_, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", Where: where(parser.Condition{Left: "id", Operator: "=", Right: parser.StringValue("abc")})}), tables)
 	if err != errTypeMismatch {
 		t.Fatalf("Select() error = %v, want %v", err, errTypeMismatch)
 	}
@@ -221,14 +232,14 @@ func TestSelectWithAndConditions(t *testing.T) {
 		}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
 		TableName: "users",
 		Columns:   []string{"id"},
 		Where: where(
 			parser.Condition{Left: "id", Operator: ">", Right: parser.Int64Value(1)},
 			parser.ConditionChainItem{Op: parser.BooleanOpAnd, Condition: parser.Condition{Left: "id", Operator: "<", Right: parser.Int64Value(4)}},
 		),
-	}, tables)
+	}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -246,14 +257,14 @@ func TestSelectWithAndMixedTypes(t *testing.T) {
 		}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
 		TableName: "users",
 		Columns:   []string{"name"},
 		Where: where(
 			parser.Condition{Left: "id", Operator: ">", Right: parser.Int64Value(1)},
 			parser.ConditionChainItem{Op: parser.BooleanOpAnd, Condition: parser.Condition{Left: "name", Operator: "!=", Right: parser.StringValue("bob")}},
 		),
-	}, tables)
+	}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -271,14 +282,14 @@ func TestSelectWithOrConditions(t *testing.T) {
 		}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
 		TableName: "users",
 		Columns:   []string{"id"},
 		Where: where(
 			parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(1)},
 			parser.ConditionChainItem{Op: parser.BooleanOpOr, Condition: parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(3)}},
 		),
-	}, tables)
+	}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -295,14 +306,14 @@ func TestSelectWithOrNoMatches(t *testing.T) {
 		}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
 		TableName: "users",
 		Columns:   []string{"id"},
 		Where: where(
 			parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(3)},
 			parser.ConditionChainItem{Op: parser.BooleanOpOr, Condition: parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("cara")}},
 		),
-	}, tables)
+	}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -321,7 +332,7 @@ func TestSelectWhereLeftToRightWithoutPrecedence(t *testing.T) {
 		}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
 		TableName: "users",
 		Columns:   []string{"name"},
 		Where: where(
@@ -329,7 +340,7 @@ func TestSelectWhereLeftToRightWithoutPrecedence(t *testing.T) {
 			parser.ConditionChainItem{Op: parser.BooleanOpOr, Condition: parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(2)}},
 			parser.ConditionChainItem{Op: parser.BooleanOpAnd, Condition: parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("bob")}},
 		),
-	}, tables)
+	}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -347,11 +358,11 @@ func TestSelectOrderByIntAsc(t *testing.T) {
 		}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
 		TableName: "users",
 		Columns:   []string{"id"},
 		OrderBy:   &parser.OrderByClause{Column: "id"},
-	}, tables)
+	}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -369,11 +380,11 @@ func TestSelectOrderByIntDesc(t *testing.T) {
 		}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
 		TableName: "users",
 		Columns:   []string{"id"},
 		OrderBy:   &parser.OrderByClause{Column: "id", Desc: true},
-	}, tables)
+	}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -391,11 +402,11 @@ func TestSelectOrderByStringAsc(t *testing.T) {
 		}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
 		TableName: "users",
 		Columns:   []string{"name"},
 		OrderBy:   &parser.OrderByClause{Column: "name"},
-	}, tables)
+	}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -413,11 +424,11 @@ func TestSelectOrderByStringDesc(t *testing.T) {
 		}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
 		TableName: "users",
 		Columns:   []string{"name"},
 		OrderBy:   &parser.OrderByClause{Column: "name", Desc: true},
-	}, tables)
+	}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -435,12 +446,12 @@ func TestSelectOrderByWithWhereAndProjection(t *testing.T) {
 		}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
 		TableName: "users",
 		Columns:   []string{"name"},
 		Where:     where(parser.Condition{Left: "id", Operator: ">", Right: parser.Int64Value(1)}),
 		OrderBy:   &parser.OrderByClause{Column: "id", Desc: true},
-	}, tables)
+	}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -454,10 +465,10 @@ func TestSelectOrderByUnknownColumn(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("alice")}}},
 	}
 
-	_, err := Select(&parser.SelectExpr{
+	_, err := Select(planSelect(t, &parser.SelectExpr{
 		TableName: "users",
 		OrderBy:   &parser.OrderByClause{Column: "age"},
-	}, tables)
+	}), tables)
 	if err != errColumnDoesNotExist {
 		t.Fatalf("Select() error = %v, want %v", err, errColumnDoesNotExist)
 	}
@@ -468,7 +479,7 @@ func TestSelectCountStarEmptyTable(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols()},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", IsCountStar: true}, tables)
+	rows, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", IsCountStar: true}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -486,7 +497,7 @@ func TestSelectCountStarPopulatedTable(t *testing.T) {
 		}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", IsCountStar: true}, tables)
+	rows, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", IsCountStar: true}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -504,11 +515,11 @@ func TestSelectCountStarWithWhere(t *testing.T) {
 		}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
 		TableName:   "users",
 		IsCountStar: true,
 		Where:       where(parser.Condition{Left: "id", Operator: ">", Right: parser.Int64Value(1)}),
-	}, tables)
+	}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -522,18 +533,18 @@ func TestSelectCountStarOrderByUnsupported(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("alice")}}},
 	}
 
-	_, err := Select(&parser.SelectExpr{
+	_, err := Select(planSelect(t, &parser.SelectExpr{
 		TableName:   "users",
 		IsCountStar: true,
 		OrderBy:     &parser.OrderByClause{Column: "id"},
-	}, tables)
+	}), tables)
 	if err != errCountOrderByUnsupported {
 		t.Fatalf("Select() error = %v, want %v", err, errCountOrderByUnsupported)
 	}
 }
 
 func TestSelectMissingTable(t *testing.T) {
-	_, err := Select(&parser.SelectExpr{TableName: "users"}, map[string]*Table{})
+	_, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users"}), map[string]*Table{})
 	if err != errTableDoesNotExist {
 		t.Fatalf("Select() error = %v, want %v", err, errTableDoesNotExist)
 	}
@@ -542,7 +553,7 @@ func TestSelectMissingTable(t *testing.T) {
 func TestProjectedColumnNamesAllColumns(t *testing.T) {
 	table := &Table{Name: "users", Columns: typedCols()}
 
-	got, err := ProjectedColumnNames(&parser.SelectExpr{TableName: "users"}, table)
+	got, err := ProjectedColumnNames(planSelect(t, &parser.SelectExpr{TableName: "users"}), table)
 	if err != nil {
 		t.Fatalf("ProjectedColumnNames() error = %v", err)
 	}
@@ -554,7 +565,7 @@ func TestProjectedColumnNamesAllColumns(t *testing.T) {
 func TestProjectedColumnNamesInvalidColumn(t *testing.T) {
 	table := &Table{Name: "users", Columns: typedCols()}
 
-	_, err := ProjectedColumnNames(&parser.SelectExpr{TableName: "users", Columns: []string{"email"}}, table)
+	_, err := ProjectedColumnNames(planSelect(t, &parser.SelectExpr{TableName: "users", Columns: []string{"email"}}), table)
 	if err != errColumnDoesNotExist {
 		t.Fatalf("ProjectedColumnNames() error = %v, want %v", err, errColumnDoesNotExist)
 	}
@@ -563,7 +574,7 @@ func TestProjectedColumnNamesInvalidColumn(t *testing.T) {
 func TestProjectedColumnNamesCountStar(t *testing.T) {
 	table := &Table{Name: "users", Columns: typedCols()}
 
-	got, err := ProjectedColumnNames(&parser.SelectExpr{TableName: "users", IsCountStar: true}, table)
+	got, err := ProjectedColumnNames(planSelect(t, &parser.SelectExpr{TableName: "users", IsCountStar: true}), table)
 	if err != nil {
 		t.Fatalf("ProjectedColumnNames() error = %v", err)
 	}
