@@ -121,7 +121,9 @@ func SaveCatalog(pager *Pager, cat *CatalogData) error {
 	}
 	clear(page.data)
 	copy(page.data, buf)
-	page.MarkDirty()
+	// Catalog mutation requires explicit dirty marking; later flush eligibility
+	// is driven by dirty tracking rather than implicit full flushes.
+	pager.MarkDirty(page)
 	return nil
 }
 

@@ -43,6 +43,14 @@ func (p *Page) MarkDirty() {
 	p.dirty = true
 }
 
+// ClearDirty marks the page as clean.
+func (p *Page) ClearDirty() {
+	if p == nil {
+		return
+	}
+	p.dirty = false
+}
+
 // Dirty reports whether the page has been modified.
 func (p *Page) Dirty() bool {
 	if p == nil {

@@ -389,17 +389,19 @@ func (db *DB) flushStagedState(catalogData []byte, pages []stagedPage) error {
 
 		clear(page.Data())
 		copy(page.Data(), staged.data)
-		page.MarkDirty()
+		db.pager.MarkDirty(page)
 	}
 
 	clear(catalogPage.Data())
 	copy(catalogPage.Data(), catalogData)
-	catalogPage.MarkDirty()
+	// Page mutation requires explicit dirty marking; commit-oriented flush
+	// eligibility is driven by dirty tracking.
+	db.pager.MarkDirty(catalogPage)
 
-	if err := db.pager.Flush(); err != nil {
+	if err := db.pager.FlushDirty(); err != nil {
 		clear(catalogPage.Data())
 		copy(catalogPage.Data(), originalCatalogData)
-		catalogPage.MarkDirty()
+		db.pager.MarkDirty(catalogPage)
 
 		for _, restore := range restores {
 			if restore.allocated {
@@ -408,7 +410,7 @@ func (db *DB) flushStagedState(catalogData []byte, pages []stagedPage) error {
 			}
 			clear(restore.page.Data())
 			copy(restore.page.Data(), restore.original)
-			restore.page.MarkDirty()
+			db.pager.MarkDirty(restore.page)
 		}
 		return err
 	}

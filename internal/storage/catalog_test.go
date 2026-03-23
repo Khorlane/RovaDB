@@ -90,3 +90,58 @@ func TestSaveCatalogTooLarge(t *testing.T) {
 		t.Fatalf("SaveCatalog() error = %v, want %v", err, errCatalogTooLarge)
 	}
 }
+
+func TestMutationPathsMarkPagesDirty(t *testing.T) {
+	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "dirty.db"))
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+
+	cat := &CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				RootPageID: 1,
+				RowCount:   0,
+				Columns: []CatalogColumn{
+					{Name: "id", Type: CatalogColumnTypeInt},
+				},
+			},
+		},
+	}
+	if err := SaveCatalog(pager, cat); err != nil {
+		t.Fatalf("SaveCatalog() error = %v", err)
+	}
+	catalogPage, err := pager.Get(0)
+	if err != nil {
+		t.Fatalf("pager.Get(0) error = %v", err)
+	}
+	if !pager.IsDirty(catalogPage) {
+		t.Fatal("catalog page is clean after SaveCatalog(), want dirty")
+	}
+	if err := pager.FlushDirty(); err != nil {
+		t.Fatalf("pager.FlushDirty() error = %v", err)
+	}
+	if pager.IsDirty(catalogPage) {
+		t.Fatal("catalog page still dirty after FlushDirty()")
+	}
+
+	tablePage := pager.NewPage()
+	pager.ClearDirty(tablePage)
+	InitTableRootPage(tablePage)
+	if !pager.IsDirty(tablePage) {
+		t.Fatal("table page is clean after InitTableRootPage(), want dirty")
+	}
+	if err := pager.FlushDirty(); err != nil {
+		t.Fatalf("pager.FlushDirty() error = %v", err)
+	}
+	if pager.IsDirty(tablePage) {
+		t.Fatal("table page still dirty after FlushDirty()")
+	}
+}

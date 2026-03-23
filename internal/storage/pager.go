@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"sort"
 )
 
 var errInvalidPageFileSize = errors.New("storage: invalid page-aligned file size")
@@ -67,8 +68,8 @@ func (p *Pager) NewPage() *Page {
 	p.nextPageID++
 
 	page := NewPage(id)
-	page.MarkDirty()
 	p.pages[id] = page
+	p.MarkDirty(page)
 	return page
 }
 
@@ -92,19 +93,69 @@ func (p *Pager) DiscardNewPage(id PageID) {
 	p.nextPageID = id
 }
 
-// Flush writes all dirty pages to disk.
-func (p *Pager) Flush() error {
-	for _, page := range p.pages {
-		if !page.dirty {
+// MarkDirty marks a loaded page dirty. Page mutation requires explicit dirty
+// registration so later commit-oriented flushing can be driven by dirty state.
+func (p *Pager) MarkDirty(page *Page) {
+	if p == nil || page == nil {
+		return
+	}
+	page.MarkDirty()
+}
+
+// IsDirty reports whether a loaded page is currently dirty.
+func (p *Pager) IsDirty(page *Page) bool {
+	if p == nil || page == nil {
+		return false
+	}
+	return page.Dirty()
+}
+
+// ClearDirty marks a loaded page clean.
+func (p *Pager) ClearDirty(page *Page) {
+	if p == nil || page == nil {
+		return
+	}
+	page.ClearDirty()
+}
+
+// DirtyPages returns loaded dirty pages in ascending page-number order.
+func (p *Pager) DirtyPages() []*Page {
+	if p == nil {
+		return nil
+	}
+
+	ids := make([]int, 0, len(p.pages))
+	for id, page := range p.pages {
+		if page == nil || !page.Dirty() {
 			continue
 		}
+		ids = append(ids, int(id))
+	}
+	sort.Ints(ids)
+
+	pages := make([]*Page, 0, len(ids))
+	for _, id := range ids {
+		pages = append(pages, p.pages[PageID(id)])
+	}
+	return pages
+}
+
+// FlushDirty writes dirty pages to disk and clears their dirty flags on
+// successful write. Flush eligibility is driven entirely by dirty tracking.
+func (p *Pager) FlushDirty() error {
+	for _, page := range p.DirtyPages() {
 		if _, err := p.file.WriteAt(page.data, pageOffset(page.id)); err != nil {
 			return err
 		}
-		page.dirty = false
+		p.ClearDirty(page)
 	}
 
 	return p.file.Sync()
+}
+
+// Flush writes all currently dirty pages to disk.
+func (p *Pager) Flush() error {
+	return p.FlushDirty()
 }
 
 // Close flushes dirty pages.
@@ -112,5 +163,5 @@ func (p *Pager) Close() error {
 	if p == nil || p.file == nil {
 		return nil
 	}
-	return p.Flush()
+	return p.FlushDirty()
 }

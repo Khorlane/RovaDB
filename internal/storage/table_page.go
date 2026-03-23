@@ -20,6 +20,8 @@ func InitTableRootPage(page *Page) {
 
 	binary.LittleEndian.PutUint32(page.data[0:4], 0)
 	binary.LittleEndian.PutUint32(page.data[4:8], tablePageHeaderSize)
+	// Table page mutation sites must explicitly dirty the page so commit-oriented
+	// flush decisions can be driven by dirty tracking.
 	page.MarkDirty()
 }
 
@@ -45,6 +47,8 @@ func AppendRowToTablePage(page *Page, row []byte) error {
 
 	binary.LittleEndian.PutUint32(page.data[0:4], TablePageRowCount(page)+1)
 	binary.LittleEndian.PutUint32(page.data[4:8], freeOffset+uint32(required))
+	// Table page mutation sites must explicitly dirty the page so commit-oriented
+	// flush decisions can be driven by dirty tracking.
 	page.MarkDirty()
 	return nil
 }
@@ -123,6 +127,8 @@ func RewriteTablePage(page *Page, encodedRows [][]byte) error {
 	}
 	clear(page.data)
 	copy(page.data, data)
+	// Table page mutation sites must explicitly dirty the page so commit-oriented
+	// flush decisions can be driven by dirty tracking.
 	page.MarkDirty()
 	return nil
 }
