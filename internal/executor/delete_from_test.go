@@ -25,7 +25,7 @@ func TestExecuteDeleteIntWhere(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("steve")}, {parser.Int64Value(2), parser.StringValue("bob")}, {parser.Int64Value(1), parser.StringValue("sam")}}},
 	}
 
-	affected, err := executeDelete(&parser.DeleteStmt{TableName: "users", HasWhere: true, WhereColumn: "id", WhereValue: parser.Int64Value(1)}, tables)
+	affected, err := executeDelete(&parser.DeleteStmt{TableName: "users", Where: &parser.WhereClause{Left: "id", Operator: "=", Right: parser.Int64Value(1)}}, tables)
 	if err != nil {
 		t.Fatalf("executeDelete() error = %v", err)
 	}
@@ -39,7 +39,7 @@ func TestExecuteDeleteStringWhere(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("steve")}, {parser.Int64Value(2), parser.StringValue("bob")}}},
 	}
 
-	affected, err := executeDelete(&parser.DeleteStmt{TableName: "users", HasWhere: true, WhereColumn: "name", WhereValue: parser.StringValue("bob")}, tables)
+	affected, err := executeDelete(&parser.DeleteStmt{TableName: "users", Where: &parser.WhereClause{Left: "name", Operator: "=", Right: parser.StringValue("bob")}}, tables)
 	if err != nil {
 		t.Fatalf("executeDelete() error = %v", err)
 	}
@@ -53,7 +53,7 @@ func TestExecuteDeleteUnknownWhereColumn(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols()},
 	}
 
-	_, err := executeDelete(&parser.DeleteStmt{TableName: "users", HasWhere: true, WhereColumn: "email", WhereValue: parser.StringValue("bob")}, tables)
+	_, err := executeDelete(&parser.DeleteStmt{TableName: "users", Where: &parser.WhereClause{Left: "email", Operator: "=", Right: parser.StringValue("bob")}}, tables)
 	if err != errColumnDoesNotExist {
 		t.Fatalf("executeDelete() error = %v, want %v", err, errColumnDoesNotExist)
 	}
@@ -64,7 +64,7 @@ func TestExecuteDeleteNoMatchesLeavesRows(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("steve")}, {parser.Int64Value(2), parser.StringValue("bob")}}},
 	}
 
-	affected, err := executeDelete(&parser.DeleteStmt{TableName: "users", HasWhere: true, WhereColumn: "name", WhereValue: parser.StringValue("sam")}, tables)
+	affected, err := executeDelete(&parser.DeleteStmt{TableName: "users", Where: &parser.WhereClause{Left: "name", Operator: "=", Right: parser.StringValue("sam")}}, tables)
 	if err != nil {
 		t.Fatalf("executeDelete() error = %v", err)
 	}

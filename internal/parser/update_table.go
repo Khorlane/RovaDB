@@ -15,9 +15,7 @@ type UpdateAssignment struct {
 type UpdateStmt struct {
 	TableName   string
 	Assignments []UpdateAssignment
-	WhereColumn string
-	WhereValue  Value
-	HasWhere    bool
+	Where       *WhereClause
 }
 
 func parseUpdate(input string) (*UpdateStmt, error) {
@@ -40,21 +38,17 @@ func parseUpdate(input string) (*UpdateStmt, error) {
 		return nil, errors.New("parser: invalid update")
 	}
 
-	whereColumn := ""
-	whereValue := Value{}
-	hasWhere := false
+	var where *WhereClause
 	upperSet := strings.ToUpper(setPart)
 	assignmentsPart := setPart
 	if whereIndex := strings.Index(upperSet, " WHERE "); whereIndex >= 0 {
 		assignmentsPart = strings.TrimSpace(setPart[:whereIndex])
 		whereClause := strings.TrimSpace(setPart[whereIndex+len(" WHERE "):])
-		column, value, ok := parseWhereClause(whereClause)
+		parsedWhere, ok := parseWhereClause(whereClause)
 		if !ok {
 			return nil, errors.New("parser: invalid update")
 		}
-		whereColumn = column
-		whereValue = value
-		hasWhere = true
+		where = parsedWhere
 	}
 
 	assignments, ok := parseAssignments(assignmentsPart)
@@ -65,9 +59,7 @@ func parseUpdate(input string) (*UpdateStmt, error) {
 	return &UpdateStmt{
 		TableName:   tableName,
 		Assignments: assignments,
-		WhereColumn: whereColumn,
-		WhereValue:  whereValue,
-		HasWhere:    hasWhere,
+		Where:       where,
 	}, nil
 }
 

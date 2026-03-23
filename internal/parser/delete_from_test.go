@@ -4,29 +4,23 @@ import "testing"
 
 func TestParseDelete(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
-		tableName   string
-		hasWhere    bool
-		whereColumn string
-		whereValue  Value
+		name      string
+		input     string
+		tableName string
+		where     *WhereClause
 	}{
 		{name: "delete all", input: "DELETE FROM users", tableName: "users"},
 		{
-			name:        "delete where int",
-			input:       "DELETE FROM users WHERE id = 1",
-			tableName:   "users",
-			hasWhere:    true,
-			whereColumn: "id",
-			whereValue:  Int64Value(1),
+			name:      "delete where int",
+			input:     "DELETE FROM users WHERE id = 1",
+			tableName: "users",
+			where:     &WhereClause{Left: "id", Operator: "=", Right: Int64Value(1)},
 		},
 		{
-			name:        "delete where string",
-			input:       "DELETE FROM users WHERE name = 'bob'",
-			tableName:   "users",
-			hasWhere:    true,
-			whereColumn: "name",
-			whereValue:  StringValue("bob"),
+			name:      "delete where string",
+			input:     "DELETE FROM users WHERE name = 'bob'",
+			tableName: "users",
+			where:     &WhereClause{Left: "name", Operator: "=", Right: StringValue("bob")},
 		},
 	}
 
@@ -36,8 +30,11 @@ func TestParseDelete(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseDelete() error = %v", err)
 			}
-			if got.TableName != tc.tableName || got.HasWhere != tc.hasWhere || got.WhereColumn != tc.whereColumn || got.WhereValue != tc.whereValue {
-				t.Fatalf("parseDelete() = %#v, want table=%q hasWhere=%v whereColumn=%q whereValue=%#v", got, tc.tableName, tc.hasWhere, tc.whereColumn, tc.whereValue)
+			if got.TableName != tc.tableName {
+				t.Fatalf("parseDelete().TableName = %q, want %q", got.TableName, tc.tableName)
+			}
+			if (got.Where == nil) != (tc.where == nil) || (got.Where != nil && *got.Where != *tc.where) {
+				t.Fatalf("parseDelete().Where = %#v, want %#v", got.Where, tc.where)
 			}
 		})
 	}

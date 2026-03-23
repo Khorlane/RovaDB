@@ -89,7 +89,7 @@ func TestSelectWithIntWhere(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("steve")}, {parser.Int64Value(2), parser.StringValue("bob")}}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", HasWhere: true, WhereColumn: "id", WhereValue: parser.Int64Value(1)}, tables)
+	rows, err := Select(&parser.SelectExpr{TableName: "users", Where: &parser.WhereClause{Left: "id", Operator: "=", Right: parser.Int64Value(1)}}, tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -103,7 +103,7 @@ func TestSelectWithStringWhere(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("steve")}, {parser.Int64Value(2), parser.StringValue("bob")}}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", Columns: []string{"name"}, HasWhere: true, WhereColumn: "name", WhereValue: parser.StringValue("bob")}, tables)
+	rows, err := Select(&parser.SelectExpr{TableName: "users", Columns: []string{"name"}, Where: &parser.WhereClause{Left: "name", Operator: "=", Right: parser.StringValue("bob")}}, tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -117,7 +117,7 @@ func TestSelectWithUnknownWhereColumn(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols()},
 	}
 
-	_, err := Select(&parser.SelectExpr{TableName: "users", HasWhere: true, WhereColumn: "email", WhereValue: parser.StringValue("bob")}, tables)
+	_, err := Select(&parser.SelectExpr{TableName: "users", Where: &parser.WhereClause{Left: "email", Operator: "=", Right: parser.StringValue("bob")}}, tables)
 	if err != errColumnDoesNotExist {
 		t.Fatalf("Select() error = %v, want %v", err, errColumnDoesNotExist)
 	}
@@ -128,12 +128,80 @@ func TestSelectWithNoMatches(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("steve")}}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", HasWhere: true, WhereColumn: "name", WhereValue: parser.StringValue("bob")}, tables)
+	rows, err := Select(&parser.SelectExpr{TableName: "users", Where: &parser.WhereClause{Left: "name", Operator: "=", Right: parser.StringValue("bob")}}, tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
 	if len(rows) != 0 {
 		t.Fatalf("Select() rows = %#v, want empty", rows)
+	}
+}
+
+func TestSelectWithNumericComparisons(t *testing.T) {
+	tests := []struct {
+		name     string
+		where    *parser.WhereClause
+		wantRows []int64
+	}{
+		{name: "greater than", where: &parser.WhereClause{Left: "id", Operator: ">", Right: parser.Int64Value(2)}, wantRows: []int64{3, 4}},
+		{name: "greater equal", where: &parser.WhereClause{Left: "id", Operator: ">=", Right: parser.Int64Value(2)}, wantRows: []int64{2, 3, 4}},
+		{name: "less than", where: &parser.WhereClause{Left: "id", Operator: "<", Right: parser.Int64Value(3)}, wantRows: []int64{1, 2}},
+		{name: "less equal", where: &parser.WhereClause{Left: "id", Operator: "<=", Right: parser.Int64Value(3)}, wantRows: []int64{1, 2, 3}},
+		{name: "not equal", where: &parser.WhereClause{Left: "id", Operator: "!=", Right: parser.Int64Value(3)}, wantRows: []int64{1, 2, 4}},
+	}
+
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.Int64Value(3), parser.StringValue("cara")},
+			{parser.Int64Value(4), parser.StringValue("dina")},
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := Select(&parser.SelectExpr{TableName: "users", Columns: []string{"id"}, Where: tc.where}, tables)
+			if err != nil {
+				t.Fatalf("Select() error = %v", err)
+			}
+			if len(rows) != len(tc.wantRows) {
+				t.Fatalf("len(rows) = %d, want %d", len(rows), len(tc.wantRows))
+			}
+			for i, want := range tc.wantRows {
+				if rows[i][0] != parser.Int64Value(want) {
+					t.Fatalf("rows[%d][0] = %#v, want %#v", i, rows[i][0], parser.Int64Value(want))
+				}
+			}
+		})
+	}
+}
+
+func TestSelectWithStringNotEqual(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+		}},
+	}
+
+	rows, err := Select(&parser.SelectExpr{TableName: "users", Columns: []string{"name"}, Where: &parser.WhereClause{Left: "name", Operator: "!=", Right: parser.StringValue("bob")}}, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 1 || rows[0][0] != parser.StringValue("alice") {
+		t.Fatalf("Select() rows = %#v, want [[alice]]", rows)
+	}
+}
+
+func TestSelectWhereTypeMismatch(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("alice")}}},
+	}
+
+	_, err := Select(&parser.SelectExpr{TableName: "users", Where: &parser.WhereClause{Left: "id", Operator: "=", Right: parser.StringValue("abc")}}, tables)
+	if err != errTypeMismatch {
+		t.Fatalf("Select() error = %v, want %v", err, errTypeMismatch)
 	}
 }
 

@@ -19,8 +19,8 @@ func Select(sel *parser.SelectExpr, tables map[string]*Table) ([][]parser.Value,
 		return nil, err
 	}
 	whereIndex := -1
-	if sel.HasWhere {
-		whereIndex, err = resolveColumnIndex(sel.WhereColumn, table)
+	if sel.Where != nil {
+		whereIndex, err = resolveColumnIndex(sel.Where.Left, table)
 		if err != nil {
 			return nil, err
 		}
@@ -28,8 +28,14 @@ func Select(sel *parser.SelectExpr, tables map[string]*Table) ([][]parser.Value,
 
 	rows := make([][]parser.Value, 0, len(table.Rows))
 	for _, row := range table.Rows {
-		if whereIndex >= 0 && !valuesEqual(row[whereIndex], sel.WhereValue) {
-			continue
+		if whereIndex >= 0 {
+			match, err := compareValues(sel.Where.Operator, row[whereIndex], sel.Where.Right)
+			if err != nil {
+				return nil, err
+			}
+			if !match {
+				continue
+			}
 		}
 		out := make([]parser.Value, 0, len(indexes))
 		for _, idx := range indexes {
@@ -92,19 +98,4 @@ func resolveColumnIndex(name string, table *Table) (int, error) {
 	}
 
 	return -1, errColumnDoesNotExist
-}
-
-func valuesEqual(left, right parser.Value) bool {
-	if left.Kind != right.Kind {
-		return false
-	}
-
-	switch left.Kind {
-	case parser.ValueKindInt64:
-		return left.I64 == right.I64
-	case parser.ValueKindString:
-		return left.Str == right.Str
-	default:
-		return false
-	}
 }

@@ -27,9 +27,9 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 	}
 
 	whereIndex := -1
-	if stmt.HasWhere {
+	if stmt.Where != nil {
 		var err error
-		whereIndex, err = resolveColumnIndex(stmt.WhereColumn, table)
+		whereIndex, err = resolveColumnIndex(stmt.Where.Left, table)
 		if err != nil {
 			return 0, err
 		}
@@ -37,8 +37,14 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 
 	var affected int64
 	for _, row := range table.Rows {
-		if whereIndex >= 0 && !valuesEqual(row[whereIndex], stmt.WhereValue) {
-			continue
+		if whereIndex >= 0 {
+			match, err := compareValues(stmt.Where.Operator, row[whereIndex], stmt.Where.Right)
+			if err != nil {
+				return 0, err
+			}
+			if !match {
+				continue
+			}
 		}
 		for _, assignment := range assignments {
 			row[assignment.index] = assignment.value

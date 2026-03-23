@@ -307,6 +307,56 @@ func TestQuerySelectWhereIntEquality(t *testing.T) {
 	}
 }
 
+func TestQuerySelectWhereNumericComparisons(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'cara')",
+	} {
+		if _, err := db.Exec(context.Background(), sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT id FROM users WHERE id >= 2")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() first = false, want true")
+	}
+	var id int64
+	if err := rows.Scan(&id); err != nil {
+		t.Fatalf("Scan() first error = %v", err)
+	}
+	if id != 2 {
+		t.Fatalf("first id = %d, want 2", id)
+	}
+	if !rows.Next() {
+		t.Fatal("Next() second = false, want true")
+	}
+	if err := rows.Scan(&id); err != nil {
+		t.Fatalf("Scan() second error = %v", err)
+	}
+	if id != 3 {
+		t.Fatalf("second id = %d, want 3", id)
+	}
+	if rows.Next() {
+		t.Fatal("Next() third = true, want false")
+	}
+}
+
 func TestQuerySelectWhereStringEquality(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
@@ -342,6 +392,72 @@ func TestQuerySelectWhereStringEquality(t *testing.T) {
 	}
 	if rows.Next() {
 		t.Fatal("Next() = true, want false")
+	}
+}
+
+func TestQuerySelectWhereStringNotEqual(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert 1) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (2, 'bob')"); err != nil {
+		t.Fatalf("Exec(insert 2) error = %v", err)
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT name FROM users WHERE name != 'bob'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+	var name string
+	if err := rows.Scan(&name); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if name != "alice" {
+		t.Fatalf("Scan() got %q, want %q", name, "alice")
+	}
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+}
+
+func TestQuerySelectWhereTypeMismatch(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT * FROM users WHERE id = 'abc'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() == nil {
+		t.Fatal("Err() = nil, want type mismatch error")
 	}
 }
 

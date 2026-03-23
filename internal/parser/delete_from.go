@@ -7,10 +7,8 @@ import (
 
 // DeleteStmt is the tiny parsed form for DELETE FROM ... [WHERE ...].
 type DeleteStmt struct {
-	TableName   string
-	WhereColumn string
-	WhereValue  Value
-	HasWhere    bool
+	TableName string
+	Where     *WhereClause
 }
 
 func parseDelete(input string) (*DeleteStmt, error) {
@@ -28,19 +26,15 @@ func parseDelete(input string) (*DeleteStmt, error) {
 
 	upperRest := strings.ToUpper(rest)
 	tableName := rest
-	whereColumn := ""
-	whereValue := Value{}
-	hasWhere := false
+	var where *WhereClause
 	if whereIndex := strings.Index(upperRest, " WHERE "); whereIndex >= 0 {
 		tableName = strings.TrimSpace(rest[:whereIndex])
 		whereClause := strings.TrimSpace(rest[whereIndex+len(" WHERE "):])
-		column, value, ok := parseWhereClause(whereClause)
+		parsedWhere, ok := parseWhereClause(whereClause)
 		if !ok {
 			return nil, errors.New("parser: invalid delete")
 		}
-		whereColumn = column
-		whereValue = value
-		hasWhere = true
+		where = parsedWhere
 	}
 
 	if tableName == "" || strings.ContainsAny(tableName, " \t\r\n,") {
@@ -48,9 +42,7 @@ func parseDelete(input string) (*DeleteStmt, error) {
 	}
 
 	return &DeleteStmt{
-		TableName:   tableName,
-		WhereColumn: whereColumn,
-		WhereValue:  whereValue,
-		HasWhere:    hasWhere,
+		TableName: tableName,
+		Where:     where,
 	}, nil
 }

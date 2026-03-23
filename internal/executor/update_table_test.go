@@ -49,9 +49,7 @@ func TestExecuteUpdateIntWhere(t *testing.T) {
 		Assignments: []parser.UpdateAssignment{
 			{Column: "name", Value: parser.StringValue("bob")},
 		},
-		HasWhere:    true,
-		WhereColumn: "id",
-		WhereValue:  parser.Int64Value(1),
+		Where: &parser.WhereClause{Left: "id", Operator: "=", Right: parser.Int64Value(1)},
 	}, tables)
 	if err != nil {
 		t.Fatalf("executeUpdate() error = %v", err)
@@ -78,9 +76,7 @@ func TestExecuteUpdateStringWhere(t *testing.T) {
 		Assignments: []parser.UpdateAssignment{
 			{Column: "id", Value: parser.Int64Value(3)},
 		},
-		HasWhere:    true,
-		WhereColumn: "name",
-		WhereValue:  parser.StringValue("alice"),
+		Where: &parser.WhereClause{Left: "name", Operator: "=", Right: parser.StringValue("alice")},
 	}, tables)
 	if err != nil {
 		t.Fatalf("executeUpdate() error = %v", err)
@@ -116,9 +112,7 @@ func TestExecuteUpdateUnknownWhereColumn(t *testing.T) {
 		Assignments: []parser.UpdateAssignment{
 			{Column: "name", Value: parser.StringValue("bob")},
 		},
-		HasWhere:    true,
-		WhereColumn: "email",
-		WhereValue:  parser.StringValue("alice"),
+		Where: &parser.WhereClause{Left: "email", Operator: "=", Right: parser.StringValue("alice")},
 	}, tables)
 	if err != errColumnDoesNotExist {
 		t.Fatalf("executeUpdate() error = %v, want %v", err, errColumnDoesNotExist)
@@ -141,9 +135,7 @@ func TestExecuteUpdateNoMatchesLeavesRows(t *testing.T) {
 		Assignments: []parser.UpdateAssignment{
 			{Column: "name", Value: parser.StringValue("bob")},
 		},
-		HasWhere:    true,
-		WhereColumn: "id",
-		WhereValue:  parser.Int64Value(2),
+		Where: &parser.WhereClause{Left: "id", Operator: "=", Right: parser.Int64Value(2)},
 	}, tables)
 	if err != nil {
 		t.Fatalf("executeUpdate() error = %v", err)
@@ -170,9 +162,7 @@ func TestExecuteUpdateMultipleAssignments(t *testing.T) {
 			{Column: "name", Value: parser.StringValue("bob")},
 			{Column: "id", Value: parser.Int64Value(2)},
 		},
-		HasWhere:    true,
-		WhereColumn: "name",
-		WhereValue:  parser.StringValue("alice"),
+		Where: &parser.WhereClause{Left: "name", Operator: "=", Right: parser.StringValue("alice")},
 	}, tables)
 	if err != nil {
 		t.Fatalf("executeUpdate() error = %v", err)

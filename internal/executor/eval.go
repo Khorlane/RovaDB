@@ -8,6 +8,8 @@ import (
 
 var errInvalidExpression = errors.New("executor: invalid expression")
 
+var errUnsupportedComparisonOp = errors.New("executor: unsupported comparison operator")
+
 // Eval evaluates the tiny Stage 1 expression model into a Value.
 func Eval(expr *parser.Expr) (parser.Value, error) {
 	if expr == nil {
@@ -44,5 +46,50 @@ func Eval(expr *parser.Expr) (parser.Value, error) {
 		}
 	default:
 		return parser.Value{}, errInvalidExpression
+	}
+}
+
+func compareValues(op string, left, right parser.Value) (bool, error) {
+	if left.Kind != right.Kind {
+		return false, errTypeMismatch
+	}
+
+	switch left.Kind {
+	case parser.ValueKindInt64:
+		switch op {
+		case "=":
+			return left.I64 == right.I64, nil
+		case "!=":
+			return left.I64 != right.I64, nil
+		case "<":
+			return left.I64 < right.I64, nil
+		case "<=":
+			return left.I64 <= right.I64, nil
+		case ">":
+			return left.I64 > right.I64, nil
+		case ">=":
+			return left.I64 >= right.I64, nil
+		default:
+			return false, errUnsupportedComparisonOp
+		}
+	case parser.ValueKindString:
+		switch op {
+		case "=":
+			return left.Str == right.Str, nil
+		case "!=":
+			return left.Str != right.Str, nil
+		case "<":
+			return left.Str < right.Str, nil
+		case "<=":
+			return left.Str <= right.Str, nil
+		case ">":
+			return left.Str > right.Str, nil
+		case ">=":
+			return left.Str >= right.Str, nil
+		default:
+			return false, errUnsupportedComparisonOp
+		}
+	default:
+		return false, errTypeMismatch
 	}
 }

@@ -8,9 +8,7 @@ func TestParseUpdate(t *testing.T) {
 		input       string
 		tableName   string
 		assignments []UpdateAssignment
-		hasWhere    bool
-		whereColumn string
-		whereValue  Value
+		where       *WhereClause
 	}{
 		{
 			name:      "update all",
@@ -27,9 +25,7 @@ func TestParseUpdate(t *testing.T) {
 			assignments: []UpdateAssignment{
 				{Column: "name", Value: StringValue("bob")},
 			},
-			hasWhere:    true,
-			whereColumn: "id",
-			whereValue:  Int64Value(1),
+			where: &WhereClause{Left: "id", Operator: "=", Right: Int64Value(1)},
 		},
 		{
 			name:      "update multiple assignments where string",
@@ -39,9 +35,7 @@ func TestParseUpdate(t *testing.T) {
 				{Column: "name", Value: StringValue("bob")},
 				{Column: "id", Value: Int64Value(2)},
 			},
-			hasWhere:    true,
-			whereColumn: "name",
-			whereValue:  StringValue("alice"),
+			where: &WhereClause{Left: "name", Operator: "=", Right: StringValue("alice")},
 		},
 	}
 
@@ -51,8 +45,11 @@ func TestParseUpdate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseUpdate() error = %v", err)
 			}
-			if got.TableName != tc.tableName || got.HasWhere != tc.hasWhere || got.WhereColumn != tc.whereColumn || got.WhereValue != tc.whereValue {
-				t.Fatalf("parseUpdate() = %#v, want table=%q hasWhere=%v whereColumn=%q whereValue=%#v", got, tc.tableName, tc.hasWhere, tc.whereColumn, tc.whereValue)
+			if got.TableName != tc.tableName {
+				t.Fatalf("parseUpdate().TableName = %q, want %q", got.TableName, tc.tableName)
+			}
+			if (got.Where == nil) != (tc.where == nil) || (got.Where != nil && *got.Where != *tc.where) {
+				t.Fatalf("parseUpdate().Where = %#v, want %#v", got.Where, tc.where)
 			}
 			if len(got.Assignments) != len(tc.assignments) {
 				t.Fatalf("parseUpdate().Assignments len = %d, want %d", len(got.Assignments), len(tc.assignments))

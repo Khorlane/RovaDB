@@ -43,3 +43,35 @@ func TestParseSelectExprSelectStarUsesNilColumns(t *testing.T) {
 		t.Fatalf("Columns = %#v, want nil for SELECT *", got.Columns)
 	}
 }
+
+func TestParseSelectExprWhereOperators(t *testing.T) {
+	tests := []struct {
+		name     string
+		sql      string
+		left     string
+		operator string
+		right    Value
+	}{
+		{name: "equals", sql: "SELECT id FROM users WHERE id = 1", left: "id", operator: "=", right: Int64Value(1)},
+		{name: "not equals", sql: "SELECT id FROM users WHERE id != 1", left: "id", operator: "!=", right: Int64Value(1)},
+		{name: "less than", sql: "SELECT id FROM users WHERE id < 10", left: "id", operator: "<", right: Int64Value(10)},
+		{name: "less equal", sql: "SELECT id FROM users WHERE id <= 10", left: "id", operator: "<=", right: Int64Value(10)},
+		{name: "greater than", sql: "SELECT id FROM users WHERE id > 10", left: "id", operator: ">", right: Int64Value(10)},
+		{name: "greater equal", sql: "SELECT id FROM users WHERE id >= 10", left: "id", operator: ">=", right: Int64Value(10)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ParseSelectExpr(tc.sql)
+			if !ok {
+				t.Fatal("ParseSelectExpr() ok = false, want true")
+			}
+			if got == nil || got.Where == nil {
+				t.Fatalf("ParseSelectExpr() = %#v, want WHERE clause", got)
+			}
+			if got.Where.Left != tc.left || got.Where.Operator != tc.operator || got.Where.Right != tc.right {
+				t.Fatalf("Where = %#v, want left=%q op=%q right=%#v", got.Where, tc.left, tc.operator, tc.right)
+			}
+		})
+	}
+}
