@@ -20,7 +20,7 @@ var (
 	errJournalSizeMismatch = errors.New("storage: journal page size mismatch")
 )
 
-// JournalHeader is the fixed-width journal file header.
+// JournalHeader is the fixed-width rollback-journal header.
 type JournalHeader struct {
 	Magic      [8]byte
 	Version    uint32
@@ -28,13 +28,13 @@ type JournalHeader struct {
 	EntryCount uint32
 }
 
-// JournalEntry stores one full original page image for later rollback.
+// JournalEntry stores one full original durable page image for later recovery.
 type JournalEntry struct {
 	PageID uint32
 	Data   []byte
 }
 
-// Journal is a tiny journal DTO for future write/recovery work.
+// Journal is a tiny DTO for rollback-journal write and recovery plumbing.
 type Journal struct {
 	Header  JournalHeader
 	Entries []JournalEntry
@@ -45,7 +45,7 @@ func JournalPath(dbPath string) string {
 	return dbPath + ".journal"
 }
 
-// WriteJournalHeader writes the fixed journal header.
+// WriteJournalHeader writes the fixed rollback-journal header.
 func WriteJournalHeader(w io.Writer, h JournalHeader) error {
 	if h.Magic == ([8]byte{}) {
 		h.Magic = journalMagic
@@ -64,7 +64,7 @@ func WriteJournalHeader(w io.Writer, h JournalHeader) error {
 	return err
 }
 
-// ReadJournalHeader reads and validates the fixed journal header.
+// ReadJournalHeader reads and validates the fixed rollback-journal header.
 func ReadJournalHeader(r io.Reader) (JournalHeader, error) {
 	var raw [journalHeaderSize]byte
 	if _, err := io.ReadFull(r, raw[:]); err != nil {
@@ -86,7 +86,7 @@ func ReadJournalHeader(r io.Reader) (JournalHeader, error) {
 	return h, nil
 }
 
-// WriteJournalEntry writes one fixed-width journal entry.
+// WriteJournalEntry writes one fixed-width rollback-journal entry.
 func WriteJournalEntry(w io.Writer, pageID uint32, data []byte) error {
 	if len(data) == 0 {
 		return errInvalidJournal
@@ -101,7 +101,7 @@ func WriteJournalEntry(w io.Writer, pageID uint32, data []byte) error {
 	return err
 }
 
-// ReadJournalEntry reads one journal entry using the provided page size.
+// ReadJournalEntry reads one rollback-journal entry using the provided page size.
 func ReadJournalEntry(r io.Reader, pageSize uint32) (JournalEntry, error) {
 	if pageSize == 0 {
 		return JournalEntry{}, errInvalidJournal
@@ -140,14 +140,14 @@ func CreateJournalFile(path string, pageSize uint32, entryCount uint32) (*os.Fil
 	return file, nil
 }
 
-// OpenJournalFile opens an existing journal file for later reads.
+// OpenJournalFile opens an existing rollback journal file for later reads.
 func OpenJournalFile(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_RDWR, 0)
 }
 
-// WriteRollbackJournal writes a complete rollback journal containing the
-// original page images for later crash recovery. Later slices will make commit
-// write this journal durably before overwriting database pages.
+// WriteRollbackJournal writes original durable page images for pages that are
+// about to be overwritten. Commit is not complete until the database is synced
+// and this journal is removed.
 func WriteRollbackJournal(path string, pageSize uint32, pages []*Page) error {
 	file, err := CreateJournalFile(path, pageSize, uint32(len(pages)))
 	if err != nil {
@@ -176,7 +176,8 @@ func WriteRollbackJournal(path string, pageSize uint32, pages []*Page) error {
 	return file.Close()
 }
 
-// ReadRollbackJournal reads and validates a complete rollback journal file.
+// ReadRollbackJournal reads a complete rollback journal or fails cleanly on
+// malformed or incomplete data.
 func ReadRollbackJournal(path string) (JournalHeader, []JournalEntry, error) {
 	file, err := OpenJournalFile(path)
 	if err != nil {
@@ -204,9 +205,9 @@ func ReadRollbackJournal(path string) (JournalHeader, []JournalEntry, error) {
 	return header, entries, nil
 }
 
-// RecoverFromRollbackJournal restores original page images from a surviving
-// rollback journal before normal database open continues. This is rollback
-// journal recovery, not WAL.
+// RecoverFromRollbackJournal restores last-committed page images from a
+// surviving rollback journal before catalog or row metadata loads. This is
+// rollback-journal recovery, not WAL.
 func RecoverFromRollbackJournal(dbPath string, pageSize uint32) error {
 	journalPath := JournalPath(dbPath)
 	if _, err := os.Stat(journalPath); errors.Is(err, os.ErrNotExist) {

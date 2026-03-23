@@ -24,6 +24,7 @@ var (
 )
 
 // DB is the top-level handle for a RovaDB database.
+// Mutating statements execute under an internal autocommit discipline.
 type DB struct {
 	path   string
 	closed bool
@@ -48,8 +49,8 @@ func Open(path string) (*DB, error) {
 		return nil, ErrInvalidArgument
 	}
 
-	// A surviving rollback journal implies an interrupted journaled commit.
-	// Recovery restores last-committed page images before any catalog/table load.
+	// A surviving rollback journal implies an interrupted commit. Recovery
+	// restores last-committed page images before catalog or row metadata loads.
 	if err := storage.RecoverFromRollbackJournal(path, storage.PageSize); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
@@ -273,7 +274,7 @@ func (db *DB) beginTxn() error {
 		return ErrInvalidArgument
 	}
 	// Transaction state transitions are explicit. Terminal txn objects are not
-	// reused; a fresh internal txn is created for each mutating statement.
+	// reused; each mutating statement gets a fresh internal txn object.
 	if db.txn != nil && db.txn.IsActive() {
 		return ErrTxnAlreadyActive
 	}
@@ -289,7 +290,7 @@ func (db *DB) clearTxn() {
 }
 
 // rollbackTxn restores pre-commit page images in memory. Commit remains the
-// only durability boundary; crash recovery is still future journal work.
+// only durability boundary; surviving journals are handled on the next open.
 func (db *DB) rollbackTxn() error {
 	if db == nil {
 		return ErrInvalidArgument
@@ -322,8 +323,7 @@ func (db *DB) rollbackTxn() error {
 	return nil
 }
 
-// execMutatingStatement enforces the internal autocommit shape for mutating
-// statements. Durability semantics are intentionally unchanged in this slice.
+// execMutatingStatement enforces internal autocommit for mutating statements.
 func (db *DB) execMutatingStatement(apply func() error) error {
 	if db == nil {
 		return ErrInvalidArgument
@@ -360,10 +360,10 @@ func (db *DB) execMutatingStatement(apply func() error) error {
 	return nil
 }
 
-// commitTxn defines the durability boundary for an internal transaction.
-// The rollback journal records pre-commit originals before any database-page
-// overwrite. Commit is not complete until database pages are synced and the
-// journal is removed. Later recovery will use any surviving journal files.
+// commitTxn is the only durability boundary for a mutating statement. It
+// writes pre-commit originals to the rollback journal, syncs database pages,
+// removes the journal, then commits the txn state. Any invariant failure here
+// is a correctness bug, not expected runtime flow.
 func (db *DB) commitTxn() error {
 	if db == nil {
 		return ErrInvalidArgument

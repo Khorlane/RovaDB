@@ -10,7 +10,8 @@ const (
 // PageID identifies a fixed-size page in the database file.
 type PageID uint32
 
-// Page is a fixed-size page buffer. Page data always has length PageSize.
+// Page is a fixed-size in-memory page buffer. Dirty/original tracking is used
+// to stage autocommit writes and to restore pre-commit page bytes on rollback.
 type Page struct {
 	id             PageID
 	data           []byte
@@ -38,7 +39,7 @@ func (p *Page) Data() []byte {
 	return p.data
 }
 
-// MarkDirty marks the page as modified.
+// MarkDirty marks the page as modified and eligible for commit-time flush.
 func (p *Page) MarkDirty() {
 	if p == nil {
 		return
@@ -62,7 +63,7 @@ func (p *Page) Dirty() bool {
 	return p.dirty
 }
 
-// HasOriginal reports whether rollback restoration data is currently tracked.
+// HasOriginal reports whether the page still has a saved original durable image.
 func (p *Page) HasOriginal() bool {
 	if p == nil {
 		return false

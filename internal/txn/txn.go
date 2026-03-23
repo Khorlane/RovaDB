@@ -3,6 +3,7 @@ package txn
 import "errors"
 
 // TxnState describes the lifecycle state of an internal transaction.
+// Committed and rolled-back states are terminal.
 type TxnState int
 
 const (
@@ -20,6 +21,7 @@ var (
 )
 
 // Txn is the minimal internal transaction state holder.
+// Invalid state transitions are correctness bugs and return explicit errors.
 type Txn struct {
 	state TxnState
 	dirty bool
@@ -47,7 +49,7 @@ func (t *Txn) IsDirty() bool {
 	return t != nil && t.dirty
 }
 
-// MarkDirty records that work occurred within the transaction.
+// MarkDirty records staged work within an active transaction.
 func (t *Txn) MarkDirty() error {
 	if t == nil {
 		return ErrNoActiveTxn

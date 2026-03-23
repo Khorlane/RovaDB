@@ -9,7 +9,8 @@ import (
 
 var errInvalidPageFileSize = errors.New("storage: invalid page-aligned file size")
 
-// Pager is the minimal page loader and flusher for a database file.
+// Pager loads pages, tracks dirty/original images for one in-process
+// transaction window, and flushes pages in a deterministic order.
 type Pager struct {
 	file                *os.File
 	pages               map[PageID]*Page
@@ -96,8 +97,8 @@ func (p *Pager) DiscardNewPage(id PageID) {
 	p.nextPageID = id
 }
 
-// MarkDirty marks a loaded page dirty. Page mutation requires explicit dirty
-// registration so later commit-oriented flushing can be driven by dirty state.
+// MarkDirty marks a loaded page dirty. Mutations must register explicitly so
+// commit is the only place that decides which pages flush.
 func (p *Pager) MarkDirty(page *Page) {
 	p.MarkDirtyWithOriginal(page)
 }
@@ -210,8 +211,8 @@ func (p *Pager) Sync() error {
 	return p.file.Sync()
 }
 
-// RestoreDirtyPages restores in-memory dirty pages to their pre-transaction
-// images and discards newly allocated uncommitted pages.
+// RestoreDirtyPages restores pre-commit in-memory page images and discards
+// newly allocated uncommitted pages.
 func (p *Pager) RestoreDirtyPages() {
 	if p == nil {
 		return
