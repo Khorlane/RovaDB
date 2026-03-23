@@ -9,6 +9,7 @@ import (
 // InsertStmt is the tiny parsed form for INSERT INTO ... VALUES (...).
 type InsertStmt struct {
 	TableName string
+	Columns   []string
 	Values    []Value
 }
 
@@ -28,7 +29,26 @@ func parseInsert(input string) (*InsertStmt, error) {
 
 	tableName := strings.TrimSpace(rest[:split])
 	afterTable := strings.TrimSpace(rest[split:])
-	if tableName == "" || !strings.HasPrefix(strings.ToUpper(afterTable), "VALUES ") {
+	if tableName == "" {
+		return nil, errors.New("parser: invalid insert")
+	}
+
+	columns := []string(nil)
+	if strings.HasPrefix(afterTable, "(") {
+		closeIdx := strings.Index(afterTable, ")")
+		if closeIdx < 0 {
+			return nil, errors.New("parser: invalid insert")
+		}
+
+		parsedColumns, ok := parseInsertColumns(afterTable[1:closeIdx])
+		if !ok {
+			return nil, errors.New("parser: invalid insert")
+		}
+		columns = parsedColumns
+		afterTable = strings.TrimSpace(afterTable[closeIdx+1:])
+	}
+
+	if !strings.HasPrefix(strings.ToUpper(afterTable), "VALUES ") {
 		return nil, errors.New("parser: invalid insert")
 	}
 
@@ -56,8 +76,11 @@ func parseInsert(input string) (*InsertStmt, error) {
 		}
 		values = append(values, value)
 	}
+	if len(columns) > 0 && len(columns) != len(values) {
+		return nil, errors.New("parser: invalid insert")
+	}
 
-	return &InsertStmt{TableName: tableName, Values: values}, nil
+	return &InsertStmt{TableName: tableName, Columns: columns, Values: values}, nil
 }
 
 func parseLiteralValue(token string) (Value, bool) {
@@ -75,4 +98,28 @@ func parseLiteralValue(token string) (Value, bool) {
 	}
 
 	return Value{}, false
+}
+
+func parseInsertColumns(input string) ([]string, bool) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return nil, false
+	}
+
+	rawColumns := strings.Split(trimmed, ",")
+	columns := make([]string, 0, len(rawColumns))
+	seen := make(map[string]struct{}, len(rawColumns))
+	for _, raw := range rawColumns {
+		column := strings.TrimSpace(raw)
+		if column == "" {
+			return nil, false
+		}
+		if _, ok := seen[column]; ok {
+			return nil, false
+		}
+		seen[column] = struct{}{}
+		columns = append(columns, column)
+	}
+
+	return columns, len(columns) > 0
 }
