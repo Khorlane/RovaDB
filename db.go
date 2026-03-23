@@ -57,15 +57,16 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 		return Result{}, ErrNotImplemented
 	}
 	switch stmt.(type) {
-	case *parser.CreateTableStmt, *parser.InsertStmt:
+	case *parser.CreateTableStmt, *parser.InsertStmt, *parser.DeleteStmt:
 	default:
 		return Result{}, ErrNotImplemented
 	}
-	if err := executor.Execute(stmt, db.tables); err != nil {
+	rowsAffected, err := executor.Execute(stmt, db.tables)
+	if err != nil {
 		return Result{}, err
 	}
 
-	return Result{}, nil
+	return Result{rowsAffected: rowsAffected}, nil
 }
 
 // Query validates the call and reserves query execution for a later engine pass.

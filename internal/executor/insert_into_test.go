@@ -11,12 +11,15 @@ func TestExecuteInsert(t *testing.T) {
 		"users": {Name: "users", Columns: []string{"id", "name"}},
 	}
 
-	err := Execute(&parser.InsertStmt{
+	affected, err := Execute(&parser.InsertStmt{
 		TableName: "users",
 		Values:    []parser.Value{parser.Int64Value(1), parser.StringValue("steve")},
 	}, tables)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("Execute() affected = %d, want 1", affected)
 	}
 
 	if len(tables["users"].Rows) != 1 {
@@ -33,13 +36,16 @@ func TestExecuteInsertWithColumnList(t *testing.T) {
 		"users": {Name: "users", Columns: []string{"id", "name"}},
 	}
 
-	err := Execute(&parser.InsertStmt{
+	affected, err := Execute(&parser.InsertStmt{
 		TableName: "users",
 		Columns:   []string{"id", "name"},
 		Values:    []parser.Value{parser.Int64Value(1), parser.StringValue("steve")},
 	}, tables)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("Execute() affected = %d, want 1", affected)
 	}
 
 	row := tables["users"].Rows[0]
@@ -53,13 +59,16 @@ func TestExecuteInsertWithReorderedColumnList(t *testing.T) {
 		"users": {Name: "users", Columns: []string{"id", "name"}},
 	}
 
-	err := Execute(&parser.InsertStmt{
+	affected, err := Execute(&parser.InsertStmt{
 		TableName: "users",
 		Columns:   []string{"name", "id"},
 		Values:    []parser.Value{parser.StringValue("steve"), parser.Int64Value(1)},
 	}, tables)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("Execute() affected = %d, want 1", affected)
 	}
 
 	row := tables["users"].Rows[0]
@@ -69,7 +78,7 @@ func TestExecuteInsertWithReorderedColumnList(t *testing.T) {
 }
 
 func TestExecuteInsertMissingTable(t *testing.T) {
-	err := Execute(&parser.InsertStmt{
+	_, err := Execute(&parser.InsertStmt{
 		TableName: "users",
 		Values:    []parser.Value{parser.Int64Value(1)},
 	}, map[string]*Table{})
@@ -83,7 +92,7 @@ func TestExecuteInsertWrongValueCount(t *testing.T) {
 		"users": {Name: "users", Columns: []string{"id", "name"}},
 	}
 
-	err := Execute(&parser.InsertStmt{
+	_, err := Execute(&parser.InsertStmt{
 		TableName: "users",
 		Values:    []parser.Value{parser.Int64Value(1)},
 	}, tables)
@@ -97,7 +106,7 @@ func TestExecuteInsertUnknownColumn(t *testing.T) {
 		"users": {Name: "users", Columns: []string{"id", "name"}},
 	}
 
-	err := Execute(&parser.InsertStmt{
+	_, err := Execute(&parser.InsertStmt{
 		TableName: "users",
 		Columns:   []string{"id", "email"},
 		Values:    []parser.Value{parser.Int64Value(1), parser.StringValue("steve")},
@@ -112,7 +121,7 @@ func TestExecuteInsertNotAllColumnsSpecified(t *testing.T) {
 		"users": {Name: "users", Columns: []string{"id", "name"}},
 	}
 
-	err := Execute(&parser.InsertStmt{
+	_, err := Execute(&parser.InsertStmt{
 		TableName: "users",
 		Columns:   []string{"id"},
 		Values:    []parser.Value{parser.Int64Value(1)},

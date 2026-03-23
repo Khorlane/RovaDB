@@ -4,24 +4,24 @@ import (
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
-func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) error {
+func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, error) {
 	table, ok := tables[stmt.TableName]
 	if !ok {
-		return errTableDoesNotExist
+		return 0, errTableDoesNotExist
 	}
 
 	if len(stmt.Columns) == 0 {
 		if len(stmt.Values) != len(table.Columns) {
-			return errWrongValueCount
+			return 0, errWrongValueCount
 		}
 
 		row := append([]parser.Value(nil), stmt.Values...)
 		table.Rows = append(table.Rows, row)
-		return nil
+		return 1, nil
 	}
 
 	if len(stmt.Columns) != len(table.Columns) || len(stmt.Values) != len(table.Columns) {
-		return errWrongValueCount
+		return 0, errWrongValueCount
 	}
 
 	row := make([]parser.Value, len(table.Columns))
@@ -35,18 +35,18 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) error {
 			}
 		}
 		if idx < 0 {
-			return errColumnDoesNotExist
+			return 0, errColumnDoesNotExist
 		}
 		if _, ok := seen[idx]; ok {
-			return errWrongValueCount
+			return 0, errWrongValueCount
 		}
 		seen[idx] = struct{}{}
 		row[idx] = stmt.Values[i]
 	}
 	if len(seen) != len(table.Columns) {
-		return errWrongValueCount
+		return 0, errWrongValueCount
 	}
 
 	table.Rows = append(table.Rows, row)
-	return nil
+	return 1, nil
 }

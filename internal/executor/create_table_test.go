@@ -9,12 +9,15 @@ import (
 func TestExecuteCreateTable(t *testing.T) {
 	tables := make(map[string]*Table)
 
-	err := Execute(&parser.CreateTableStmt{
+	affected, err := Execute(&parser.CreateTableStmt{
 		Name:    "users",
 		Columns: []string{"id", "name"},
 	}, tables)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
+	}
+	if affected != 0 {
+		t.Fatalf("Execute() affected = %d, want 0", affected)
 	}
 
 	got := tables["users"]
@@ -34,7 +37,7 @@ func TestExecuteCreateTableDuplicate(t *testing.T) {
 		"users": {Name: "users", Columns: []string{"id"}},
 	}
 
-	err := Execute(&parser.CreateTableStmt{
+	_, err := Execute(&parser.CreateTableStmt{
 		Name:    "users",
 		Columns: []string{"id", "name"},
 	}, tables)

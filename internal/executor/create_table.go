@@ -22,20 +22,22 @@ type Table struct {
 }
 
 // Execute handles the tiny Stage 1 write statement set.
-func Execute(stmt any, tables map[string]*Table) error {
+func Execute(stmt any, tables map[string]*Table) (int64, error) {
 	switch s := stmt.(type) {
 	case *parser.CreateTableStmt:
 		if _, exists := tables[s.Name]; exists {
-			return errTableAlreadyExists
+			return 0, errTableAlreadyExists
 		}
 		tables[s.Name] = &Table{
 			Name:    s.Name,
 			Columns: append([]string(nil), s.Columns...),
 		}
-		return nil
+		return 0, nil
 	case *parser.InsertStmt:
 		return executeInsert(s, tables)
+	case *parser.DeleteStmt:
+		return executeDelete(s, tables)
 	default:
-		return errUnsupportedStatement
+		return 0, errUnsupportedStatement
 	}
 }
