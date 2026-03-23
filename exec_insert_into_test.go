@@ -12,7 +12,7 @@ func TestExecInsertInto(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id, name)"); err != nil {
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
@@ -32,7 +32,7 @@ func TestExecInsertIntoWithColumnListReordered(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id, name)"); err != nil {
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	if _, err := db.Exec(context.Background(), "INSERT INTO users (name, id) VALUES ('steve', 1)"); err != nil {
@@ -55,5 +55,20 @@ func TestExecInsertIntoWithColumnListReordered(t *testing.T) {
 	}
 	if id != 1 || name != "steve" {
 		t.Fatalf("row = (%d, %q), want (1, %q)", id, name, "steve")
+	}
+}
+
+func TestExecInsertIntoWrongType(t *testing.T) {
+	db, err := Open("test.db")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES ('steve', 'bob')"); err == nil {
+		t.Fatal("Exec(insert) error = nil, want type error")
 	}
 }

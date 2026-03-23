@@ -12,7 +12,7 @@ func TestExecCreateTable(t *testing.T) {
 	}
 	defer db.Close()
 
-	result, err := db.Exec(context.Background(), "CREATE TABLE users (id, name)")
+	result, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)")
 	if err != nil {
 		t.Fatalf("Exec() error = %v", err)
 	}
@@ -31,11 +31,11 @@ func TestExecCreateTableDuplicate(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id, name)"); err != nil {
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("first Exec() error = %v", err)
 	}
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id, name)"); err == nil {
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err == nil {
 		t.Fatal("second Exec() error = nil, want duplicate table error")
 	}
 }

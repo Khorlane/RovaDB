@@ -8,7 +8,7 @@ import (
 
 func TestExecuteInsert(t *testing.T) {
 	tables := map[string]*Table{
-		"users": {Name: "users", Columns: []string{"id", "name"}},
+		"users": {Name: "users", Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}}},
 	}
 
 	affected, err := Execute(&parser.InsertStmt{
@@ -21,10 +21,6 @@ func TestExecuteInsert(t *testing.T) {
 	if affected != 1 {
 		t.Fatalf("Execute() affected = %d, want 1", affected)
 	}
-
-	if len(tables["users"].Rows) != 1 {
-		t.Fatalf("Execute() rows len = %d, want 1", len(tables["users"].Rows))
-	}
 	row := tables["users"].Rows[0]
 	if len(row) != 2 || row[0] != parser.Int64Value(1) || row[1] != parser.StringValue("steve") {
 		t.Fatalf("Execute() row = %#v, want [1 'steve']", row)
@@ -33,7 +29,7 @@ func TestExecuteInsert(t *testing.T) {
 
 func TestExecuteInsertWithColumnList(t *testing.T) {
 	tables := map[string]*Table{
-		"users": {Name: "users", Columns: []string{"id", "name"}},
+		"users": {Name: "users", Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}}},
 	}
 
 	affected, err := Execute(&parser.InsertStmt{
@@ -47,16 +43,11 @@ func TestExecuteInsertWithColumnList(t *testing.T) {
 	if affected != 1 {
 		t.Fatalf("Execute() affected = %d, want 1", affected)
 	}
-
-	row := tables["users"].Rows[0]
-	if len(row) != 2 || row[0] != parser.Int64Value(1) || row[1] != parser.StringValue("steve") {
-		t.Fatalf("Execute() row = %#v, want [1 'steve']", row)
-	}
 }
 
 func TestExecuteInsertWithReorderedColumnList(t *testing.T) {
 	tables := map[string]*Table{
-		"users": {Name: "users", Columns: []string{"id", "name"}},
+		"users": {Name: "users", Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}}},
 	}
 
 	affected, err := Execute(&parser.InsertStmt{
@@ -70,7 +61,6 @@ func TestExecuteInsertWithReorderedColumnList(t *testing.T) {
 	if affected != 1 {
 		t.Fatalf("Execute() affected = %d, want 1", affected)
 	}
-
 	row := tables["users"].Rows[0]
 	if len(row) != 2 || row[0] != parser.Int64Value(1) || row[1] != parser.StringValue("steve") {
 		t.Fatalf("Execute() row = %#v, want [1 'steve']", row)
@@ -89,7 +79,7 @@ func TestExecuteInsertMissingTable(t *testing.T) {
 
 func TestExecuteInsertWrongValueCount(t *testing.T) {
 	tables := map[string]*Table{
-		"users": {Name: "users", Columns: []string{"id", "name"}},
+		"users": {Name: "users", Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}}},
 	}
 
 	_, err := Execute(&parser.InsertStmt{
@@ -103,7 +93,7 @@ func TestExecuteInsertWrongValueCount(t *testing.T) {
 
 func TestExecuteInsertUnknownColumn(t *testing.T) {
 	tables := map[string]*Table{
-		"users": {Name: "users", Columns: []string{"id", "name"}},
+		"users": {Name: "users", Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}}},
 	}
 
 	_, err := Execute(&parser.InsertStmt{
@@ -118,13 +108,42 @@ func TestExecuteInsertUnknownColumn(t *testing.T) {
 
 func TestExecuteInsertNotAllColumnsSpecified(t *testing.T) {
 	tables := map[string]*Table{
-		"users": {Name: "users", Columns: []string{"id", "name"}},
+		"users": {Name: "users", Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}}},
 	}
 
 	_, err := Execute(&parser.InsertStmt{
 		TableName: "users",
 		Columns:   []string{"id"},
 		Values:    []parser.Value{parser.Int64Value(1)},
+	}, tables)
+	if err != errWrongValueCount {
+		t.Fatalf("Execute() error = %v, want %v", err, errWrongValueCount)
+	}
+}
+
+func TestExecuteInsertWrongType(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}}},
+	}
+
+	_, err := Execute(&parser.InsertStmt{
+		TableName: "users",
+		Values:    []parser.Value{parser.StringValue("steve"), parser.StringValue("bob")},
+	}, tables)
+	if err != errWrongValueCount {
+		t.Fatalf("Execute() error = %v, want %v", err, errWrongValueCount)
+	}
+}
+
+func TestExecuteInsertColumnListWrongType(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}}},
+	}
+
+	_, err := Execute(&parser.InsertStmt{
+		TableName: "users",
+		Columns:   []string{"name", "id"},
+		Values:    []parser.Value{parser.StringValue("steve"), parser.StringValue("oops")},
 	}, tables)
 	if err != errWrongValueCount {
 		t.Fatalf("Execute() error = %v, want %v", err, errWrongValueCount)

@@ -64,7 +64,7 @@ func resolveSelectColumns(sel *parser.SelectExpr, table *Table) ([]int, error) {
 
 func resolveColumnIndex(name string, table *Table) (int, error) {
 	for i, column := range table.Columns {
-		if column == name {
+		if column.Name == name {
 			return i, nil
 		}
 	}

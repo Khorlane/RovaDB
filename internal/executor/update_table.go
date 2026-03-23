@@ -17,6 +17,9 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 		if err != nil {
 			return 0, err
 		}
+		if !valueMatchesColumnType(assignment.Value, table.Columns[idx].Type) {
+			return 0, errWrongValueCount
+		}
 		assignments = append(assignments, struct {
 			index int
 			value parser.Value

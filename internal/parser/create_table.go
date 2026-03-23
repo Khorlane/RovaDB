@@ -7,10 +7,21 @@ import (
 
 var errUnsupportedStatement = errors.New("parser: unsupported statement")
 
+const (
+	ColumnTypeInt  = "INT"
+	ColumnTypeText = "TEXT"
+)
+
+// ColumnDef is the tiny parsed form for a typed column definition.
+type ColumnDef struct {
+	Name string
+	Type string
+}
+
 // CreateTableStmt is the tiny parsed form for CREATE TABLE.
 type CreateTableStmt struct {
 	Name    string
-	Columns []string
+	Columns []ColumnDef
 }
 
 // Parse dispatches the tiny Stage 1 statement shapes.
@@ -63,18 +74,26 @@ func parseCreateTable(input string) (*CreateTableStmt, error) {
 	}
 
 	rawColumns := strings.Split(inner, ",")
-	columns := make([]string, 0, len(rawColumns))
+	columns := make([]ColumnDef, 0, len(rawColumns))
 	seen := make(map[string]struct{}, len(rawColumns))
 	for _, raw := range rawColumns {
-		column := strings.TrimSpace(raw)
-		if column == "" {
+		parts := strings.Fields(strings.TrimSpace(raw))
+		if len(parts) != 2 {
 			return nil, errors.New("parser: invalid create table")
 		}
-		if _, ok := seen[column]; ok {
+		name := strings.TrimSpace(parts[0])
+		typeName := strings.ToUpper(strings.TrimSpace(parts[1]))
+		if name == "" {
 			return nil, errors.New("parser: invalid create table")
 		}
-		seen[column] = struct{}{}
-		columns = append(columns, column)
+		if _, ok := seen[name]; ok {
+			return nil, errors.New("parser: invalid create table")
+		}
+		if typeName != ColumnTypeInt && typeName != ColumnTypeText {
+			return nil, errors.New("parser: invalid create table")
+		}
+		seen[name] = struct{}{}
+		columns = append(columns, ColumnDef{Name: name, Type: typeName})
 	}
 
 	return &CreateTableStmt{Name: name, Columns: columns}, nil

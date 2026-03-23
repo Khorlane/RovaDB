@@ -17,7 +17,7 @@ var (
 // Table is the tiny in-memory table catalog entry.
 type Table struct {
 	Name    string
-	Columns []string
+	Columns []parser.ColumnDef
 	Rows    [][]parser.Value
 }
 
@@ -30,7 +30,7 @@ func Execute(stmt any, tables map[string]*Table) (int64, error) {
 		}
 		tables[s.Name] = &Table{
 			Name:    s.Name,
-			Columns: append([]string(nil), s.Columns...),
+			Columns: append([]parser.ColumnDef(nil), s.Columns...),
 		}
 		return 0, nil
 	case *parser.InsertStmt:

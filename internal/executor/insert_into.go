@@ -14,6 +14,11 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 		if len(stmt.Values) != len(table.Columns) {
 			return 0, errWrongValueCount
 		}
+		for i, value := range stmt.Values {
+			if !valueMatchesColumnType(value, table.Columns[i].Type) {
+				return 0, errWrongValueCount
+			}
+		}
 
 		row := append([]parser.Value(nil), stmt.Values...)
 		table.Rows = append(table.Rows, row)
@@ -29,7 +34,7 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 	for i, name := range stmt.Columns {
 		idx := -1
 		for j, column := range table.Columns {
-			if column == name {
+			if column.Name == name {
 				idx = j
 				break
 			}
@@ -38,6 +43,9 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 			return 0, errColumnDoesNotExist
 		}
 		if _, ok := seen[idx]; ok {
+			return 0, errWrongValueCount
+		}
+		if !valueMatchesColumnType(stmt.Values[i], table.Columns[idx].Type) {
 			return 0, errWrongValueCount
 		}
 		seen[idx] = struct{}{}
@@ -49,4 +57,15 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 
 	table.Rows = append(table.Rows, row)
 	return 1, nil
+}
+
+func valueMatchesColumnType(value parser.Value, typeName string) bool {
+	switch typeName {
+	case parser.ColumnTypeInt:
+		return value.Kind == parser.ValueKindInt64
+	case parser.ColumnTypeText:
+		return value.Kind == parser.ValueKindString
+	default:
+		return false
+	}
 }

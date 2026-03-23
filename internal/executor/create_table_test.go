@@ -11,7 +11,7 @@ func TestExecuteCreateTable(t *testing.T) {
 
 	affected, err := Execute(&parser.CreateTableStmt{
 		Name:    "users",
-		Columns: []string{"id", "name"},
+		Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}},
 	}, tables)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -27,19 +27,19 @@ func TestExecuteCreateTable(t *testing.T) {
 	if got.Name != "users" {
 		t.Fatalf("Execute() table name = %q, want %q", got.Name, "users")
 	}
-	if len(got.Columns) != 2 || got.Columns[0] != "id" || got.Columns[1] != "name" {
-		t.Fatalf("Execute() columns = %#v, want []string{\"id\", \"name\"}", got.Columns)
+	if len(got.Columns) != 2 || got.Columns[0] != (parser.ColumnDef{Name: "id", Type: parser.ColumnTypeInt}) || got.Columns[1] != (parser.ColumnDef{Name: "name", Type: parser.ColumnTypeText}) {
+		t.Fatalf("Execute() columns = %#v, want typed id/name columns", got.Columns)
 	}
 }
 
 func TestExecuteCreateTableDuplicate(t *testing.T) {
 	tables := map[string]*Table{
-		"users": {Name: "users", Columns: []string{"id"}},
+		"users": {Name: "users", Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}}},
 	}
 
 	_, err := Execute(&parser.CreateTableStmt{
 		Name:    "users",
-		Columns: []string{"id", "name"},
+		Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}},
 	}, tables)
 	if err == nil {
 		t.Fatal("Execute() error = nil, want duplicate table error")

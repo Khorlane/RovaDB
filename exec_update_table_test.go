@@ -12,7 +12,7 @@ func TestExecUpdateWhere(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id, name)"); err != nil {
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
@@ -58,5 +58,23 @@ func TestExecUpdateWhere(t *testing.T) {
 	}
 	if id2 != 2 || name2 != "sam" {
 		t.Fatalf("second row = (%d, %q), want (2, %q)", id2, name2, "sam")
+	}
+}
+
+func TestExecUpdateWrongType(t *testing.T) {
+	db, err := Open("test.db")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "UPDATE users SET id = 'oops' WHERE name = 'alice'"); err == nil {
+		t.Fatal("Exec(update) error = nil, want type error")
 	}
 }
