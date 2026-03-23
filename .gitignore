@@ -12,6 +12,7 @@ coverage.out
 *.dll
 *.so
 *.dylib
+*.db
 
 # Go workspace files
 go.work
@@ -19,4 +20,3 @@ go.work.sum
 
 # Editor settings
 .vscode/
-

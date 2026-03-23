@@ -6,6 +6,7 @@ import (
 
 	"github.com/Khorlane/RovaDB/internal/executor"
 	"github.com/Khorlane/RovaDB/internal/parser"
+	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
 // DB is the top-level handle for a RovaDB database.
@@ -13,6 +14,7 @@ type DB struct {
 	path   string
 	closed bool
 	tables map[string]*executor.Table
+	file   *storage.DBFile
 }
 
 // Open returns a database handle for the given path.
@@ -21,7 +23,12 @@ func Open(path string) (*DB, error) {
 		return nil, ErrInvalidArgument
 	}
 
-	return &DB{path: path}, nil
+	file, err := storage.OpenOrCreate(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return &DB{path: path, file: file}, nil
 }
 
 // Close releases database resources.
@@ -29,8 +36,14 @@ func (db *DB) Close() error {
 	if db == nil {
 		return nil
 	}
+	if db.closed {
+		return nil
+	}
 
 	db.closed = true
+	if db.file != nil {
+		return db.file.Close()
+	}
 	return nil
 }
 
