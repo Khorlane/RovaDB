@@ -38,12 +38,23 @@ type Expr struct {
 
 // SelectExpr is the minimal parsed form for SELECT <expr>.
 type SelectExpr struct {
-	Expr *Expr
+	Expr      *Expr
+	TableName string
+	Columns   []string
+	SelectAll bool
 }
 
 // ParseSelectExpr recognizes the tiny Stage 1 SELECT <expr> shape.
 func ParseSelectExpr(sql string) (*SelectExpr, bool) {
-	tokens := strings.Fields(strings.TrimSpace(sql))
+	trimmed := strings.TrimSpace(sql)
+	upper := strings.ToUpper(trimmed)
+	if strings.HasPrefix(upper, "SELECT ") {
+		if selectFrom, ok := parseSelectFrom(trimmed, upper); ok {
+			return selectFrom, true
+		}
+	}
+
+	tokens := strings.Fields(trimmed)
 	if len(tokens) != 2 && len(tokens) != 4 {
 		return nil, false
 	}
@@ -64,6 +75,44 @@ func ParseSelectExpr(sql string) (*SelectExpr, bool) {
 	}
 
 	return parseSpacedIntBinaryExpr(tokens[1], tokens[2], tokens[3])
+}
+
+func parseSelectFrom(sql, upper string) (*SelectExpr, bool) {
+	fromIndex := strings.Index(upper, " FROM ")
+	if fromIndex < 0 {
+		return nil, false
+	}
+
+	selectList := strings.TrimSpace(sql[len("SELECT "):fromIndex])
+	tableName := strings.TrimSpace(sql[fromIndex+len(" FROM "):])
+	if selectList == "" || tableName == "" || strings.ContainsAny(tableName, " \t\r\n,") {
+		return nil, false
+	}
+
+	if selectList == "*" {
+		return &SelectExpr{
+			TableName: tableName,
+			SelectAll: true,
+		}, true
+	}
+
+	rawColumns := strings.Split(selectList, ",")
+	columns := make([]string, 0, len(rawColumns))
+	for _, raw := range rawColumns {
+		column := strings.TrimSpace(raw)
+		if column == "" || column == "*" || strings.ContainsAny(column, " \t\r\n()'+-*/") {
+			return nil, false
+		}
+		columns = append(columns, column)
+	}
+	if len(columns) == 0 {
+		return nil, false
+	}
+
+	return &SelectExpr{
+		TableName: tableName,
+		Columns:   columns,
+	}, true
 }
 
 func parseParenExpr(expr string) (*Expr, bool) {

@@ -132,6 +132,8 @@ func TestQueryUnsupportedLiteral(t *testing.T) {
 		{name: "select nested parenthesized expression", sql: "SELECT ((1+2))"},
 		{name: "select unterminated parenthesized expression", sql: "SELECT (1+2"},
 		{name: "select trailing parenthesized expression", sql: "SELECT 1+2)"},
+		{name: "select missing from table", sql: "SELECT id, name users"},
+		{name: "select invalid from format", sql: "SELECT id name FROM users"},
 		{name: "select double quoted string", sql: `SELECT "hello"`},
 		{name: "select string with spaces", sql: "SELECT 'hello world'"},
 		{name: "select unterminated string", sql: "SELECT 'unterminated"},
@@ -289,6 +291,18 @@ func TestParseSelectExprDirect(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "select table columns",
+			sql:  "SELECT id, name FROM users",
+			ok:   true,
+			want: &parser.Expr{},
+		},
+		{
+			name: "select table star",
+			sql:  "SELECT * FROM users",
+			ok:   true,
+			want: &parser.Expr{},
+		},
 		{name: "select identifier", sql: "SELECT abc", ok: false},
 	}
 
@@ -306,6 +320,18 @@ func TestParseSelectExprDirect(t *testing.T) {
 			}
 			if got == nil {
 				t.Fatal("ParseSelectExpr() = nil, want value")
+			}
+			if tc.name == "select table columns" {
+				if got.TableName != "users" || len(got.Columns) != 2 || got.Columns[0] != "id" || got.Columns[1] != "name" || got.SelectAll {
+					t.Fatalf("ParseSelectExpr() = %#v, want table users columns [id name]", got)
+				}
+				return
+			}
+			if tc.name == "select table star" {
+				if got.TableName != "users" || !got.SelectAll || len(got.Columns) != 0 {
+					t.Fatalf("ParseSelectExpr() = %#v, want table users select all", got)
+				}
+				return
 			}
 			if !equalExpr(got.Expr, tc.want) {
 				t.Fatalf("ParseSelectExpr().Expr = %#v, want %#v", got.Expr, tc.want)

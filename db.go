@@ -85,11 +85,22 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 
 	sel, ok := parser.ParseSelectExpr(sql)
 	if ok {
+		if sel.TableName != "" {
+			rows, err := executor.Select(sel, db.tables)
+			if err != nil {
+				return &Rows{err: err, index: -1}, nil
+			}
+			return &Rows{values: rows, index: -1}, nil
+		}
+
 		value, err := executor.Eval(sel.Expr)
 		if err == nil {
-			return &Rows{value: value}, nil
+			return &Rows{
+				index:  -1,
+				values: [][]parser.Value{{value}},
+			}, nil
 		}
 	}
 
-	return &Rows{err: ErrNotImplemented}, nil
+	return &Rows{err: ErrNotImplemented, index: -1}, nil
 }
