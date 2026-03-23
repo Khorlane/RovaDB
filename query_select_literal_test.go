@@ -364,14 +364,14 @@ func TestParseSelectExprDirect(t *testing.T) {
 				return
 			}
 			if tc.name == "select table column where string" {
-				if got.TableName != "users" || len(got.Columns) != 1 || got.Columns[0] != "name" || got.Where == nil || len(got.Where.Conditions) != 1 || got.Where.Conditions[0].Left != "name" || got.Where.Conditions[0].Operator != "=" || got.Where.Conditions[0].Right != parser.StringValue("bob") {
+				if got.TableName != "users" || len(got.Columns) != 1 || got.Columns[0] != "name" || got.Where == nil || len(got.Where.Items) != 1 || got.Where.Items[0].Condition.Left != "name" || got.Where.Items[0].Condition.Operator != "=" || got.Where.Items[0].Condition.Right != parser.StringValue("bob") {
 					t.Fatalf("ParseSelectExpr() = %#v, want table users columns [name] where name='bob'", got)
 				}
 				return
 			}
 			if tc.name == "select table star" || tc.name == "select table star mixed spacing" || tc.name == "select table star where int" {
 				if tc.name == "select table star where int" {
-					if got.TableName != "users" || got.Columns != nil || got.Where == nil || len(got.Where.Conditions) != 1 || got.Where.Conditions[0].Left != "id" || got.Where.Conditions[0].Operator != "=" || got.Where.Conditions[0].Right != parser.Int64Value(1) {
+					if got.TableName != "users" || got.Columns != nil || got.Where == nil || len(got.Where.Items) != 1 || got.Where.Items[0].Condition.Left != "id" || got.Where.Items[0].Condition.Operator != "=" || got.Where.Items[0].Condition.Right != parser.Int64Value(1) {
 						t.Fatalf("ParseSelectExpr() = %#v, want table users select all where id=1", got)
 					}
 					return

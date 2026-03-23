@@ -78,3 +78,40 @@ func TestExecUpdateWrongType(t *testing.T) {
 		t.Fatal("Exec(update) error = nil, want type error")
 	}
 }
+
+func TestExecUpdateWhereOr(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'cara')",
+	} {
+		if _, err := db.Exec(context.Background(), sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	result, err := db.Exec(context.Background(), "UPDATE users SET name = 'updated' WHERE id = 1 OR id = 3")
+	if err != nil {
+		t.Fatalf("Exec(update) error = %v", err)
+	}
+	if result.RowsAffected() != 2 {
+		t.Fatalf("Exec(update).RowsAffected() = %d, want 2", result.RowsAffected())
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT name FROM users ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsStringSequence(t, rows, "updated", "bob", "updated")
+}

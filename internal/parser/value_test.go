@@ -65,10 +65,10 @@ func TestParseSelectExprValueKinds(t *testing.T) {
 	if !ok {
 		t.Fatal("ParseSelectExpr(SELECT * FROM users WHERE name = NULL) ok = false, want true")
 	}
-	if nullSel.Where == nil || len(nullSel.Where.Conditions) != 1 {
+	if nullSel.Where == nil || len(nullSel.Where.Items) != 1 {
 		t.Fatalf("ParseSelectExpr(...).Where = %#v, want one condition", nullSel.Where)
 	}
-	if nullSel.Where.Conditions[0].Right.Kind != ValueKindNull {
-		t.Fatalf("ParseSelectExpr(...).Where.Conditions[0].Right.Kind = %v, want %v", nullSel.Where.Conditions[0].Right.Kind, ValueKindNull)
+	if nullSel.Where.Items[0].Condition.Right.Kind != ValueKindNull {
+		t.Fatalf("ParseSelectExpr(...).Where.Items[0].Condition.Right.Kind = %v, want %v", nullSel.Where.Items[0].Condition.Right.Kind, ValueKindNull)
 	}
 }

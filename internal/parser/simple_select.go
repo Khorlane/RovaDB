@@ -43,9 +43,23 @@ type Condition struct {
 	Right    Value
 }
 
-// WhereClause is a flat AND-only WHERE shape.
+// BooleanOp is the connector between WHERE conditions.
+type BooleanOp string
+
+const (
+	BooleanOpAnd BooleanOp = "AND"
+	BooleanOpOr  BooleanOp = "OR"
+)
+
+// ConditionChainItem preserves the parsed condition order and connector order.
+type ConditionChainItem struct {
+	Op        BooleanOp
+	Condition Condition
+}
+
+// WhereClause is a flat left-to-right WHERE shape with no precedence rules.
 type WhereClause struct {
-	Conditions []Condition
+	Items []ConditionChainItem
 }
 
 // OrderByClause is a single-column ORDER BY clause.
@@ -192,37 +206,47 @@ func parseWhereClause(input string) (*WhereClause, bool) {
 		return nil, false
 	}
 
-	conditions := parseWhereConditions(tokens)
-	if len(conditions) == 0 {
+	items := parseWhereItems(tokens)
+	if len(items) == 0 {
 		return nil, false
 	}
 
-	return &WhereClause{Conditions: conditions}, true
+	return &WhereClause{Items: items}, true
 }
 
-func parseWhereConditions(tokens []string) []Condition {
-	conditions := make([]Condition, 0, len(tokens)/4+1)
+func parseWhereItems(tokens []string) []ConditionChainItem {
+	items := make([]ConditionChainItem, 0, len(tokens)/4+1)
 	for i := 0; i < len(tokens); i += 4 {
-		if i > 0 && !strings.EqualFold(tokens[i-1], "AND") {
-			return nil
+		var op BooleanOp
+		if i > 0 {
+			switch {
+			case strings.EqualFold(tokens[i-1], string(BooleanOpAnd)):
+				op = BooleanOpAnd
+			case strings.EqualFold(tokens[i-1], string(BooleanOpOr)):
+				op = BooleanOpOr
+			default:
+				return nil
+			}
 		}
 		if tokens[i] == "" || !isWhereOperator(tokens[i+1]) {
 			return nil
 		}
-
 		value, ok := parseLiteralValue(tokens[i+2])
 		if !ok {
 			return nil
 		}
 
-		conditions = append(conditions, Condition{
-			Left:     tokens[i],
-			Operator: tokens[i+1],
-			Right:    value,
+		items = append(items, ConditionChainItem{
+			Op: op,
+			Condition: Condition{
+				Left:     tokens[i],
+				Operator: tokens[i+1],
+				Right:    value,
+			},
 		})
 	}
 
-	return conditions
+	return items
 }
 
 func isWhereOperator(op string) bool {

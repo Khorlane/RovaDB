@@ -14,21 +14,30 @@ func TestParseDelete(t *testing.T) {
 			name:      "delete where int",
 			input:     "DELETE FROM users WHERE id = 1",
 			tableName: "users",
-			where:     &WhereClause{Conditions: []Condition{{Left: "id", Operator: "=", Right: Int64Value(1)}}},
+			where:     &WhereClause{Items: []ConditionChainItem{{Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(1)}}}},
 		},
 		{
 			name:      "delete where string",
 			input:     "DELETE FROM users WHERE name = 'bob'",
 			tableName: "users",
-			where:     &WhereClause{Conditions: []Condition{{Left: "name", Operator: "=", Right: StringValue("bob")}}},
+			where:     &WhereClause{Items: []ConditionChainItem{{Condition: Condition{Left: "name", Operator: "=", Right: StringValue("bob")}}}},
 		},
 		{
 			name:      "delete where and",
 			input:     "DELETE FROM users WHERE id > 1 AND name = 'bob'",
 			tableName: "users",
-			where: &WhereClause{Conditions: []Condition{
-				{Left: "id", Operator: ">", Right: Int64Value(1)},
-				{Left: "name", Operator: "=", Right: StringValue("bob")},
+			where: &WhereClause{Items: []ConditionChainItem{
+				{Condition: Condition{Left: "id", Operator: ">", Right: Int64Value(1)}},
+				{Op: BooleanOpAnd, Condition: Condition{Left: "name", Operator: "=", Right: StringValue("bob")}},
+			}},
+		},
+		{
+			name:      "delete where or",
+			input:     "DELETE FROM users WHERE id = 1 OR name = 'bob'",
+			tableName: "users",
+			where: &WhereClause{Items: []ConditionChainItem{
+				{Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(1)}},
+				{Op: BooleanOpOr, Condition: Condition{Left: "name", Operator: "=", Right: StringValue("bob")}},
 			}},
 		},
 	}
@@ -48,12 +57,12 @@ func TestParseDelete(t *testing.T) {
 			if got.Where == nil {
 				return
 			}
-			if len(got.Where.Conditions) != len(tc.where.Conditions) {
-				t.Fatalf("len(parseDelete().Where.Conditions) = %d, want %d", len(got.Where.Conditions), len(tc.where.Conditions))
+			if len(got.Where.Items) != len(tc.where.Items) {
+				t.Fatalf("len(parseDelete().Where.Items) = %d, want %d", len(got.Where.Items), len(tc.where.Items))
 			}
-			for i := range tc.where.Conditions {
-				if got.Where.Conditions[i] != tc.where.Conditions[i] {
-					t.Fatalf("parseDelete().Where.Conditions[%d] = %#v, want %#v", i, got.Where.Conditions[i], tc.where.Conditions[i])
+			for i := range tc.where.Items {
+				if got.Where.Items[i] != tc.where.Items[i] {
+					t.Fatalf("parseDelete().Where.Items[%d] = %#v, want %#v", i, got.Where.Items[i], tc.where.Items[i])
 				}
 			}
 		})
@@ -68,6 +77,8 @@ func TestParseDeleteInvalid(t *testing.T) {
 		{name: "missing table", input: "DELETE FROM"},
 		{name: "missing rhs literal", input: "DELETE FROM users WHERE id ="},
 		{name: "missing equals", input: "DELETE FROM users WHERE id 1"},
+		{name: "missing trailing condition", input: "DELETE FROM users WHERE id = 1 OR"},
+		{name: "unsupported boolean op", input: "DELETE FROM users WHERE id = 1 XOR id = 2"},
 	}
 
 	for _, tc := range tests {

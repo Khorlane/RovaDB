@@ -69,10 +69,10 @@ func TestParseSelectExprWhereOperators(t *testing.T) {
 			if got == nil || got.Where == nil {
 				t.Fatalf("ParseSelectExpr() = %#v, want WHERE clause", got)
 			}
-			if len(got.Where.Conditions) != 1 {
-				t.Fatalf("len(Where.Conditions) = %d, want 1", len(got.Where.Conditions))
+			if len(got.Where.Items) != 1 {
+				t.Fatalf("len(Where.Items) = %d, want 1", len(got.Where.Items))
 			}
-			cond := got.Where.Conditions[0]
+			cond := got.Where.Items[0].Condition
 			if cond.Left != tc.left || cond.Operator != tc.operator || cond.Right != tc.right {
 				t.Fatalf("Condition = %#v, want left=%q op=%q right=%#v", cond, tc.left, tc.operator, tc.right)
 			}
@@ -80,25 +80,82 @@ func TestParseSelectExprWhereOperators(t *testing.T) {
 	}
 }
 
-func TestParseSelectExprWhereAndConditions(t *testing.T) {
-	got, ok := ParseSelectExpr("SELECT id FROM users WHERE id > 1 AND name != 'bob' AND id < 10")
-	if !ok {
-		t.Fatal("ParseSelectExpr() ok = false, want true")
+func TestParseSelectExprWhereConditionChain(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want []ConditionChainItem
+	}{
+		{
+			name: "single condition",
+			sql:  "SELECT id FROM users WHERE id > 1",
+			want: []ConditionChainItem{{Condition: Condition{Left: "id", Operator: ">", Right: Int64Value(1)}}},
+		},
+		{
+			name: "and",
+			sql:  "SELECT id FROM users WHERE id > 1 AND name != 'bob'",
+			want: []ConditionChainItem{
+				{Condition: Condition{Left: "id", Operator: ">", Right: Int64Value(1)}},
+				{Op: BooleanOpAnd, Condition: Condition{Left: "name", Operator: "!=", Right: StringValue("bob")}},
+			},
+		},
+		{
+			name: "or",
+			sql:  "SELECT id FROM users WHERE id = 1 OR id = 2",
+			want: []ConditionChainItem{
+				{Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(1)}},
+				{Op: BooleanOpOr, Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(2)}},
+			},
+		},
+		{
+			name: "and or",
+			sql:  "SELECT id FROM users WHERE id = 1 AND id = 2 OR name = 'bob'",
+			want: []ConditionChainItem{
+				{Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(1)}},
+				{Op: BooleanOpAnd, Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(2)}},
+				{Op: BooleanOpOr, Condition: Condition{Left: "name", Operator: "=", Right: StringValue("bob")}},
+			},
+		},
+		{
+			name: "or and",
+			sql:  "SELECT id FROM users WHERE id = 1 OR id = 2 AND name = 'bob'",
+			want: []ConditionChainItem{
+				{Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(1)}},
+				{Op: BooleanOpOr, Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(2)}},
+				{Op: BooleanOpAnd, Condition: Condition{Left: "name", Operator: "=", Right: StringValue("bob")}},
+			},
+		},
 	}
-	if got == nil || got.Where == nil {
-		t.Fatalf("ParseSelectExpr() = %#v, want WHERE clause", got)
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ParseSelectExpr(tc.sql)
+			if !ok {
+				t.Fatal("ParseSelectExpr() ok = false, want true")
+			}
+			if got == nil || got.Where == nil {
+				t.Fatalf("ParseSelectExpr() = %#v, want WHERE clause", got)
+			}
+			if len(got.Where.Items) != len(tc.want) {
+				t.Fatalf("len(Where.Items) = %d, want %d", len(got.Where.Items), len(tc.want))
+			}
+			for i := range tc.want {
+				if got.Where.Items[i] != tc.want[i] {
+					t.Fatalf("Where.Items[%d] = %#v, want %#v", i, got.Where.Items[i], tc.want[i])
+				}
+			}
+		})
 	}
-	if len(got.Where.Conditions) != 3 {
-		t.Fatalf("len(Where.Conditions) = %d, want 3", len(got.Where.Conditions))
-	}
-	want := []Condition{
-		{Left: "id", Operator: ">", Right: Int64Value(1)},
-		{Left: "name", Operator: "!=", Right: StringValue("bob")},
-		{Left: "id", Operator: "<", Right: Int64Value(10)},
-	}
-	for i := range want {
-		if got.Where.Conditions[i] != want[i] {
-			t.Fatalf("Where.Conditions[%d] = %#v, want %#v", i, got.Where.Conditions[i], want[i])
+}
+
+func TestParseSelectExprInvalidWhereBooleanChains(t *testing.T) {
+	for _, sql := range []string{
+		"SELECT id FROM users WHERE id = 1 OR",
+		"SELECT id FROM users WHERE AND id = 1",
+		"SELECT id FROM users WHERE id = 1 XOR id = 2",
+	} {
+		if got, ok := ParseSelectExpr(sql); ok {
+			t.Fatalf("ParseSelectExpr(%q) = %#v, want parse failure", sql, got)
 		}
 	}
 }

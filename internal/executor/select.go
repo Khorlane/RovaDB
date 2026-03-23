@@ -107,23 +107,40 @@ func evalWhere(row []parser.Value, table *Table, where *parser.WhereClause) (boo
 	if where == nil {
 		return true, nil
 	}
+	if len(where.Items) == 0 {
+		return true, nil
+	}
 
-	for _, cond := range where.Conditions {
-		idx, err := resolveColumnIndex(cond.Left, table)
+	current, err := evalWhereCondition(row, table, where.Items[0].Condition)
+	if err != nil {
+		return false, err
+	}
+
+	for _, item := range where.Items[1:] {
+		next, err := evalWhereCondition(row, table, item.Condition)
 		if err != nil {
 			return false, err
 		}
-
-		match, err := compareValues(cond.Operator, row[idx], cond.Right)
-		if err != nil {
-			return false, err
-		}
-		if !match {
-			return false, nil
+		switch item.Op {
+		case parser.BooleanOpAnd:
+			current = current && next
+		case parser.BooleanOpOr:
+			current = current || next
+		default:
+			return false, errUnsupportedStatement
 		}
 	}
 
-	return true, nil
+	return current, nil
+}
+
+func evalWhereCondition(row []parser.Value, table *Table, cond parser.Condition) (bool, error) {
+	idx, err := resolveColumnIndex(cond.Left, table)
+	if err != nil {
+		return false, err
+	}
+
+	return compareValues(cond.Operator, row[idx], cond.Right)
 }
 
 func validateWhereColumns(where *parser.WhereClause, table *Table) error {
@@ -131,8 +148,8 @@ func validateWhereColumns(where *parser.WhereClause, table *Table) error {
 		return nil
 	}
 
-	for _, cond := range where.Conditions {
-		if _, err := resolveColumnIndex(cond.Left, table); err != nil {
+	for _, item := range where.Items {
+		if _, err := resolveColumnIndex(item.Condition.Left, table); err != nil {
 			return err
 		}
 	}

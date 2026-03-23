@@ -25,7 +25,7 @@ func TestParseUpdate(t *testing.T) {
 			assignments: []UpdateAssignment{
 				{Column: "name", Value: StringValue("bob")},
 			},
-			where: &WhereClause{Conditions: []Condition{{Left: "id", Operator: "=", Right: Int64Value(1)}}},
+			where: &WhereClause{Items: []ConditionChainItem{{Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(1)}}}},
 		},
 		{
 			name:      "update multiple assignments where string",
@@ -35,7 +35,7 @@ func TestParseUpdate(t *testing.T) {
 				{Column: "name", Value: StringValue("bob")},
 				{Column: "id", Value: Int64Value(2)},
 			},
-			where: &WhereClause{Conditions: []Condition{{Left: "name", Operator: "=", Right: StringValue("alice")}}},
+			where: &WhereClause{Items: []ConditionChainItem{{Condition: Condition{Left: "name", Operator: "=", Right: StringValue("alice")}}}},
 		},
 		{
 			name:      "update where and",
@@ -44,9 +44,21 @@ func TestParseUpdate(t *testing.T) {
 			assignments: []UpdateAssignment{
 				{Column: "name", Value: StringValue("bob")},
 			},
-			where: &WhereClause{Conditions: []Condition{
-				{Left: "id", Operator: ">", Right: Int64Value(1)},
-				{Left: "name", Operator: "!=", Right: StringValue("sam")},
+			where: &WhereClause{Items: []ConditionChainItem{
+				{Condition: Condition{Left: "id", Operator: ">", Right: Int64Value(1)}},
+				{Op: BooleanOpAnd, Condition: Condition{Left: "name", Operator: "!=", Right: StringValue("sam")}},
+			}},
+		},
+		{
+			name:      "update where or",
+			input:     "UPDATE users SET name = 'bob' WHERE id = 1 OR name = 'alice'",
+			tableName: "users",
+			assignments: []UpdateAssignment{
+				{Column: "name", Value: StringValue("bob")},
+			},
+			where: &WhereClause{Items: []ConditionChainItem{
+				{Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(1)}},
+				{Op: BooleanOpOr, Condition: Condition{Left: "name", Operator: "=", Right: StringValue("alice")}},
 			}},
 		},
 		{
@@ -56,7 +68,7 @@ func TestParseUpdate(t *testing.T) {
 			assignments: []UpdateAssignment{
 				{Column: "name", Value: NullValue()},
 			},
-			where: &WhereClause{Conditions: []Condition{{Left: "id", Operator: "=", Right: Int64Value(1)}}},
+			where: &WhereClause{Items: []ConditionChainItem{{Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(1)}}}},
 		},
 	}
 
@@ -75,12 +87,12 @@ func TestParseUpdate(t *testing.T) {
 			if got.Where == nil {
 				goto assignments
 			}
-			if len(got.Where.Conditions) != len(tc.where.Conditions) {
-				t.Fatalf("len(parseUpdate().Where.Conditions) = %d, want %d", len(got.Where.Conditions), len(tc.where.Conditions))
+			if len(got.Where.Items) != len(tc.where.Items) {
+				t.Fatalf("len(parseUpdate().Where.Items) = %d, want %d", len(got.Where.Items), len(tc.where.Items))
 			}
-			for i := range tc.where.Conditions {
-				if got.Where.Conditions[i] != tc.where.Conditions[i] {
-					t.Fatalf("parseUpdate().Where.Conditions[%d] = %#v, want %#v", i, got.Where.Conditions[i], tc.where.Conditions[i])
+			for i := range tc.where.Items {
+				if got.Where.Items[i] != tc.where.Items[i] {
+					t.Fatalf("parseUpdate().Where.Items[%d] = %#v, want %#v", i, got.Where.Items[i], tc.where.Items[i])
 				}
 			}
 		assignments:
@@ -105,6 +117,8 @@ func TestParseUpdateInvalid(t *testing.T) {
 		{name: "missing assignment value", input: "UPDATE users SET name ="},
 		{name: "missing equals", input: "UPDATE users SET name 'bob'"},
 		{name: "duplicate assignment column", input: "UPDATE users SET name = 'bob', name = 'sam'"},
+		{name: "missing trailing condition", input: "UPDATE users SET name = 'bob' WHERE id = 1 OR"},
+		{name: "unsupported boolean op", input: "UPDATE users SET name = 'bob' WHERE id = 1 XOR id = 2"},
 	}
 
 	for _, tc := range tests {
