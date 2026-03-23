@@ -3,6 +3,7 @@ package rovadb
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/executor"
@@ -57,6 +58,9 @@ func TestCommitFlushesDirtyPages(t *testing.T) {
 	}
 	if db.pager.HasOriginal(catalogPage) || db.pager.HasOriginal(rootPage) {
 		t.Fatal("rollback snapshots still tracked after commit")
+	}
+	if _, err := os.Stat(storage.JournalPath(path)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("journal stat error = %v, want not exists", err)
 	}
 
 	if err := db.Close(); err != nil {
@@ -118,6 +122,145 @@ func TestCommitErrorPropagates(t *testing.T) {
 	}
 	if len(db.pager.DirtyPages()) == 0 {
 		t.Fatal("len(db.pager.DirtyPages()) = 0, want dirty pages retained after failed commit")
+	}
+}
+
+func TestJournaledCommitCreatesAndRemovesJournal(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "UPDATE t SET id = 2 WHERE id = 1"); err != nil {
+		t.Fatalf("Exec(update) error = %v", err)
+	}
+	if _, err := os.Stat(storage.JournalPath(path)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("journal stat error = %v, want not exists", err)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	db = reopenDB(t, path)
+	defer db.Close()
+	assertSelectIntRows(t, db, "SELECT * FROM t", 2)
+}
+
+func TestJournalWrittenBeforeDatabaseOverwrite(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	hookCalled := false
+	db.afterJournalWriteHook = func() error {
+		hookCalled = true
+
+		journalFile, err := storage.OpenJournalFile(storage.JournalPath(path))
+		if err != nil {
+			return err
+		}
+		defer journalFile.Close()
+
+		header, err := storage.ReadJournalHeader(journalFile)
+		if err != nil {
+			return err
+		}
+		if header.EntryCount == 0 {
+			t.Fatal("journal entry count = 0, want > 0")
+		}
+
+		rawDB, pager := openRawStorage(t, path)
+		defer rawDB.Close()
+		page, err := pager.Get(1)
+		if err != nil {
+			return err
+		}
+		payloads, err := storage.ReadRowsFromTablePage(page)
+		if err != nil {
+			return err
+		}
+		values, err := storage.DecodeRow(payloads[0])
+		if err != nil {
+			return err
+		}
+		if values[0].I64 != 1 {
+			t.Fatalf("disk value before flush = %d, want 1", values[0].I64)
+		}
+		return nil
+	}
+
+	if _, err := db.Exec(context.Background(), "UPDATE t SET id = 2 WHERE id = 1"); err != nil {
+		t.Fatalf("Exec(update) error = %v", err)
+	}
+	if !hookCalled {
+		t.Fatal("afterJournalWriteHook was not called")
+	}
+}
+
+func TestCommitFailureLeavesJournalForRecovery(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	db.afterJournalWriteHook = func() error {
+		return errors.New("boom after journal")
+	}
+	if _, err := db.Exec(context.Background(), "UPDATE t SET id = 2 WHERE id = 1"); err == nil {
+		t.Fatal("Exec(update) error = nil, want failure")
+	}
+
+	if _, err := os.Stat(storage.JournalPath(path)); err != nil {
+		t.Fatalf("journal stat error = %v, want present journal", err)
+	}
+}
+
+func TestCommitWithoutOriginalPagesSkipsJournal(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	db.beginTxn()
+	page := db.pager.NewPage()
+	copy(page.Data(), []byte("new"))
+	db.txn.MarkDirty()
+	if err := db.commitTxn(); err != nil {
+		t.Fatalf("commitTxn() error = %v", err)
+	}
+
+	if _, err := os.Stat(storage.JournalPath(path)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("journal stat error = %v, want not exists", err)
 	}
 }
 
@@ -255,6 +398,9 @@ func TestCommitClearsRollbackSnapshots(t *testing.T) {
 	}
 	if db.pager.IsDirty(catalogPage) || db.pager.IsDirty(rootPage) {
 		t.Fatal("page still dirty after commit")
+	}
+	if _, err := os.Stat(storage.JournalPath(db.path)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("journal stat error = %v, want not exists", err)
 	}
 }
 

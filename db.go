@@ -3,6 +3,7 @@ package rovadb
 import (
 	"context"
 	"errors"
+	"os"
 	"sort"
 	"strings"
 
@@ -26,6 +27,8 @@ type DB struct {
 	file   *storage.DBFile
 	pager  *storage.Pager
 	txn    *txn.Txn
+
+	afterJournalWriteHook func() error
 }
 
 type stagedPage struct {
@@ -310,8 +313,9 @@ func (db *DB) execMutatingStatement(apply func() error) error {
 }
 
 // commitTxn defines the durability boundary for an internal transaction.
-// Dirty pages are flushed in deterministic order via pager dirty tracking.
-// Crash safety is still future work and will arrive with journaling.
+// The rollback journal records pre-commit originals before any database-page
+// overwrite. Commit is not complete until database pages are synced and the
+// journal is removed. Later recovery will use any surviving journal files.
 func (db *DB) commitTxn() error {
 	if db == nil || db.txn == nil {
 		return nil
@@ -320,8 +324,27 @@ func (db *DB) commitTxn() error {
 		return nil
 	}
 	if db.txn.IsDirty() {
+		journalPages := db.pager.DirtyPagesWithOriginals()
+		if len(journalPages) > 0 {
+			if err := storage.WriteRollbackJournal(storage.JournalPath(db.path), db.pager.PageSize(), journalPages); err != nil {
+				return err
+			}
+			if db.afterJournalWriteHook != nil {
+				if err := db.afterJournalWriteHook(); err != nil {
+					return err
+				}
+			}
+		}
 		if err := db.pager.FlushDirty(); err != nil {
 			return err
+		}
+		if err := db.pager.Sync(); err != nil {
+			return err
+		}
+		if len(journalPages) > 0 {
+			if err := os.Remove(storage.JournalPath(db.path)); err != nil && !os.IsNotExist(err) {
+				return err
+			}
 		}
 	}
 	db.pager.ClearDirtyTracking()

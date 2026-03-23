@@ -194,7 +194,19 @@ func (p *Pager) FlushDirty() error {
 		}
 		p.ClearDirty(page)
 	}
+	return nil
+}
 
+// PageSize reports the fixed storage page size used by the pager.
+func (p *Pager) PageSize() uint32 {
+	return PageSize
+}
+
+// Sync fsyncs the underlying database file.
+func (p *Pager) Sync() error {
+	if p == nil || p.file == nil {
+		return nil
+	}
 	return p.file.Sync()
 }
 
@@ -247,7 +259,10 @@ func (p *Pager) ClearDirtyTracking() {
 
 // Flush writes all currently dirty pages to disk.
 func (p *Pager) Flush() error {
-	return p.FlushDirty()
+	if err := p.FlushDirty(); err != nil {
+		return err
+	}
+	return p.Sync()
 }
 
 // Close flushes dirty pages.
@@ -255,5 +270,5 @@ func (p *Pager) Close() error {
 	if p == nil || p.file == nil {
 		return nil
 	}
-	return p.FlushDirty()
+	return p.Flush()
 }

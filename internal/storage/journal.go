@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"sort"
 )
 
 const (
@@ -141,4 +142,35 @@ func CreateJournalFile(path string, pageSize uint32, entryCount uint32) (*os.Fil
 // OpenJournalFile opens an existing journal file for later reads.
 func OpenJournalFile(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_RDWR, 0)
+}
+
+// WriteRollbackJournal writes a complete rollback journal containing the
+// original page images for later crash recovery. Later slices will make commit
+// write this journal durably before overwriting database pages.
+func WriteRollbackJournal(path string, pageSize uint32, pages []*Page) error {
+	file, err := CreateJournalFile(path, pageSize, uint32(len(pages)))
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	ordered := make([]*Page, 0, len(pages))
+	ordered = append(ordered, pages...)
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].ID() < ordered[j].ID()
+	})
+
+	for _, page := range ordered {
+		if page == nil || !page.hasOriginal || len(page.originalData) == 0 {
+			continue
+		}
+		if err := WriteJournalEntry(file, uint32(page.ID()), page.originalData); err != nil {
+			return err
+		}
+	}
+
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	return file.Close()
 }
