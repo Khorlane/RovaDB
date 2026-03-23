@@ -582,3 +582,31 @@ func TestProjectedColumnNamesCountStar(t *testing.T) {
 		t.Fatalf("ProjectedColumnNames() = %#v, want [count]", got)
 	}
 }
+
+func TestValidateSelectPlanLiteralAllowsNilTableScan(t *testing.T) {
+	plan, err := planner.PlanSelect(&parser.SelectExpr{
+		Expr: &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: 1},
+	})
+	if err != nil {
+		t.Fatalf("PlanSelect() error = %v", err)
+	}
+
+	if err := validateSelectPlan(plan); err != nil {
+		t.Fatalf("validateSelectPlan() error = %v, want nil", err)
+	}
+}
+
+func TestSelectInvalidPlanMissingTableScan(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("alice")}}},
+	}
+
+	plan := &planner.SelectPlan{
+		Stmt: &parser.SelectExpr{TableName: "users"},
+	}
+
+	_, err := Select(plan, tables)
+	if err != errInvalidSelectPlan {
+		t.Fatalf("Select() error = %v, want %v", err, errInvalidSelectPlan)
+	}
+}

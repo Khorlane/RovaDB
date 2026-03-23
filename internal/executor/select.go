@@ -8,8 +8,8 @@ import (
 )
 
 func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Value, error) {
-	if plan == nil || plan.Stmt == nil {
-		return nil, errUnsupportedStatement
+	if err := validateSelectPlan(plan); err != nil {
+		return nil, err
 	}
 
 	sel := plan.Stmt
@@ -70,6 +70,22 @@ func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Valu
 	}
 
 	return rows, nil
+}
+
+func validateSelectPlan(plan *planner.SelectPlan) error {
+	if plan == nil || plan.Stmt == nil {
+		return errUnsupportedStatement
+	}
+	if plan.Stmt.TableName == "" {
+		return nil
+	}
+	if plan.ScanType != planner.ScanTypeTable || plan.TableScan == nil {
+		return errInvalidSelectPlan
+	}
+	if plan.TableScan.TableName != plan.Stmt.TableName {
+		return errInvalidSelectPlan
+	}
+	return nil
 }
 
 func ProjectedColumnNames(plan *planner.SelectPlan, table *Table) ([]string, error) {

@@ -15,6 +15,7 @@ var (
 	errTypeMismatch            = errors.New("executor: type mismatch")
 	errUnsupportedStatement    = errors.New("executor: unsupported statement")
 	errCountOrderByUnsupported = errors.New("executor: ORDER BY not supported for COUNT(*)")
+	errInvalidSelectPlan       = errors.New("executor: invalid select plan")
 )
 
 // Table is the tiny in-memory table catalog entry.
