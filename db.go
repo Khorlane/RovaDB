@@ -256,7 +256,7 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 	sel, ok := parser.ParseSelectExpr(sql)
 	if ok {
 		if sel.TableName != "" {
-			plan, err := planner.PlanSelect(sel)
+			plan, err := planner.PlanSelect(sel, plannerTableMetadata(db.tables))
 			if err != nil {
 				return &Rows{err: err, index: -1}, nil
 			}
@@ -281,6 +281,23 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 	}
 
 	return &Rows{err: ErrNotImplemented, index: -1}, nil
+}
+
+func plannerTableMetadata(tables map[string]*executor.Table) map[string]*planner.TableMetadata {
+	if len(tables) == 0 {
+		return nil
+	}
+
+	metadata := make(map[string]*planner.TableMetadata, len(tables))
+	for tableName, table := range tables {
+		if table == nil {
+			continue
+		}
+		metadata[tableName] = &planner.TableMetadata{
+			Indexes: table.Indexes,
+		}
+	}
+	return metadata
 }
 
 func (db *DB) beginTxn() error {

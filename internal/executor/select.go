@@ -21,7 +21,39 @@ func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Valu
 	if !ok {
 		return nil, errTableDoesNotExist
 	}
+	switch plan.ScanType {
+	case planner.ScanTypeTable:
+		return executeSelectRows(sel, table, table.Rows)
+	case planner.ScanTypeIndex:
+		return executeIndexSelect(plan, table)
+	default:
+		return nil, errInvalidSelectPlan
+	}
+}
 
+func executeIndexSelect(plan *planner.SelectPlan, table *Table) ([][]parser.Value, error) {
+	if plan == nil || plan.IndexScan == nil || table == nil {
+		return nil, errInvalidSelectPlan
+	}
+
+	index := table.Indexes[plan.IndexScan.ColumnName]
+	if index == nil {
+		return nil, errInvalidSelectPlan
+	}
+
+	rowPositions := index.LookupEqual(plan.IndexScan.Value)
+	candidateRows := make([][]parser.Value, 0, len(rowPositions))
+	for _, rowIndex := range rowPositions {
+		if rowIndex < 0 || rowIndex >= len(table.Rows) {
+			return nil, errInvalidSelectPlan
+		}
+		candidateRows = append(candidateRows, table.Rows[rowIndex])
+	}
+
+	return executeSelectRows(plan.Stmt, table, candidateRows)
+}
+
+func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
 	indexes, err := resolveSelectColumns(sel, table)
 	if err != nil {
 		return nil, err
@@ -34,7 +66,7 @@ func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Valu
 			return nil, errCountOrderByUnsupported
 		}
 		count := int64(0)
-		for _, row := range table.Rows {
+		for _, row := range candidateRows {
 			match, err := evalWhere(row, table, sel.Where)
 			if err != nil {
 				return nil, err
@@ -45,8 +77,8 @@ func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Valu
 		}
 		return [][]parser.Value{{parser.Int64Value(count)}}, nil
 	}
-	baseRows := make([][]parser.Value, 0, len(table.Rows))
-	for _, row := range table.Rows {
+	baseRows := make([][]parser.Value, 0, len(candidateRows))
+	for _, row := range candidateRows {
 		match, err := evalWhere(row, table, sel.Where)
 		if err != nil {
 			return nil, err
@@ -79,10 +111,16 @@ func validateSelectPlan(plan *planner.SelectPlan) error {
 	if plan.Stmt.TableName == "" {
 		return nil
 	}
-	if plan.ScanType != planner.ScanTypeTable || plan.TableScan == nil {
-		return errInvalidSelectPlan
-	}
-	if plan.TableScan.TableName != plan.Stmt.TableName {
+	switch plan.ScanType {
+	case planner.ScanTypeTable:
+		if plan.TableScan == nil || plan.TableScan.TableName != plan.Stmt.TableName {
+			return errInvalidSelectPlan
+		}
+	case planner.ScanTypeIndex:
+		if plan.IndexScan == nil || plan.IndexScan.TableName != plan.Stmt.TableName || plan.IndexScan.ColumnName == "" {
+			return errInvalidSelectPlan
+		}
+	default:
 		return errInvalidSelectPlan
 	}
 	return nil

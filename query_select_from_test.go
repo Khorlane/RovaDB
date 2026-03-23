@@ -307,6 +307,133 @@ func TestQuerySelectWhereIntEquality(t *testing.T) {
 	}
 }
 
+func TestQuerySelectWhereIndexedEquality(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'alice')",
+	} {
+		if _, err := db.Exec(context.Background(), sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if err := db.defineBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineBasicIndex() error = %v", err)
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT id FROM users WHERE name = 'alice'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsIntSequence(t, rows, 1, 3)
+}
+
+func TestQuerySelectWhereIndexedEqualityNoMatch(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	if err := db.defineBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineBasicIndex() error = %v", err)
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT * FROM users WHERE name = 'bob'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() != nil {
+		t.Fatalf("Err() = %v, want nil", rows.Err())
+	}
+}
+
+func TestQuerySelectWhereIndexedEqualityWithProjectionAndOrderBy(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (3, 'alice')",
+		"INSERT INTO users VALUES (1, 'bob')",
+		"INSERT INTO users VALUES (2, 'alice')",
+	} {
+		if _, err := db.Exec(context.Background(), sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if err := db.defineBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineBasicIndex() error = %v", err)
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT id FROM users WHERE name = 'alice' ORDER BY id DESC")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsIntSequence(t, rows, 3, 2)
+}
+
+func TestQuerySelectCountStarWithIndexedEquality(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'alice')",
+		"INSERT INTO users VALUES (3, 'bob')",
+	} {
+		if _, err := db.Exec(context.Background(), sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if err := db.defineBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineBasicIndex() error = %v", err)
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT COUNT(*) FROM users WHERE name = 'alice'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsIntSequence(t, rows, 2)
+}
+
 func TestQuerySelectWhereNumericComparisons(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

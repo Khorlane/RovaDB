@@ -610,3 +610,77 @@ func TestSelectInvalidPlanMissingTableScan(t *testing.T) {
 		t.Fatalf("Select() error = %v, want %v", err, errInvalidSelectPlan)
 	}
 }
+
+func TestSelectWithIndexScan(t *testing.T) {
+	table := &Table{
+		Name:    "users",
+		Columns: typedCols(),
+		Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.Int64Value(3), parser.StringValue("alice")},
+		},
+		Indexes: map[string]*planner.BasicIndex{
+			"name": planner.NewBasicIndex("users", "name"),
+		},
+	}
+	if err := rebuildIndexesForTable(table); err != nil {
+		t.Fatalf("rebuildIndexesForTable() error = %v", err)
+	}
+
+	rows, err := Select(&planner.SelectPlan{
+		Stmt: &parser.SelectExpr{
+			TableName: "users",
+			Columns:   []string{"id"},
+			Where:     where(parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("alice")}),
+		},
+		ScanType: planner.ScanTypeIndex,
+		IndexScan: &planner.IndexScan{
+			TableName:  "users",
+			ColumnName: "name",
+			Value:      parser.StringValue("alice"),
+		},
+	}, map[string]*Table{"users": table})
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 2 || rows[0][0] != parser.Int64Value(1) || rows[1][0] != parser.Int64Value(3) {
+		t.Fatalf("Select() rows = %#v, want [[1] [3]]", rows)
+	}
+}
+
+func TestSelectInvalidPlanMissingIndexScanPayload(t *testing.T) {
+	plan := &planner.SelectPlan{
+		Stmt:     &parser.SelectExpr{TableName: "users"},
+		ScanType: planner.ScanTypeIndex,
+	}
+
+	_, err := Select(plan, map[string]*Table{"users": {Name: "users", Columns: typedCols()}})
+	if err != errInvalidSelectPlan {
+		t.Fatalf("Select() error = %v, want %v", err, errInvalidSelectPlan)
+	}
+}
+
+func TestSelectInvalidPlanMissingRuntimeIndex(t *testing.T) {
+	table := &Table{
+		Name:    "users",
+		Columns: typedCols(),
+		Rows:    [][]parser.Value{{parser.Int64Value(1), parser.StringValue("alice")}},
+	}
+
+	_, err := Select(&planner.SelectPlan{
+		Stmt: &parser.SelectExpr{
+			TableName: "users",
+			Where:     where(parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("alice")}),
+		},
+		ScanType: planner.ScanTypeIndex,
+		IndexScan: &planner.IndexScan{
+			TableName:  "users",
+			ColumnName: "name",
+			Value:      parser.StringValue("alice"),
+		},
+	}, map[string]*Table{"users": table})
+	if err != errInvalidSelectPlan {
+		t.Fatalf("Select() error = %v, want %v", err, errInvalidSelectPlan)
+	}
+}
