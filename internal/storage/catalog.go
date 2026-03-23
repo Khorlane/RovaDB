@@ -6,8 +6,9 @@ import (
 )
 
 const (
-	catalogVersion = 1
-	catalogPageID  = 0
+	catalogVersionV1 = 1
+	catalogVersion   = 2
+	catalogPageID    = 0
 
 	CatalogColumnTypeInt  = 1
 	CatalogColumnTypeText = 2
@@ -29,12 +30,18 @@ type CatalogTable struct {
 	RootPageID uint32
 	RowCount   uint32
 	Columns    []CatalogColumn
+	Indexes    []CatalogIndex
 }
 
 // CatalogColumn is a persisted typed column entry.
 type CatalogColumn struct {
 	Name string
 	Type uint8
+}
+
+// CatalogIndex is a persisted single-column index definition.
+type CatalogIndex struct {
+	ColumnName string
 }
 
 // LoadCatalog decodes the catalog stored in page 0.
@@ -49,7 +56,7 @@ func LoadCatalog(pager *Pager) (*CatalogData, error) {
 
 	offset := 0
 	version, ok := readUint32(page.data, &offset)
-	if !ok || version != catalogVersion {
+	if !ok || (version != catalogVersionV1 && version != catalogVersion) {
 		return nil, errInvalidCatalog
 	}
 	tableCount, ok := readUint32(page.data, &offset)
@@ -100,6 +107,20 @@ func LoadCatalog(pager *Pager) (*CatalogData, error) {
 				Name: columnName,
 				Type: columnType,
 			})
+		}
+		if version >= catalogVersion {
+			indexCount, ok := readUint16(page.data, &offset)
+			if !ok {
+				return nil, errInvalidCatalog
+			}
+			table.Indexes = make([]CatalogIndex, 0, indexCount)
+			for j := uint16(0); j < indexCount; j++ {
+				columnName, ok := readString(page.data, &offset)
+				if !ok || columnName == "" {
+					return nil, errInvalidCatalog
+				}
+				table.Indexes = append(table.Indexes, CatalogIndex{ColumnName: columnName})
+			}
 		}
 
 		cat.Tables = append(cat.Tables, table)
@@ -155,6 +176,16 @@ func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
 			}
 			buf = appendString(buf, column.Name)
 			buf = append(buf, column.Type)
+			if len(buf) > PageSize {
+				return nil, errCatalogTooLarge
+			}
+		}
+		buf = appendUint16(buf, uint16(len(table.Indexes)))
+		for _, index := range table.Indexes {
+			if index.ColumnName == "" {
+				return nil, errInvalidCatalog
+			}
+			buf = appendString(buf, index.ColumnName)
 			if len(buf) > PageSize {
 				return nil, errCatalogTooLarge
 			}

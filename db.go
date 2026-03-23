@@ -82,6 +82,11 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
+	if err := rebuildPersistedIndexes(tables); err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, err
+	}
 
 	return &DB{
 		path:   path,
@@ -572,8 +577,31 @@ func cloneTable(table *executor.Table) *executor.Table {
 		Name:    table.Name,
 		Columns: columns,
 		Rows:    rows,
+		Indexes: cloneIndexes(table.Indexes),
+	}
+	columnNames := columnNamesForTable(cloned)
+	for _, index := range cloned.Indexes {
+		if index == nil {
+			continue
+		}
+		_ = index.Rebuild(columnNames, cloned.Rows)
 	}
 	cloned.SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
+	return cloned
+}
+
+func cloneIndexes(indexes map[string]*planner.BasicIndex) map[string]*planner.BasicIndex {
+	if len(indexes) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]*planner.BasicIndex, len(indexes))
+	for columnName, index := range indexes {
+		if index == nil {
+			continue
+		}
+		cloned[columnName] = planner.NewBasicIndex(index.TableName, index.ColumnName)
+	}
 	return cloned
 }
 
@@ -600,12 +628,21 @@ func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
 			RootPageID: uint32(table.RootPageID()),
 			RowCount:   table.PersistedRowCount(),
 			Columns:    make([]storage.CatalogColumn, 0, len(table.Columns)),
+			Indexes:    make([]storage.CatalogIndex, 0, len(table.Indexes)),
 		}
 		for _, column := range table.Columns {
 			entry.Columns = append(entry.Columns, storage.CatalogColumn{
 				Name: column.Name,
 				Type: catalogColumnType(column.Type),
 			})
+		}
+		indexNames := make([]string, 0, len(table.Indexes))
+		for columnName := range table.Indexes {
+			indexNames = append(indexNames, columnName)
+		}
+		sort.Strings(indexNames)
+		for _, columnName := range indexNames {
+			entry.Indexes = append(entry.Indexes, storage.CatalogIndex{ColumnName: columnName})
 		}
 		catalog.Tables = append(catalog.Tables, entry)
 	}
@@ -643,11 +680,98 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 		tables[table.Name] = &executor.Table{
 			Name:    table.Name,
 			Columns: columns,
+			Indexes: make(map[string]*planner.BasicIndex),
 		}
 		tables[table.Name].SetStorageMeta(rootPageID, table.RowCount)
+		for _, index := range table.Indexes {
+			if index.ColumnName == "" {
+				return nil, errInvalidStoredTableMeta
+			}
+			tables[table.Name].Indexes[index.ColumnName] = planner.NewBasicIndex(table.Name, index.ColumnName)
+		}
 	}
 
 	return tables, nil
+}
+
+func rebuildPersistedIndexes(tables map[string]*executor.Table) error {
+	for _, table := range tables {
+		if table == nil || len(table.Indexes) == 0 {
+			continue
+		}
+		columnNames := columnNamesForTable(table)
+		for columnName, index := range table.Indexes {
+			if index == nil {
+				table.Indexes[columnName] = planner.NewBasicIndex(table.Name, columnName)
+				index = table.Indexes[columnName]
+			}
+			if err := index.Rebuild(columnNames, table.Rows); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func columnNamesForTable(table *executor.Table) []string {
+	if table == nil {
+		return nil
+	}
+	columnNames := make([]string, 0, len(table.Columns))
+	for _, column := range table.Columns {
+		columnNames = append(columnNames, column.Name)
+	}
+	return columnNames
+}
+
+func (db *DB) defineBasicIndex(tableName, columnName string) error {
+	if db == nil {
+		return ErrInvalidArgument
+	}
+
+	var committedTables map[string]*executor.Table
+	err := db.execMutatingStatement(func() error {
+		stagedTables := cloneTables(db.tables)
+		table := stagedTables[tableName]
+		if table == nil {
+			return errors.New("rovadb: table does not exist")
+		}
+		columnNames := columnNamesForTable(table)
+		found := false
+		for _, column := range table.Columns {
+			if column.Name == columnName {
+				found = true
+			}
+		}
+		if !found {
+			return errors.New("rovadb: column does not exist")
+		}
+		if table.Indexes == nil {
+			table.Indexes = make(map[string]*planner.BasicIndex)
+		}
+		index := planner.NewBasicIndex(tableName, columnName)
+		if err := index.Rebuild(columnNames, table.Rows); err != nil {
+			return err
+		}
+		table.Indexes[columnName] = index
+
+		catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
+		if err != nil {
+			return err
+		}
+		if err := db.stageDirtyState(catalogData, nil); err != nil {
+			return err
+		}
+		committedTables = stagedTables
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if committedTables != nil {
+		db.tables = committedTables
+	}
+	return nil
 }
 
 func loadPersistedRows(pager *storage.Pager, tables map[string]*executor.Table) error {

@@ -29,6 +29,9 @@ func TestCatalogRoundTripIncludesStorageMetadata(t *testing.T) {
 					{Name: "id", Type: CatalogColumnTypeInt},
 					{Name: "name", Type: CatalogColumnTypeText},
 				},
+				Indexes: []CatalogIndex{
+					{ColumnName: "id"},
+				},
 			},
 		},
 	}
@@ -58,6 +61,76 @@ func TestCatalogRoundTripIncludesStorageMetadata(t *testing.T) {
 	if table.RowCount != 0 {
 		t.Fatalf("table.RowCount = %d, want 0", table.RowCount)
 	}
+	if len(table.Indexes) != 1 || table.Indexes[0].ColumnName != "id" {
+		t.Fatalf("table.Indexes = %#v, want [{ColumnName:id}]", table.Indexes)
+	}
+}
+
+func TestLoadCatalogV1WithoutIndexes(t *testing.T) {
+	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_v1.db"))
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+
+	page, err := pager.Get(0)
+	if err != nil {
+		t.Fatalf("pager.Get(0) error = %v", err)
+	}
+	v1 := make([]byte, PageSize)
+	copy(v1, buildCatalogPageDataV1(&CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				RootPageID: 1,
+				RowCount:   2,
+				Columns: []CatalogColumn{
+					{Name: "id", Type: CatalogColumnTypeInt},
+				},
+			},
+		},
+	}))
+	clear(page.data)
+	copy(page.data, v1)
+	pager.MarkDirtyWithOriginal(page)
+	if err := pager.FlushDirty(); err != nil {
+		t.Fatalf("pager.FlushDirty() error = %v", err)
+	}
+
+	got, err := LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+	if len(got.Tables) != 1 {
+		t.Fatalf("len(got.Tables) = %d, want 1", len(got.Tables))
+	}
+	if len(got.Tables[0].Indexes) != 0 {
+		t.Fatalf("got.Tables[0].Indexes = %#v, want empty", got.Tables[0].Indexes)
+	}
+}
+
+func buildCatalogPageDataV1(cat *CatalogData) []byte {
+	buf := make([]byte, 0, PageSize)
+	buf = appendUint32(buf, catalogVersionV1)
+	buf = appendUint32(buf, uint32(len(cat.Tables)))
+	for _, table := range cat.Tables {
+		buf = appendString(buf, table.Name)
+		buf = appendUint32(buf, table.RootPageID)
+		buf = appendUint32(buf, table.RowCount)
+		buf = appendUint16(buf, uint16(len(table.Columns)))
+		for _, column := range table.Columns {
+			buf = appendString(buf, column.Name)
+			buf = append(buf, column.Type)
+		}
+	}
+	page := make([]byte, PageSize)
+	copy(page, buf)
+	return page
 }
 
 func TestSaveCatalogTooLarge(t *testing.T) {

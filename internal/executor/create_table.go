@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
+	"github.com/Khorlane/RovaDB/internal/planner"
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
@@ -23,6 +24,7 @@ type Table struct {
 	Name              string
 	Columns           []parser.ColumnDef
 	Rows              [][]parser.Value
+	Indexes           map[string]*planner.BasicIndex
 	rootPageID        storage.PageID
 	persistedRowCount uint32
 }
