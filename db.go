@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -15,13 +16,12 @@ import (
 )
 
 var (
-	errDuplicateRootPageID       = errors.New("rovadb: duplicate root page id")
-	errPersistedRowCountMismatch = errors.New("rovadb: persisted row count mismatch")
-	errInvalidStoredTableMeta    = errors.New("rovadb: invalid stored table metadata")
-	ErrTxnAlreadyActive          = errors.New("rovadb: transaction already active")
-	ErrTxnCommitWithoutActive    = errors.New("rovadb: commit requires active transaction")
-	ErrTxnRollbackWithoutActive  = errors.New("rovadb: rollback requires active transaction")
-	ErrTxnInvariantViolation     = errors.New("rovadb: transaction invariant violation")
+	errDuplicateRootPageID      = errors.New("rovadb: duplicate root page id")
+	errInvalidStoredTableMeta   = errors.New("rovadb: invalid stored table metadata")
+	ErrTxnAlreadyActive         = errors.New("rovadb: transaction already active")
+	ErrTxnCommitWithoutActive   = errors.New("rovadb: commit requires active transaction")
+	ErrTxnRollbackWithoutActive = errors.New("rovadb: rollback requires active transaction")
+	ErrTxnInvariantViolation    = errors.New("rovadb: transaction invariant violation")
 )
 
 // DB is the top-level handle for a RovaDB database.
@@ -87,6 +87,11 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
+	if err := validateTables(tables, true); err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, err
+	}
 
 	return &DB{
 		path:   path,
@@ -135,6 +140,9 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	if db.tables == nil {
 		db.tables = make(map[string]*executor.Table)
 	}
+	if err := db.validateTxnState(); err != nil {
+		return Result{}, err
+	}
 
 	stmt, err := parser.Parse(sql)
 	if err != nil {
@@ -162,6 +170,9 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 		if err != nil {
 			return Result{}, err
 		}
+		if err := validateTables(committedTables, false); err != nil {
+			return Result{}, err
+		}
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.InsertStmt:
@@ -183,6 +194,9 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 			return nil
 		})
 		if err != nil {
+			return Result{}, err
+		}
+		if err := validateTables(committedTables, false); err != nil {
 			return Result{}, err
 		}
 		db.tables = committedTables
@@ -208,6 +222,9 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 		if err != nil {
 			return Result{}, err
 		}
+		if err := validateTables(committedTables, false); err != nil {
+			return Result{}, err
+		}
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.DeleteStmt:
@@ -231,6 +248,9 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 		if err != nil {
 			return Result{}, err
 		}
+		if err := validateTables(committedTables, false); err != nil {
+			return Result{}, err
+		}
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	default:
@@ -252,10 +272,16 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 	if strings.TrimSpace(sql) == "" {
 		return nil, ErrInvalidArgument
 	}
+	if err := db.validateTxnState(); err != nil {
+		return &Rows{err: err, index: -1}, nil
+	}
 
 	sel, ok := parser.ParseSelectExpr(sql)
 	if ok {
 		if sel.TableName != "" {
+			if err := validateTables(db.tables, false); err != nil {
+				return &Rows{err: err, index: -1}, nil
+			}
 			plan, err := planner.PlanSelect(sel, plannerTableMetadata(db.tables))
 			if err != nil {
 				return &Rows{err: err, index: -1}, nil
@@ -339,11 +365,11 @@ func (db *DB) rollbackTxn() error {
 		}
 		db.pager.ClearDirtyTracking()
 		if len(db.pager.DirtyPages()) != 0 {
-			return ErrTxnInvariantViolation
+			return newExecError("invalid transaction state")
 		}
 		for _, page := range db.pager.DirtyPagesWithOriginals() {
 			if db.pager.HasOriginal(page) {
-				return ErrTxnInvariantViolation
+				return newExecError("invalid transaction state")
 			}
 		}
 		return nil
@@ -439,10 +465,10 @@ func (db *DB) commitTxn() error {
 	}
 	db.pager.ClearDirtyTracking()
 	if len(db.pager.DirtyPages()) != 0 || len(db.pager.DirtyPagesWithOriginals()) != 0 {
-		return ErrTxnInvariantViolation
+		return newExecError("invalid transaction state")
 	}
 	if _, err := os.Stat(storage.JournalPath(db.path)); err == nil {
-		return ErrTxnInvariantViolation
+		return newExecError("invalid transaction state")
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return wrapStorageError(err)
 	}
@@ -785,6 +811,9 @@ func (db *DB) defineBasicIndex(tableName, columnName string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateTables(committedTables, false); err != nil {
+		return err
+	}
 	if committedTables != nil {
 		db.tables = committedTables
 	}
@@ -806,7 +835,7 @@ func loadPersistedRows(pager *storage.Pager, tables map[string]*executor.Table) 
 			return wrapStorageError(err)
 		}
 		if uint32(len(payloads)) != table.PersistedRowCount() {
-			return errPersistedRowCountMismatch
+			return newStorageError("row count mismatch")
 		}
 
 		table.Rows = table.Rows[:0]
@@ -859,4 +888,82 @@ func wrapStorageError(err error) error {
 		return err
 	}
 	return newStorageError(err.Error())
+}
+
+func validateTables(tables map[string]*executor.Table, storageBoundary bool) error {
+	for _, table := range tables {
+		if err := validateTableRowCount(table, storageBoundary); err != nil {
+			return err
+		}
+		if err := validateIndexConsistency(table); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateTableRowCount(table *executor.Table, storageBoundary bool) error {
+	if table == nil {
+		return nil
+	}
+	if uint32(len(table.Rows)) == table.PersistedRowCount() {
+		return nil
+	}
+	if storageBoundary {
+		return newStorageError("row count mismatch")
+	}
+	return newExecError("row count mismatch")
+}
+
+func validateIndexConsistency(table *executor.Table) error {
+	if table == nil || len(table.Indexes) == 0 {
+		return nil
+	}
+
+	columnNames := columnNamesForTable(table)
+	for columnName, index := range table.Indexes {
+		if index == nil {
+			return newExecError("index/table mismatch")
+		}
+		if index.TableName != table.Name || index.ColumnName != columnName {
+			return newExecError("index/table mismatch")
+		}
+
+		expected := planner.NewBasicIndex(table.Name, columnName)
+		if err := expected.Rebuild(columnNames, table.Rows); err != nil {
+			return newExecError("index/table mismatch")
+		}
+		if !reflect.DeepEqual(expected.Entries, index.Entries) {
+			return newExecError("index/table mismatch")
+		}
+	}
+
+	return nil
+}
+
+func (db *DB) validateTxnState() error {
+	if db == nil {
+		return ErrInvalidArgument
+	}
+	if db.pager == nil {
+		if db.txn != nil {
+			return newExecError("invalid transaction state")
+		}
+		return nil
+	}
+
+	hasDirty := len(db.pager.DirtyPages()) != 0 || len(db.pager.DirtyPagesWithOriginals()) != 0
+	if db.txn == nil {
+		if hasDirty {
+			return newExecError("invalid transaction state")
+		}
+		return nil
+	}
+	if db.txn.IsActive() {
+		return nil
+	}
+	if hasDirty {
+		return newExecError("invalid transaction state")
+	}
+	return nil
 }
