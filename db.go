@@ -110,9 +110,15 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	}
 	if createStmt, ok := stmt.(*parser.CreateTableStmt); ok {
 		rootPage := db.pager.NewPage()
+		storage.InitTableRootPage(rootPage)
 		db.tables[createStmt.Name].SetStorageMeta(rootPage.ID(), 0)
 		if err := db.persistCatalog(); err != nil {
 			delete(db.tables, createStmt.Name)
+			return Result{}, err
+		}
+	}
+	if insertStmt, ok := stmt.(*parser.InsertStmt); ok {
+		if err := db.persistInsertedRow(insertStmt.TableName); err != nil {
 			return Result{}, err
 		}
 	}
@@ -165,6 +171,32 @@ func (db *DB) persistCatalog() error {
 		return err
 	}
 	return db.pager.Flush()
+}
+
+func (db *DB) persistInsertedRow(tableName string) error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+
+	table := db.tables[tableName]
+	if table == nil || len(table.Rows) == 0 {
+		return nil
+	}
+
+	page, err := db.pager.Get(table.RootPageID())
+	if err != nil {
+		return err
+	}
+	row, err := storage.EncodeRow(table.Rows[len(table.Rows)-1])
+	if err != nil {
+		return err
+	}
+	if err := storage.AppendRowToTablePage(page, row); err != nil {
+		return err
+	}
+
+	table.SetStorageMeta(table.RootPageID(), storage.TablePageRowCount(page))
+	return db.persistCatalog()
 }
 
 func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
