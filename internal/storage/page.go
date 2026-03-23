@@ -12,9 +12,12 @@ type PageID uint32
 
 // Page is a fixed-size page buffer. Page data always has length PageSize.
 type Page struct {
-	id    PageID
-	data  []byte
-	dirty bool
+	id             PageID
+	data           []byte
+	dirty          bool
+	originalData   []byte
+	hasOriginal    bool
+	newlyAllocated bool
 }
 
 // NewPage allocates a zeroed fixed-size page buffer.
@@ -57,6 +60,14 @@ func (p *Page) Dirty() bool {
 		return false
 	}
 	return p.dirty
+}
+
+// HasOriginal reports whether rollback restoration data is currently tracked.
+func (p *Page) HasOriginal() bool {
+	if p == nil {
+		return false
+	}
+	return p.hasOriginal
 }
 
 // pageOffset returns the file offset for the given page.

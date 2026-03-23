@@ -164,6 +164,38 @@ func TestFlushDirtyWritesOnlyDirtyPages(t *testing.T) {
 	}
 }
 
+func TestRestoreDirtyPages(t *testing.T) {
+	dbFile, pager, _ := openTestPager(t)
+	defer dbFile.Close()
+
+	page := pager.NewPage()
+	copy(page.Data(), []byte("before"))
+	if err := pager.FlushDirty(); err != nil {
+		t.Fatalf("pager.FlushDirty() error = %v", err)
+	}
+	pager.ClearDirtyTracking()
+
+	pager.MarkDirtyWithOriginal(page)
+	copy(page.Data(), []byte("after!"))
+	if !pager.IsDirty(page) {
+		t.Fatal("pager.IsDirty() = false, want true")
+	}
+	if !pager.HasOriginal(page) {
+		t.Fatal("pager.HasOriginal() = false, want true")
+	}
+
+	pager.RestoreDirtyPages()
+	if pager.IsDirty(page) {
+		t.Fatal("pager.IsDirty() = true, want false after restore")
+	}
+	if pager.HasOriginal(page) {
+		t.Fatal("pager.HasOriginal() = true, want false after restore")
+	}
+	if got := string(page.Data()[:6]); got != "before" {
+		t.Fatalf("restored page data = %q, want %q", got, "before")
+	}
+}
+
 func openTestPager(t *testing.T) (*DBFile, *Pager, string) {
 	t.Helper()
 

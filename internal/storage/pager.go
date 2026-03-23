@@ -11,9 +11,10 @@ var errInvalidPageFileSize = errors.New("storage: invalid page-aligned file size
 
 // Pager is the minimal page loader and flusher for a database file.
 type Pager struct {
-	file       *os.File
-	pages      map[PageID]*Page
-	nextPageID PageID
+	file                *os.File
+	pages               map[PageID]*Page
+	nextPageID          PageID
+	lastCommittedPageID PageID
 }
 
 // NewPager creates a pager over an open database file.
@@ -40,9 +41,10 @@ func NewPager(f *os.File) (*Pager, error) {
 	}
 
 	return &Pager{
-		file:       f,
-		pages:      make(map[PageID]*Page),
-		nextPageID: nextPageID,
+		file:                f,
+		pages:               make(map[PageID]*Page),
+		nextPageID:          nextPageID,
+		lastCommittedPageID: nextPageID,
 	}, nil
 }
 
@@ -68,6 +70,7 @@ func (p *Pager) NewPage() *Page {
 	p.nextPageID++
 
 	page := NewPage(id)
+	page.newlyAllocated = true
 	p.pages[id] = page
 	p.MarkDirty(page)
 	return page
@@ -96,8 +99,18 @@ func (p *Pager) DiscardNewPage(id PageID) {
 // MarkDirty marks a loaded page dirty. Page mutation requires explicit dirty
 // registration so later commit-oriented flushing can be driven by dirty state.
 func (p *Pager) MarkDirty(page *Page) {
+	p.MarkDirtyWithOriginal(page)
+}
+
+// MarkDirtyWithOriginal marks a page dirty and captures its pre-mutation image
+// the first time it is dirtied within the current transaction window.
+func (p *Pager) MarkDirtyWithOriginal(page *Page) {
 	if p == nil || page == nil {
 		return
+	}
+	if !page.hasOriginal && !page.newlyAllocated {
+		page.originalData = append([]byte(nil), page.data...)
+		page.hasOriginal = true
 	}
 	page.MarkDirty()
 }
@@ -116,6 +129,14 @@ func (p *Pager) ClearDirty(page *Page) {
 		return
 	}
 	page.ClearDirty()
+}
+
+// HasOriginal reports whether rollback restoration is tracked for a page.
+func (p *Pager) HasOriginal(page *Page) bool {
+	if p == nil || page == nil {
+		return false
+	}
+	return page.HasOriginal()
 }
 
 // DirtyPages returns loaded dirty pages in ascending page-number order.
@@ -151,6 +172,53 @@ func (p *Pager) FlushDirty() error {
 	}
 
 	return p.file.Sync()
+}
+
+// RestoreDirtyPages restores in-memory dirty pages to their pre-transaction
+// images and discards newly allocated uncommitted pages.
+func (p *Pager) RestoreDirtyPages() {
+	if p == nil {
+		return
+	}
+
+	for _, page := range p.pages {
+		if page == nil {
+			continue
+		}
+		if !page.newlyAllocated && !page.hasOriginal {
+			continue
+		}
+		if page.newlyAllocated {
+			delete(p.pages, page.id)
+			continue
+		}
+		if page.hasOriginal {
+			clear(page.data)
+			copy(page.data, page.originalData)
+		}
+		page.ClearDirty()
+		page.originalData = nil
+		page.hasOriginal = false
+	}
+
+	p.nextPageID = p.lastCommittedPageID
+}
+
+// ClearDirtyTracking clears rollback snapshots after a successful commit.
+func (p *Pager) ClearDirtyTracking() {
+	if p == nil {
+		return
+	}
+	for _, page := range p.pages {
+		if page == nil {
+			continue
+		}
+		page.originalData = nil
+		page.hasOriginal = false
+		page.newlyAllocated = false
+		page.ClearDirty()
+	}
+	p.lastCommittedPageID = p.nextPageID
 }
 
 // Flush writes all currently dirty pages to disk.

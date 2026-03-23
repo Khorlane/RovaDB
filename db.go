@@ -270,6 +270,19 @@ func (db *DB) clearTxn() {
 	db.txn = nil
 }
 
+// rollbackTxn restores pre-commit page images in memory. Commit remains the
+// only durability boundary; crash recovery is still future journal work.
+func (db *DB) rollbackTxn() {
+	if db == nil || db.txn == nil {
+		return
+	}
+	if db.txn.IsActive() {
+		db.pager.RestoreDirtyPages()
+		db.txn.Rollback()
+	}
+	db.pager.ClearDirtyTracking()
+}
+
 // execMutatingStatement enforces the internal autocommit shape for mutating
 // statements. Durability semantics are intentionally unchanged in this slice.
 func (db *DB) execMutatingStatement(apply func() error) error {
@@ -279,9 +292,7 @@ func (db *DB) execMutatingStatement(apply func() error) error {
 
 	db.beginTxn()
 	if err := apply(); err != nil {
-		if db.txn != nil && db.txn.IsActive() {
-			db.txn.Rollback()
-		}
+		db.rollbackTxn()
 		db.clearTxn()
 		return err
 	}
@@ -290,9 +301,7 @@ func (db *DB) execMutatingStatement(apply func() error) error {
 		db.txn.MarkDirty()
 	}
 	if err := db.commitTxn(); err != nil {
-		if db.txn != nil && db.txn.IsActive() {
-			db.txn.Rollback()
-		}
+		db.rollbackTxn()
 		db.clearTxn()
 		return err
 	}
@@ -315,6 +324,7 @@ func (db *DB) commitTxn() error {
 			return err
 		}
 	}
+	db.pager.ClearDirtyTracking()
 	db.txn.Commit()
 	return nil
 }
@@ -409,20 +419,20 @@ func (db *DB) stageDirtyState(catalogData []byte, pages []stagedPage) error {
 			}
 		}
 
+		db.pager.MarkDirtyWithOriginal(page)
 		clear(page.Data())
 		copy(page.Data(), staged.data)
-		db.pager.MarkDirty(page)
 	}
 
 	catalogPage, err := db.pager.Get(0)
 	if err != nil {
 		return err
 	}
+	db.pager.MarkDirtyWithOriginal(catalogPage)
 	clear(catalogPage.Data())
 	copy(catalogPage.Data(), catalogData)
 	// Page mutation requires explicit dirty marking; commit-oriented flush
 	// eligibility is driven by dirty tracking.
-	db.pager.MarkDirty(catalogPage)
 	return nil
 }
 
