@@ -29,6 +29,7 @@ type DB struct {
 	txn    *txn.Txn
 
 	afterJournalWriteHook func() error
+	afterDatabaseSyncHook func() error
 }
 
 type stagedPage struct {
@@ -41,6 +42,12 @@ type stagedPage struct {
 func Open(path string) (*DB, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, ErrInvalidArgument
+	}
+
+	// A surviving rollback journal implies an interrupted journaled commit.
+	// Recovery restores last-committed page images before any catalog/table load.
+	if err := storage.RecoverFromRollbackJournal(path, storage.PageSize); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
 
 	file, err := storage.OpenOrCreate(path)
@@ -340,6 +347,11 @@ func (db *DB) commitTxn() error {
 		}
 		if err := db.pager.Sync(); err != nil {
 			return err
+		}
+		if db.afterDatabaseSyncHook != nil {
+			if err := db.afterDatabaseSyncHook(); err != nil {
+				return err
+			}
 		}
 		if len(journalPages) > 0 {
 			if err := os.Remove(storage.JournalPath(db.path)); err != nil && !os.IsNotExist(err) {

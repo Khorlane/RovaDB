@@ -14,9 +14,10 @@ const (
 )
 
 var (
-	journalMagic         = [8]byte{'R', 'O', 'V', 'A', 'J', 'N', 'L', '1'}
-	errInvalidJournal    = errors.New("storage: invalid journal")
-	errInvalidJournalVer = errors.New("storage: unsupported journal version")
+	journalMagic           = [8]byte{'R', 'O', 'V', 'A', 'J', 'N', 'L', '1'}
+	errInvalidJournal      = errors.New("storage: invalid journal")
+	errInvalidJournalVer   = errors.New("storage: unsupported journal version")
+	errJournalSizeMismatch = errors.New("storage: journal page size mismatch")
 )
 
 // JournalHeader is the fixed-width journal file header.
@@ -173,4 +174,71 @@ func WriteRollbackJournal(path string, pageSize uint32, pages []*Page) error {
 		return err
 	}
 	return file.Close()
+}
+
+// ReadRollbackJournal reads and validates a complete rollback journal file.
+func ReadRollbackJournal(path string) (JournalHeader, []JournalEntry, error) {
+	file, err := OpenJournalFile(path)
+	if err != nil {
+		return JournalHeader{}, nil, err
+	}
+	defer file.Close()
+
+	header, err := ReadJournalHeader(file)
+	if err != nil {
+		return JournalHeader{}, nil, err
+	}
+
+	entries := make([]JournalEntry, 0, header.EntryCount)
+	for i := uint32(0); i < header.EntryCount; i++ {
+		entry, err := ReadJournalEntry(file, header.PageSize)
+		if err != nil {
+			return JournalHeader{}, nil, err
+		}
+		if uint32(len(entry.Data)) != header.PageSize {
+			return JournalHeader{}, nil, errInvalidJournal
+		}
+		entries = append(entries, entry)
+	}
+
+	return header, entries, nil
+}
+
+// RecoverFromRollbackJournal restores original page images from a surviving
+// rollback journal before normal database open continues. This is rollback
+// journal recovery, not WAL.
+func RecoverFromRollbackJournal(dbPath string, pageSize uint32) error {
+	journalPath := JournalPath(dbPath)
+	if _, err := os.Stat(journalPath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+
+	header, entries, err := ReadRollbackJournal(journalPath)
+	if err != nil {
+		return err
+	}
+	if header.PageSize != pageSize {
+		return errJournalSizeMismatch
+	}
+
+	file, err := os.OpenFile(dbPath, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	for _, entry := range entries {
+		if _, err := file.WriteAt(entry.Data, pageOffset(PageID(entry.PageID))); err != nil {
+			return err
+		}
+	}
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	if err := os.Remove(journalPath); err != nil {
+		return err
+	}
+	return nil
 }
