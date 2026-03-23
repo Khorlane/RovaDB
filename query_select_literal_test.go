@@ -339,7 +339,15 @@ func TestParseSelectExprDirect(t *testing.T) {
 			ok:   true,
 			want: &parser.Expr{},
 		},
+		{
+			name: "select count star",
+			sql:  "SELECT COUNT(*) FROM users",
+			ok:   true,
+			want: &parser.Expr{},
+		},
 		{name: "select identifier", sql: "SELECT abc", ok: false},
+		{name: "select count column", sql: "SELECT COUNT(id) FROM users", ok: false},
+		{name: "select count mixed projection", sql: "SELECT COUNT(*), name FROM users", ok: false},
 	}
 
 	for _, tc := range tests {
@@ -384,6 +392,12 @@ func TestParseSelectExprDirect(t *testing.T) {
 			if tc.name == "select table order by desc" {
 				if got.TableName != "users" || got.Columns != nil || got.OrderBy == nil || got.OrderBy.Column != "id" || !got.OrderBy.Desc {
 					t.Fatalf("ParseSelectExpr() = %#v, want table users order by id desc", got)
+				}
+				return
+			}
+			if tc.name == "select count star" {
+				if got.TableName != "users" || !got.IsCountStar || got.OrderBy != nil {
+					t.Fatalf("ParseSelectExpr() = %#v, want table users count(*)", got)
 				}
 				return
 			}

@@ -70,11 +70,12 @@ type OrderByClause struct {
 
 // SelectExpr is the minimal parsed form for SELECT <expr>.
 type SelectExpr struct {
-	Expr      *Expr
-	TableName string
-	Columns   []string
-	Where     *WhereClause
-	OrderBy   *OrderByClause
+	Expr        *Expr
+	TableName   string
+	Columns     []string
+	Where       *WhereClause
+	OrderBy     *OrderByClause
+	IsCountStar bool
 }
 
 // ParseSelectExpr recognizes the tiny Stage 1 SELECT <expr> shape.
@@ -155,6 +156,17 @@ func parseSelectFrom(sql, upper string) (*SelectExpr, bool) {
 			Where:     where,
 			OrderBy:   orderBy,
 		}, true
+	}
+	if strings.EqualFold(selectList, "COUNT(*)") {
+		return &SelectExpr{
+			TableName:   tableName,
+			Where:       where,
+			OrderBy:     orderBy,
+			IsCountStar: true,
+		}, true
+	}
+	if strings.HasPrefix(strings.ToUpper(selectList), "COUNT(") {
+		return nil, false
 	}
 
 	rawColumns := strings.Split(selectList, ",")

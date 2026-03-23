@@ -23,6 +23,22 @@ func Select(sel *parser.SelectExpr, tables map[string]*Table) ([][]parser.Value,
 	if err := validateWhereColumns(sel.Where, table); err != nil {
 		return nil, err
 	}
+	if sel.IsCountStar {
+		if sel.OrderBy != nil {
+			return nil, errCountOrderByUnsupported
+		}
+		count := int64(0)
+		for _, row := range table.Rows {
+			match, err := evalWhere(row, table, sel.Where)
+			if err != nil {
+				return nil, err
+			}
+			if match {
+				count++
+			}
+		}
+		return [][]parser.Value{{parser.Int64Value(count)}}, nil
+	}
 	baseRows := make([][]parser.Value, 0, len(table.Rows))
 	for _, row := range table.Rows {
 		match, err := evalWhere(row, table, sel.Where)
@@ -53,6 +69,9 @@ func Select(sel *parser.SelectExpr, tables map[string]*Table) ([][]parser.Value,
 func ProjectedColumnNames(sel *parser.SelectExpr, table *Table) ([]string, error) {
 	if sel == nil || table == nil {
 		return nil, errUnsupportedStatement
+	}
+	if sel.IsCountStar {
+		return []string{"count"}, nil
 	}
 	if len(sel.Columns) == 0 {
 		names := make([]string, 0, len(table.Columns))

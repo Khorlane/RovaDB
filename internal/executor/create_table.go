@@ -8,12 +8,13 @@ import (
 )
 
 var (
-	errTableAlreadyExists   = errors.New("executor: table already exists")
-	errTableDoesNotExist    = errors.New("executor: table does not exist")
-	errWrongValueCount      = errors.New("executor: wrong value count")
-	errColumnDoesNotExist   = errors.New("executor: column does not exist")
-	errTypeMismatch         = errors.New("executor: type mismatch")
-	errUnsupportedStatement = errors.New("executor: unsupported statement")
+	errTableAlreadyExists      = errors.New("executor: table already exists")
+	errTableDoesNotExist       = errors.New("executor: table does not exist")
+	errWrongValueCount         = errors.New("executor: wrong value count")
+	errColumnDoesNotExist      = errors.New("executor: column does not exist")
+	errTypeMismatch            = errors.New("executor: type mismatch")
+	errUnsupportedStatement    = errors.New("executor: unsupported statement")
+	errCountOrderByUnsupported = errors.New("executor: ORDER BY not supported for COUNT(*)")
 )
 
 // Table is the tiny in-memory table catalog entry.

@@ -463,6 +463,75 @@ func TestSelectOrderByUnknownColumn(t *testing.T) {
 	}
 }
 
+func TestSelectCountStarEmptyTable(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols()},
+	}
+
+	rows, err := Select(&parser.SelectExpr{TableName: "users", IsCountStar: true}, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 1 || len(rows[0]) != 1 || rows[0][0] != parser.Int64Value(0) {
+		t.Fatalf("Select() rows = %#v, want [[0]]", rows)
+	}
+}
+
+func TestSelectCountStarPopulatedTable(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.Int64Value(3), parser.StringValue("cara")},
+		}},
+	}
+
+	rows, err := Select(&parser.SelectExpr{TableName: "users", IsCountStar: true}, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 1 || rows[0][0] != parser.Int64Value(3) {
+		t.Fatalf("Select() rows = %#v, want [[3]]", rows)
+	}
+}
+
+func TestSelectCountStarWithWhere(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.Int64Value(3), parser.StringValue("cara")},
+		}},
+	}
+
+	rows, err := Select(&parser.SelectExpr{
+		TableName:   "users",
+		IsCountStar: true,
+		Where:       where(parser.Condition{Left: "id", Operator: ">", Right: parser.Int64Value(1)}),
+	}, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 1 || rows[0][0] != parser.Int64Value(2) {
+		t.Fatalf("Select() rows = %#v, want [[2]]", rows)
+	}
+}
+
+func TestSelectCountStarOrderByUnsupported(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("alice")}}},
+	}
+
+	_, err := Select(&parser.SelectExpr{
+		TableName:   "users",
+		IsCountStar: true,
+		OrderBy:     &parser.OrderByClause{Column: "id"},
+	}, tables)
+	if err != errCountOrderByUnsupported {
+		t.Fatalf("Select() error = %v, want %v", err, errCountOrderByUnsupported)
+	}
+}
+
 func TestSelectMissingTable(t *testing.T) {
 	_, err := Select(&parser.SelectExpr{TableName: "users"}, map[string]*Table{})
 	if err != errTableDoesNotExist {
@@ -488,5 +557,17 @@ func TestProjectedColumnNamesInvalidColumn(t *testing.T) {
 	_, err := ProjectedColumnNames(&parser.SelectExpr{TableName: "users", Columns: []string{"email"}}, table)
 	if err != errColumnDoesNotExist {
 		t.Fatalf("ProjectedColumnNames() error = %v, want %v", err, errColumnDoesNotExist)
+	}
+}
+
+func TestProjectedColumnNamesCountStar(t *testing.T) {
+	table := &Table{Name: "users", Columns: typedCols()}
+
+	got, err := ProjectedColumnNames(&parser.SelectExpr{TableName: "users", IsCountStar: true}, table)
+	if err != nil {
+		t.Fatalf("ProjectedColumnNames() error = %v", err)
+	}
+	if len(got) != 1 || got[0] != "count" {
+		t.Fatalf("ProjectedColumnNames() = %#v, want [count]", got)
 	}
 }

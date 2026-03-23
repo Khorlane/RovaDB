@@ -31,6 +31,31 @@ func TestParseSelectExprSingleProjectionColumn(t *testing.T) {
 	}
 }
 
+func TestParseSelectExprCountStar(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+	}{
+		{name: "count star", sql: "SELECT COUNT(*) FROM users"},
+		{name: "count star where", sql: "SELECT COUNT(*) FROM users WHERE id > 1"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ParseSelectExpr(tc.sql)
+			if !ok {
+				t.Fatal("ParseSelectExpr() ok = false, want true")
+			}
+			if got == nil {
+				t.Fatal("ParseSelectExpr() = nil, want value")
+			}
+			if !got.IsCountStar || got.TableName != "users" {
+				t.Fatalf("ParseSelectExpr() = %#v, want COUNT(*) select from users", got)
+			}
+		})
+	}
+}
+
 func TestParseSelectExprSelectStarUsesNilColumns(t *testing.T) {
 	got, ok := ParseSelectExpr("SELECT * FROM users")
 	if !ok {
@@ -41,6 +66,19 @@ func TestParseSelectExprSelectStarUsesNilColumns(t *testing.T) {
 	}
 	if got.Columns != nil {
 		t.Fatalf("Columns = %#v, want nil for SELECT *", got.Columns)
+	}
+}
+
+func TestParseSelectExprInvalidCountStar(t *testing.T) {
+	for _, sql := range []string{
+		"SELECT COUNT(id) FROM users",
+		"SELECT COUNT(*), name FROM users",
+		"SELECT COUNT(*) name FROM users",
+		"SELECT COUNT( * ) FROM users",
+	} {
+		if got, ok := ParseSelectExpr(sql); ok {
+			t.Fatalf("ParseSelectExpr(%q) = %#v, want parse failure", sql, got)
+		}
 	}
 }
 
