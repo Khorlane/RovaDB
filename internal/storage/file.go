@@ -8,8 +8,7 @@ import (
 )
 
 const (
-	headerSize = 16
-	version    = 1
+	version = 1
 )
 
 var (
@@ -66,7 +65,7 @@ func writeHeader(f *os.File) error {
 		return err
 	}
 
-	var header [headerSize]byte
+	var header [HeaderSize]byte
 	copy(header[:8], magic[:])
 	binary.LittleEndian.PutUint32(header[8:12], version)
 
@@ -81,7 +80,7 @@ func readHeader(f *os.File) error {
 		return err
 	}
 
-	var header [headerSize]byte
+	var header [HeaderSize]byte
 	if _, err := io.ReadFull(f, header[:]); err != nil {
 		return errInvalidHeader
 	}
