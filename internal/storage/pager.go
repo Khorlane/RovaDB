@@ -161,6 +161,30 @@ func (p *Pager) DirtyPages() []*Page {
 	return pages
 }
 
+// DirtyPagesWithOriginals returns dirty pages that still have saved
+// pre-mutation images, ordered by ascending page number. Newly allocated pages
+// are excluded because they have no prior durable image to journal.
+func (p *Pager) DirtyPagesWithOriginals() []*Page {
+	if p == nil {
+		return nil
+	}
+
+	ids := make([]int, 0, len(p.pages))
+	for id, page := range p.pages {
+		if page == nil || !page.Dirty() || !page.HasOriginal() {
+			continue
+		}
+		ids = append(ids, int(id))
+	}
+	sort.Ints(ids)
+
+	pages := make([]*Page, 0, len(ids))
+	for _, id := range ids {
+		pages = append(pages, p.pages[PageID(id)])
+	}
+	return pages
+}
+
 // FlushDirty writes dirty pages to disk and clears their dirty flags on
 // successful write. Flush eligibility is driven entirely by dirty tracking.
 func (p *Pager) FlushDirty() error {
