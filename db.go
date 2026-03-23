@@ -12,6 +12,7 @@ import (
 type DB struct {
 	path   string
 	closed bool
+	tables map[string]*executor.Table
 }
 
 // Open returns a database handle for the given path.
@@ -47,8 +48,22 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	if strings.TrimSpace(sql) == "" {
 		return Result{}, ErrInvalidArgument
 	}
+	if db.tables == nil {
+		db.tables = make(map[string]*executor.Table)
+	}
 
-	return Result{}, ErrNotImplemented
+	stmt, err := parser.Parse(sql)
+	if err != nil {
+		return Result{}, ErrNotImplemented
+	}
+	if _, ok := stmt.(*parser.CreateTableStmt); !ok {
+		return Result{}, ErrNotImplemented
+	}
+	if err := executor.Execute(stmt, db.tables); err != nil {
+		return Result{}, err
+	}
+
+	return Result{}, nil
 }
 
 // Query validates the call and reserves query execution for a later engine pass.
