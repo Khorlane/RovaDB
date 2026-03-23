@@ -13,8 +13,10 @@ const (
 
 var (
 	magic             = [8]byte{'R', 'O', 'V', 'A', 'D', 'B', 0, 0}
-	errInvalidHeader  = errors.New("storage: invalid database header")
+	errFileTooSmall   = errors.New("storage: file too small")
+	errInvalidMagic   = errors.New("storage: invalid database magic")
 	errInvalidVersion = errors.New("storage: unsupported database version")
+	errInvalidHeader  = errors.New("storage: invalid database header")
 )
 
 // DBFile is the minimal durable database file handle.
@@ -90,10 +92,10 @@ func readHeader(f *os.File) error {
 
 	var header [HeaderSize]byte
 	if _, err := io.ReadFull(f, header[:]); err != nil {
-		return errInvalidHeader
+		return errFileTooSmall
 	}
 	if string(header[:8]) != string(magic[:]) {
-		return errInvalidHeader
+		return errInvalidMagic
 	}
 	if binary.LittleEndian.Uint32(header[8:12]) != version {
 		return errInvalidVersion

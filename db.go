@@ -11,6 +11,12 @@ import (
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
+var (
+	errDuplicateRootPageID       = errors.New("rovadb: duplicate root page id")
+	errPersistedRowCountMismatch = errors.New("rovadb: persisted row count mismatch")
+	errInvalidStoredTableMeta    = errors.New("rovadb: invalid stored table metadata")
+)
+
 // DB is the top-level handle for a RovaDB database.
 type DB struct {
 	path   string
@@ -277,10 +283,23 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 	if catalog == nil {
 		return tables, nil
 	}
+	seenRootPageIDs := make(map[storage.PageID]struct{}, len(catalog.Tables))
 
 	for _, table := range catalog.Tables {
+		if table.Name == "" || table.RootPageID < 1 || len(table.Columns) == 0 {
+			return nil, errInvalidStoredTableMeta
+		}
+		rootPageID := storage.PageID(table.RootPageID)
+		if _, ok := seenRootPageIDs[rootPageID]; ok {
+			return nil, errDuplicateRootPageID
+		}
+		seenRootPageIDs[rootPageID] = struct{}{}
+
 		columns := make([]parser.ColumnDef, 0, len(table.Columns))
 		for _, column := range table.Columns {
+			if column.Name == "" {
+				return nil, errInvalidStoredTableMeta
+			}
 			columnType, err := parserColumnType(column.Type)
 			if err != nil {
 				return nil, err
@@ -291,7 +310,7 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 			Name:    table.Name,
 			Columns: columns,
 		}
-		tables[table.Name].SetStorageMeta(storage.PageID(table.RootPageID), table.RowCount)
+		tables[table.Name].SetStorageMeta(rootPageID, table.RowCount)
 	}
 
 	return tables, nil
@@ -299,7 +318,7 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 
 func loadPersistedRows(pager *storage.Pager, tables map[string]*executor.Table) error {
 	for _, table := range tables {
-		if table == nil || table.PersistedRowCount() == 0 {
+		if table == nil {
 			continue
 		}
 
@@ -312,7 +331,7 @@ func loadPersistedRows(pager *storage.Pager, tables map[string]*executor.Table) 
 			return err
 		}
 		if uint32(len(payloads)) != table.PersistedRowCount() {
-			return errors.New("rovadb: persisted row count mismatch")
+			return errPersistedRowCountMismatch
 		}
 
 		table.Rows = table.Rows[:0]

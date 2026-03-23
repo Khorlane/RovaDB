@@ -1,9 +1,12 @@
 package storage
 
 import (
+	"errors"
 	"io"
 	"os"
 )
+
+var errInvalidPageFileSize = errors.New("storage: invalid page-aligned file size")
 
 // Pager is the minimal page loader and flusher for a database file.
 type Pager struct {
@@ -19,8 +22,15 @@ func NewPager(f *os.File) (*Pager, error) {
 		return nil, err
 	}
 
-	nextPageID := PageID(1)
 	size := info.Size()
+	if size < HeaderSize {
+		return nil, errFileTooSmall
+	}
+	if size > HeaderSize && (size-HeaderSize)%PageSize != 0 {
+		return nil, errInvalidPageFileSize
+	}
+
+	nextPageID := PageID(1)
 	if size > HeaderSize {
 		nextPageID = PageID((size - HeaderSize) / PageSize)
 		if nextPageID < 1 {
