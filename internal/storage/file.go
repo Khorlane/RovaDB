@@ -23,6 +23,14 @@ type DBFile struct {
 	file *os.File
 }
 
+// File returns the underlying file handle for internal wiring.
+func (f *DBFile) File() *os.File {
+	if f == nil {
+		return nil
+	}
+	return f.file
+}
+
 // OpenOrCreate opens an existing database file or creates a new one with a header.
 func OpenOrCreate(path string) (*DBFile, error) {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {

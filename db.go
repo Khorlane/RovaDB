@@ -15,6 +15,7 @@ type DB struct {
 	closed bool
 	tables map[string]*executor.Table
 	file   *storage.DBFile
+	pager  *storage.Pager
 }
 
 // Open returns a database handle for the given path.
@@ -27,8 +28,13 @@ func Open(path string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	pager, err := storage.NewPager(file.File())
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
 
-	return &DB{path: path, file: file}, nil
+	return &DB{path: path, file: file, pager: pager}, nil
 }
 
 // Close releases database resources.
@@ -41,6 +47,11 @@ func (db *DB) Close() error {
 	}
 
 	db.closed = true
+	if db.pager != nil {
+		if err := db.pager.Close(); err != nil {
+			return err
+		}
+	}
 	if db.file != nil {
 		return db.file.Close()
 	}
