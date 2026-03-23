@@ -113,47 +113,74 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	if err != nil {
 		return Result{}, ErrNotImplemented
 	}
-	switch stmt.(type) {
-	case *parser.CreateTableStmt, *parser.InsertStmt, *parser.DeleteStmt, *parser.UpdateStmt:
+	switch stmt := stmt.(type) {
+	case *parser.CreateTableStmt:
+		var rowsAffected int64
+		err := db.execMutatingStatement(func() error {
+			var err error
+			rowsAffected, err = executor.Execute(stmt, db.tables)
+			if err != nil {
+				return err
+			}
+
+			rootPage := db.pager.NewPage()
+			storage.InitTableRootPage(rootPage)
+			db.tables[stmt.Name].SetStorageMeta(rootPage.ID(), 0)
+			if err := db.persistCatalog(); err != nil {
+				delete(db.tables, stmt.Name)
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{rowsAffected: rowsAffected}, nil
+	case *parser.InsertStmt:
+		var rowsAffected int64
+		err := db.execMutatingStatement(func() error {
+			var err error
+			rowsAffected, err = executor.Execute(stmt, db.tables)
+			if err != nil {
+				return err
+			}
+			return db.persistInsertedRow(stmt.TableName)
+		})
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{rowsAffected: rowsAffected}, nil
+	case *parser.UpdateStmt:
+		var rowsAffected int64
+		err := db.execMutatingStatement(func() error {
+			var err error
+			rowsAffected, err = executor.Execute(stmt, db.tables)
+			if err != nil {
+				return err
+			}
+			return db.rewritePersistedTable(stmt.TableName)
+		})
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{rowsAffected: rowsAffected}, nil
+	case *parser.DeleteStmt:
+		var rowsAffected int64
+		err := db.execMutatingStatement(func() error {
+			var err error
+			rowsAffected, err = executor.Execute(stmt, db.tables)
+			if err != nil {
+				return err
+			}
+			return db.rewritePersistedTable(stmt.TableName)
+		})
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{rowsAffected: rowsAffected}, nil
 	default:
 		return Result{}, ErrNotImplemented
 	}
-	db.beginTxn()
-	defer db.clearTxn()
-
-	rowsAffected, err := executor.Execute(stmt, db.tables)
-	if err != nil {
-		return Result{}, err
-	}
-	if createStmt, ok := stmt.(*parser.CreateTableStmt); ok {
-		rootPage := db.pager.NewPage()
-		storage.InitTableRootPage(rootPage)
-		db.tables[createStmt.Name].SetStorageMeta(rootPage.ID(), 0)
-		if err := db.persistCatalog(); err != nil {
-			delete(db.tables, createStmt.Name)
-			return Result{}, err
-		}
-	}
-	if insertStmt, ok := stmt.(*parser.InsertStmt); ok {
-		if err := db.persistInsertedRow(insertStmt.TableName); err != nil {
-			return Result{}, err
-		}
-	}
-	if updateStmt, ok := stmt.(*parser.UpdateStmt); ok {
-		if err := db.rewritePersistedTable(updateStmt.TableName); err != nil {
-			return Result{}, err
-		}
-	}
-	if deleteStmt, ok := stmt.(*parser.DeleteStmt); ok {
-		if err := db.rewritePersistedTable(deleteStmt.TableName); err != nil {
-			return Result{}, err
-		}
-	}
-	if db.txn != nil {
-		db.txn.MarkDirty()
-	}
-
-	return Result{rowsAffected: rowsAffected}, nil
 }
 
 // Query validates the call and reserves query execution for a later engine pass.
@@ -274,6 +301,32 @@ func (db *DB) clearTxn() {
 		return
 	}
 	db.txn = nil
+}
+
+// execMutatingStatement enforces the internal autocommit shape for mutating
+// statements. Durability semantics are intentionally unchanged in this slice.
+func (db *DB) execMutatingStatement(apply func() error) error {
+	if db == nil {
+		return ErrInvalidArgument
+	}
+
+	db.beginTxn()
+	if err := apply(); err != nil {
+		if db.txn != nil && db.txn.IsActive() {
+			db.txn.Rollback()
+		}
+		db.clearTxn()
+		return err
+	}
+
+	if db.txn != nil {
+		db.txn.MarkDirty()
+	}
+	if db.txn != nil && db.txn.IsActive() {
+		db.txn.Commit()
+	}
+	db.clearTxn()
+	return nil
 }
 
 func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {

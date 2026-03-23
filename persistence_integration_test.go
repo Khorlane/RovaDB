@@ -193,6 +193,76 @@ func TestMixedMutationPersistence(t *testing.T) {
 	assertIntRows(t, rows, 10, 30, 4)
 }
 
+func TestMutationsStillPersistUnderAutocommit(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO t VALUES (1)",
+		"INSERT INTO t VALUES (2)",
+		"INSERT INTO t VALUES (3)",
+		"UPDATE t SET id = 10 WHERE id = 1",
+		"DELETE FROM t WHERE id = 2",
+	} {
+		if _, err := db.Exec(context.Background(), sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	rows, err := db.Query(context.Background(), "SELECT * FROM t")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertIntRows(t, rows, 10, 3)
+}
+
+func TestFailedMutatingStatementClearsTxn(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1, 2)"); err == nil {
+		t.Fatal("Exec(insert) error = nil, want failure")
+	}
+	if db.txn != nil {
+		t.Fatalf("db.txn = %#v, want nil", db.txn)
+	}
+}
+
+func TestSuccessfulMutatingStatementClearsTxn(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if db.txn != nil {
+		t.Fatalf("db.txn = %#v, want nil", db.txn)
+	}
+}
+
 func assertIntRows(t *testing.T, rows *Rows, want ...int64) {
 	t.Helper()
 

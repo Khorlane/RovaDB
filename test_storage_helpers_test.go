@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/Khorlane/RovaDB/internal/storage"
@@ -43,5 +42,5 @@ type testFataler interface {
 }
 
 func errInvalidArgumentForTest(msg string) error {
-	return errors.New(fmt.Sprintf("test assertion failed: %s", msg))
+	return fmt.Errorf("test assertion failed: %s", msg)
 }
