@@ -56,7 +56,9 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	if err != nil {
 		return Result{}, ErrNotImplemented
 	}
-	if _, ok := stmt.(*parser.CreateTableStmt); !ok {
+	switch stmt.(type) {
+	case *parser.CreateTableStmt, *parser.InsertStmt:
+	default:
 		return Result{}, ErrNotImplemented
 	}
 	if err := executor.Execute(stmt, db.tables); err != nil {

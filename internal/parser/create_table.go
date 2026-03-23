@@ -21,6 +21,9 @@ func Parse(input string) (any, error) {
 	if strings.HasPrefix(upper, "CREATE TABLE ") {
 		return parseCreateTable(trimmed)
 	}
+	if strings.HasPrefix(upper, "INSERT INTO ") {
+		return parseInsert(trimmed)
+	}
 	if sel, ok := ParseSelectExpr(trimmed); ok {
 		return sel, nil
 	}

@@ -10,6 +10,7 @@ import (
 type Table struct {
 	Name    string
 	Columns []string
+	Rows    [][]parser.Value
 }
 
 // Execute handles the tiny Stage 1 write statement set.
@@ -24,6 +25,8 @@ func Execute(stmt any, tables map[string]*Table) error {
 			Columns: append([]string(nil), s.Columns...),
 		}
 		return nil
+	case *parser.InsertStmt:
+		return executeInsert(s, tables)
 	default:
 		return errors.New("executor: unsupported statement")
 	}
