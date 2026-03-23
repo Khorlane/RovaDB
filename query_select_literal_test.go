@@ -321,6 +321,18 @@ func TestParseSelectExprDirect(t *testing.T) {
 			ok:   true,
 			want: &parser.Expr{},
 		},
+		{
+			name: "select table star where int",
+			sql:  "SELECT * FROM users WHERE id = 1",
+			ok:   true,
+			want: &parser.Expr{},
+		},
+		{
+			name: "select table column where string",
+			sql:  "SELECT name FROM users WHERE name = 'bob'",
+			ok:   true,
+			want: &parser.Expr{},
+		},
 		{name: "select identifier", sql: "SELECT abc", ok: false},
 	}
 
@@ -345,7 +357,19 @@ func TestParseSelectExprDirect(t *testing.T) {
 				}
 				return
 			}
-			if tc.name == "select table star" || tc.name == "select table star mixed spacing" {
+			if tc.name == "select table column where string" {
+				if got.TableName != "users" || len(got.Columns) != 1 || got.Columns[0] != "name" || got.SelectAll || !got.HasWhere || got.WhereColumn != "name" || got.WhereValue != parser.StringValue("bob") {
+					t.Fatalf("ParseSelectExpr() = %#v, want table users columns [name] where name='bob'", got)
+				}
+				return
+			}
+			if tc.name == "select table star" || tc.name == "select table star mixed spacing" || tc.name == "select table star where int" {
+				if tc.name == "select table star where int" {
+					if got.TableName != "users" || !got.SelectAll || len(got.Columns) != 0 || !got.HasWhere || got.WhereColumn != "id" || got.WhereValue != parser.Int64Value(1) {
+						t.Fatalf("ParseSelectExpr() = %#v, want table users select all where id=1", got)
+					}
+					return
+				}
 				if got.TableName != "users" || !got.SelectAll || len(got.Columns) != 0 {
 					t.Fatalf("ParseSelectExpr() = %#v, want table users select all", got)
 				}

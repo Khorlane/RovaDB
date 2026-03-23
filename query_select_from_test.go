@@ -227,3 +227,107 @@ func TestQuerySelectWrongScanShape(t *testing.T) {
 		t.Fatalf("Scan() error = %v, want ErrInvalidArgument", err)
 	}
 }
+
+func TestQuerySelectWhereIntEquality(t *testing.T) {
+	db, err := Open("test.db")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id, name)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+		t.Fatalf("Exec(insert 1) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (2, 'bob')"); err != nil {
+		t.Fatalf("Exec(insert 2) error = %v", err)
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT name FROM users WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+	var name string
+	if err := rows.Scan(&name); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if name != "steve" {
+		t.Fatalf("Scan() got %q, want %q", name, "steve")
+	}
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+}
+
+func TestQuerySelectWhereStringEquality(t *testing.T) {
+	db, err := Open("test.db")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id, name)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+		t.Fatalf("Exec(insert 1) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (2, 'bob')"); err != nil {
+		t.Fatalf("Exec(insert 2) error = %v", err)
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT name FROM users WHERE name = 'bob'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+	var name string
+	if err := rows.Scan(&name); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if name != "bob" {
+		t.Fatalf("Scan() got %q, want %q", name, "bob")
+	}
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+}
+
+func TestQuerySelectWhereNoMatches(t *testing.T) {
+	db, err := Open("test.db")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id, name)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT * FROM users WHERE name = 'bob'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() != nil {
+		t.Fatalf("Err() = %v, want nil", rows.Err())
+	}
+}

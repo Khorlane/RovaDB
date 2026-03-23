@@ -38,10 +38,13 @@ type Expr struct {
 
 // SelectExpr is the minimal parsed form for SELECT <expr>.
 type SelectExpr struct {
-	Expr      *Expr
-	TableName string
-	Columns   []string
-	SelectAll bool
+	Expr        *Expr
+	TableName   string
+	Columns     []string
+	SelectAll   bool
+	WhereColumn string
+	WhereValue  Value
+	HasWhere    bool
 }
 
 // ParseSelectExpr recognizes the tiny Stage 1 SELECT <expr> shape.
@@ -84,15 +87,35 @@ func parseSelectFrom(sql, upper string) (*SelectExpr, bool) {
 	}
 
 	selectList := strings.TrimSpace(sql[len("SELECT "):fromIndex])
-	tableName := strings.TrimSpace(sql[fromIndex+len(" FROM "):])
+	fromPart := strings.TrimSpace(sql[fromIndex+len(" FROM "):])
+	whereUpper := strings.ToUpper(fromPart)
+	tableName := fromPart
+	whereColumn := ""
+	whereValue := Value{}
+	hasWhere := false
+	if whereIndex := strings.Index(whereUpper, " WHERE "); whereIndex >= 0 {
+		tableName = strings.TrimSpace(fromPart[:whereIndex])
+		whereClause := strings.TrimSpace(fromPart[whereIndex+len(" WHERE "):])
+		column, value, ok := parseWhereClause(whereClause)
+		if !ok {
+			return nil, false
+		}
+		whereColumn = column
+		whereValue = value
+		hasWhere = true
+	}
+
 	if selectList == "" || tableName == "" || strings.ContainsAny(tableName, " \t\r\n,") {
 		return nil, false
 	}
 
 	if selectList == "*" {
 		return &SelectExpr{
-			TableName: tableName,
-			SelectAll: true,
+			TableName:   tableName,
+			SelectAll:   true,
+			WhereColumn: whereColumn,
+			WhereValue:  whereValue,
+			HasWhere:    hasWhere,
 		}, true
 	}
 
@@ -110,9 +133,26 @@ func parseSelectFrom(sql, upper string) (*SelectExpr, bool) {
 	}
 
 	return &SelectExpr{
-		TableName: tableName,
-		Columns:   columns,
+		TableName:   tableName,
+		Columns:     columns,
+		WhereColumn: whereColumn,
+		WhereValue:  whereValue,
+		HasWhere:    hasWhere,
 	}, true
+}
+
+func parseWhereClause(input string) (string, Value, bool) {
+	tokens := strings.Fields(strings.TrimSpace(input))
+	if len(tokens) != 3 || tokens[0] == "" || tokens[1] != "=" {
+		return "", Value{}, false
+	}
+
+	value, ok := parseLiteralValue(tokens[2])
+	if !ok {
+		return "", Value{}, false
+	}
+
+	return tokens[0], value, true
 }
 
 func parseParenExpr(expr string) (*Expr, bool) {
