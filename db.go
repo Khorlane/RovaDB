@@ -254,7 +254,11 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 			if err != nil {
 				return &Rows{err: err, index: -1}, nil
 			}
-			return &Rows{values: rows, index: -1}, nil
+			columns, err := executor.ProjectedColumnNames(sel, db.tables[sel.TableName])
+			if err != nil {
+				return &Rows{err: err, index: -1}, nil
+			}
+			return &Rows{values: rows, cols: columns, index: -1}, nil
 		}
 
 		value, err := executor.Eval(sel.Expr)

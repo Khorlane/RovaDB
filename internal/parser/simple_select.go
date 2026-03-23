@@ -41,7 +41,6 @@ type SelectExpr struct {
 	Expr        *Expr
 	TableName   string
 	Columns     []string
-	SelectAll   bool
 	WhereColumn string
 	WhereValue  Value
 	HasWhere    bool
@@ -112,7 +111,6 @@ func parseSelectFrom(sql, upper string) (*SelectExpr, bool) {
 	if selectList == "*" {
 		return &SelectExpr{
 			TableName:   tableName,
-			SelectAll:   true,
 			WhereColumn: whereColumn,
 			WhereValue:  whereValue,
 			HasWhere:    hasWhere,

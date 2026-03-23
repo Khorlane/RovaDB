@@ -80,6 +80,9 @@ func TestQuerySelectAllFromTable(t *testing.T) {
 		t.Fatalf("Query() error = %v", err)
 	}
 	defer rows.Close()
+	if got := rows.Columns(); len(got) != 2 || got[0] != "id" || got[1] != "name" {
+		t.Fatalf("Columns() = %#v, want [id name]", got)
+	}
 
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
@@ -163,6 +166,9 @@ func TestQuerySelectSubsetOrder(t *testing.T) {
 		t.Fatalf("Query() error = %v", err)
 	}
 	defer rows.Close()
+	if got := rows.Columns(); len(got) != 2 || got[0] != "name" || got[1] != "id" {
+		t.Fatalf("Columns() = %#v, want [name id]", got)
+	}
 
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
@@ -174,6 +180,41 @@ func TestQuerySelectSubsetOrder(t *testing.T) {
 	}
 	if name != "steve" || id != 1 {
 		t.Fatalf("row = (%q, %d), want (%q, %d)", name, id, "steve", 1)
+	}
+}
+
+func TestQuerySelectSingleProjectedColumn(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rows, err := db.Query(context.Background(), "SELECT id FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if got := rows.Columns(); len(got) != 1 || got[0] != "id" {
+		t.Fatalf("Columns() = %#v, want [id]", got)
+	}
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+	var id int64
+	if err := rows.Scan(&id); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if id != 1 {
+		t.Fatalf("id = %d, want 1", id)
 	}
 }
 

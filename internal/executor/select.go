@@ -41,8 +41,30 @@ func Select(sel *parser.SelectExpr, tables map[string]*Table) ([][]parser.Value,
 	return rows, nil
 }
 
+func ProjectedColumnNames(sel *parser.SelectExpr, table *Table) ([]string, error) {
+	if sel == nil || table == nil {
+		return nil, errUnsupportedStatement
+	}
+	if len(sel.Columns) == 0 {
+		names := make([]string, 0, len(table.Columns))
+		for _, column := range table.Columns {
+			names = append(names, column.Name)
+		}
+		return names, nil
+	}
+
+	names := make([]string, 0, len(sel.Columns))
+	for _, name := range sel.Columns {
+		if _, err := resolveColumnIndex(name, table); err != nil {
+			return nil, errColumnDoesNotExist
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
 func resolveSelectColumns(sel *parser.SelectExpr, table *Table) ([]int, error) {
-	if sel.SelectAll {
+	if len(sel.Columns) == 0 {
 		indexes := make([]int, 0, len(table.Columns))
 		for i := range table.Columns {
 			indexes = append(indexes, i)

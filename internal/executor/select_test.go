@@ -22,7 +22,7 @@ func TestSelectAllColumns(t *testing.T) {
 		},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", SelectAll: true}, tables)
+	rows, err := Select(&parser.SelectExpr{TableName: "users"}, tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -50,7 +50,7 @@ func TestSelectEmptyTable(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols()},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", SelectAll: true}, tables)
+	rows, err := Select(&parser.SelectExpr{TableName: "users"}, tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -89,7 +89,7 @@ func TestSelectWithIntWhere(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("steve")}, {parser.Int64Value(2), parser.StringValue("bob")}}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", SelectAll: true, HasWhere: true, WhereColumn: "id", WhereValue: parser.Int64Value(1)}, tables)
+	rows, err := Select(&parser.SelectExpr{TableName: "users", HasWhere: true, WhereColumn: "id", WhereValue: parser.Int64Value(1)}, tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -117,7 +117,7 @@ func TestSelectWithUnknownWhereColumn(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols()},
 	}
 
-	_, err := Select(&parser.SelectExpr{TableName: "users", SelectAll: true, HasWhere: true, WhereColumn: "email", WhereValue: parser.StringValue("bob")}, tables)
+	_, err := Select(&parser.SelectExpr{TableName: "users", HasWhere: true, WhereColumn: "email", WhereValue: parser.StringValue("bob")}, tables)
 	if err != errColumnDoesNotExist {
 		t.Fatalf("Select() error = %v, want %v", err, errColumnDoesNotExist)
 	}
@@ -128,7 +128,7 @@ func TestSelectWithNoMatches(t *testing.T) {
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("steve")}}},
 	}
 
-	rows, err := Select(&parser.SelectExpr{TableName: "users", SelectAll: true, HasWhere: true, WhereColumn: "name", WhereValue: parser.StringValue("bob")}, tables)
+	rows, err := Select(&parser.SelectExpr{TableName: "users", HasWhere: true, WhereColumn: "name", WhereValue: parser.StringValue("bob")}, tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
@@ -138,8 +138,29 @@ func TestSelectWithNoMatches(t *testing.T) {
 }
 
 func TestSelectMissingTable(t *testing.T) {
-	_, err := Select(&parser.SelectExpr{TableName: "users", SelectAll: true}, map[string]*Table{})
+	_, err := Select(&parser.SelectExpr{TableName: "users"}, map[string]*Table{})
 	if err != errTableDoesNotExist {
 		t.Fatalf("Select() error = %v, want %v", err, errTableDoesNotExist)
+	}
+}
+
+func TestProjectedColumnNamesAllColumns(t *testing.T) {
+	table := &Table{Name: "users", Columns: typedCols()}
+
+	got, err := ProjectedColumnNames(&parser.SelectExpr{TableName: "users"}, table)
+	if err != nil {
+		t.Fatalf("ProjectedColumnNames() error = %v", err)
+	}
+	if len(got) != 2 || got[0] != "id" || got[1] != "name" {
+		t.Fatalf("ProjectedColumnNames() = %#v, want [id name]", got)
+	}
+}
+
+func TestProjectedColumnNamesInvalidColumn(t *testing.T) {
+	table := &Table{Name: "users", Columns: typedCols()}
+
+	_, err := ProjectedColumnNames(&parser.SelectExpr{TableName: "users", Columns: []string{"email"}}, table)
+	if err != errColumnDoesNotExist {
+		t.Fatalf("ProjectedColumnNames() error = %v, want %v", err, errColumnDoesNotExist)
 	}
 }

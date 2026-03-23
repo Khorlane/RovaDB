@@ -6,6 +6,7 @@ import "github.com/Khorlane/RovaDB/internal/parser"
 type Rows struct {
 	err    error
 	index  int
+	cols   []string
 	values [][]parser.Value
 }
 
@@ -96,4 +97,12 @@ func (r *Rows) Close() error {
 // Err reports any terminal row iteration error.
 func (r *Rows) Err() error {
 	return r.err
+}
+
+// Columns reports the projected column names in scan order.
+func (r *Rows) Columns() []string {
+	if r == nil {
+		return nil
+	}
+	return append([]string(nil), r.cols...)
 }
