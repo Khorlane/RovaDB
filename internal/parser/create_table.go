@@ -1,11 +1,10 @@
 package parser
 
 import (
-	"errors"
 	"strings"
 )
 
-var errUnsupportedStatement = errors.New("parser: unsupported statement")
+var errUnsupportedStatement = newParseError("unsupported query form")
 
 const (
 	ColumnTypeInt  = "INT"
@@ -59,18 +58,18 @@ func parseCreateTable(input string) (*CreateTableStmt, error) {
 	rest := strings.TrimSpace(trimmed[len(prefix):])
 	split := strings.IndexAny(rest, " \t\r\n")
 	if split <= 0 {
-		return nil, errors.New("parser: invalid create table")
+		return nil, newParseError("unsupported query form")
 	}
 
 	name := strings.TrimSpace(rest[:split])
 	definition := strings.TrimSpace(rest[split:])
 	if name == "" || !strings.HasPrefix(definition, "(") || !strings.HasSuffix(definition, ")") {
-		return nil, errors.New("parser: invalid create table")
+		return nil, newParseError("unsupported query form")
 	}
 
 	inner := strings.TrimSpace(definition[1 : len(definition)-1])
 	if inner == "" {
-		return nil, errors.New("parser: invalid create table")
+		return nil, newParseError("unsupported query form")
 	}
 
 	rawColumns := strings.Split(inner, ",")
@@ -79,18 +78,18 @@ func parseCreateTable(input string) (*CreateTableStmt, error) {
 	for _, raw := range rawColumns {
 		parts := strings.Fields(strings.TrimSpace(raw))
 		if len(parts) != 2 {
-			return nil, errors.New("parser: invalid create table")
+			return nil, newParseError("unsupported query form")
 		}
 		name := strings.TrimSpace(parts[0])
 		typeName := strings.ToUpper(strings.TrimSpace(parts[1]))
 		if name == "" {
-			return nil, errors.New("parser: invalid create table")
+			return nil, newParseError("unsupported query form")
 		}
 		if _, ok := seen[name]; ok {
-			return nil, errors.New("parser: invalid create table")
+			return nil, newParseError("unsupported query form")
 		}
 		if typeName != ColumnTypeInt && typeName != ColumnTypeText {
-			return nil, errors.New("parser: invalid create table")
+			return nil, newParseError("unsupported query form")
 		}
 		seen[name] = struct{}{}
 		columns = append(columns, ColumnDef{Name: name, Type: typeName})

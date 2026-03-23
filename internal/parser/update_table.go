@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"errors"
 	"strings"
 )
 
@@ -29,13 +28,13 @@ func parseUpdate(input string) (*UpdateStmt, error) {
 	rest := strings.TrimSpace(trimmed[len(prefix):])
 	split := strings.Index(strings.ToUpper(rest), " SET ")
 	if split <= 0 {
-		return nil, errors.New("parser: invalid update")
+		return nil, newParseError("unsupported query form")
 	}
 
 	tableName := strings.TrimSpace(rest[:split])
 	setPart := strings.TrimSpace(rest[split+len(" SET "):])
 	if tableName == "" {
-		return nil, errors.New("parser: invalid update")
+		return nil, newParseError("unsupported query form")
 	}
 
 	var where *WhereClause
@@ -46,14 +45,14 @@ func parseUpdate(input string) (*UpdateStmt, error) {
 		whereClause := strings.TrimSpace(setPart[whereIndex+len(" WHERE "):])
 		parsedWhere, ok := parseWhereClause(whereClause)
 		if !ok {
-			return nil, errors.New("parser: invalid update")
+			return nil, newParseError("invalid where clause")
 		}
 		where = parsedWhere
 	}
 
 	assignments, ok := parseAssignments(assignmentsPart)
 	if !ok {
-		return nil, errors.New("parser: invalid update")
+		return nil, newParseError("unsupported query form")
 	}
 
 	return &UpdateStmt{

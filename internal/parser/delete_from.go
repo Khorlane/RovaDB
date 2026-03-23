@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"errors"
 	"strings"
 )
 
@@ -21,7 +20,7 @@ func parseDelete(input string) (*DeleteStmt, error) {
 
 	rest := strings.TrimSpace(trimmed[len(prefix):])
 	if rest == "" {
-		return nil, errors.New("parser: invalid delete")
+		return nil, newParseError("unsupported query form")
 	}
 
 	upperRest := strings.ToUpper(rest)
@@ -32,13 +31,13 @@ func parseDelete(input string) (*DeleteStmt, error) {
 		whereClause := strings.TrimSpace(rest[whereIndex+len(" WHERE "):])
 		parsedWhere, ok := parseWhereClause(whereClause)
 		if !ok {
-			return nil, errors.New("parser: invalid delete")
+			return nil, newParseError("invalid where clause")
 		}
 		where = parsedWhere
 	}
 
 	if tableName == "" || strings.ContainsAny(tableName, " \t\r\n,") {
-		return nil, errors.New("parser: invalid delete")
+		return nil, newParseError("unsupported query form")
 	}
 
 	return &DeleteStmt{

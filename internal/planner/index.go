@@ -1,13 +1,12 @@
 package planner
 
 import (
-	"errors"
 	"strconv"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
-var errIndexColumnDoesNotExist = errors.New("planner: index column does not exist")
+var errIndexColumnDoesNotExist = newPlanError("column not found")
 
 // IndexKey is the normalized comparable key used by basic indexes.
 type IndexKey string

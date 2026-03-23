@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"errors"
 	"strconv"
 	"strings"
 )
@@ -24,42 +23,42 @@ func parseInsert(input string) (*InsertStmt, error) {
 	rest := strings.TrimSpace(trimmed[len(prefix):])
 	split := strings.IndexAny(rest, " \t\r\n")
 	if split <= 0 {
-		return nil, errors.New("parser: invalid insert")
+		return nil, newParseError("unsupported query form")
 	}
 
 	tableName := strings.TrimSpace(rest[:split])
 	afterTable := strings.TrimSpace(rest[split:])
 	if tableName == "" {
-		return nil, errors.New("parser: invalid insert")
+		return nil, newParseError("unsupported query form")
 	}
 
 	columns := []string(nil)
 	if strings.HasPrefix(afterTable, "(") {
 		closeIdx := strings.Index(afterTable, ")")
 		if closeIdx < 0 {
-			return nil, errors.New("parser: invalid insert")
+			return nil, newParseError("unsupported query form")
 		}
 
 		parsedColumns, ok := parseInsertColumns(afterTable[1:closeIdx])
 		if !ok {
-			return nil, errors.New("parser: invalid insert")
+			return nil, newParseError("unsupported query form")
 		}
 		columns = parsedColumns
 		afterTable = strings.TrimSpace(afterTable[closeIdx+1:])
 	}
 
 	if !strings.HasPrefix(strings.ToUpper(afterTable), "VALUES ") {
-		return nil, errors.New("parser: invalid insert")
+		return nil, newParseError("unsupported query form")
 	}
 
 	valuesPart := strings.TrimSpace(afterTable[len("VALUES"):])
 	if !strings.HasPrefix(valuesPart, "(") || !strings.HasSuffix(valuesPart, ")") {
-		return nil, errors.New("parser: invalid insert")
+		return nil, newParseError("unsupported query form")
 	}
 
 	inner := strings.TrimSpace(valuesPart[1 : len(valuesPart)-1])
 	if inner == "" {
-		return nil, errors.New("parser: invalid insert")
+		return nil, newParseError("unsupported query form")
 	}
 
 	rawValues := strings.Split(inner, ",")
@@ -67,17 +66,17 @@ func parseInsert(input string) (*InsertStmt, error) {
 	for _, raw := range rawValues {
 		token := strings.TrimSpace(raw)
 		if token == "" {
-			return nil, errors.New("parser: invalid insert")
+			return nil, newParseError("unsupported query form")
 		}
 
 		value, ok := parseLiteralValue(token)
 		if !ok {
-			return nil, errors.New("parser: invalid insert")
+			return nil, newParseError("unsupported query form")
 		}
 		values = append(values, value)
 	}
 	if len(columns) > 0 && len(columns) != len(values) {
-		return nil, errors.New("parser: invalid insert")
+		return nil, newParseError("unsupported query form")
 	}
 
 	return &InsertStmt{TableName: tableName, Columns: columns, Values: values}, nil

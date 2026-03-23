@@ -157,8 +157,8 @@ func TestQueryUnsupportedLiteral(t *testing.T) {
 			if rows.Next() {
 				t.Fatal("Next() = true, want false")
 			}
-			if !errors.Is(rows.Err(), ErrNotImplemented) {
-				t.Fatalf("Err() = %v, want ErrNotImplemented", rows.Err())
+			if rows.Err() == nil || rows.Err().Error() != "parse: unsupported query form" {
+				t.Fatalf("Err() = %v, want %q", rows.Err(), "parse: unsupported query form")
 			}
 		})
 	}

@@ -53,23 +53,23 @@ func Open(path string) (*DB, error) {
 	// A surviving rollback journal implies an interrupted commit. Recovery
 	// restores last-committed page images before catalog or row metadata loads.
 	if err := storage.RecoverFromRollbackJournal(path, storage.PageSize); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
+		return nil, wrapStorageError(err)
 	}
 
 	file, err := storage.OpenOrCreate(path)
 	if err != nil {
-		return nil, err
+		return nil, wrapStorageError(err)
 	}
 	pager, err := storage.NewPager(file.File())
 	if err != nil {
 		_ = file.Close()
-		return nil, err
+		return nil, wrapStorageError(err)
 	}
 	catalog, err := storage.LoadCatalog(pager)
 	if err != nil {
 		_ = pager.Close()
 		_ = file.Close()
-		return nil, err
+		return nil, wrapStorageError(err)
 	}
 	tables, err := tablesFromCatalog(catalog)
 	if err != nil {
@@ -138,7 +138,7 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 
 	stmt, err := parser.Parse(sql)
 	if err != nil {
-		return Result{}, ErrNotImplemented
+		return Result{}, err
 	}
 	switch stmt := stmt.(type) {
 	case *parser.CreateTableStmt:
@@ -234,7 +234,7 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	default:
-		return Result{}, ErrNotImplemented
+		return Result{}, newExecError("unsupported query form")
 	}
 }
 
@@ -280,7 +280,7 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 		}
 	}
 
-	return &Rows{err: ErrNotImplemented, index: -1}, nil
+	return &Rows{err: classifyQueryParseError(sql), index: -1}, nil
 }
 
 func plannerTableMetadata(tables map[string]*executor.Table) map[string]*planner.TableMetadata {
@@ -330,7 +330,7 @@ func (db *DB) rollbackTxn() error {
 		return nil
 	}
 	if db.pager == nil {
-		return ErrTxnInvariantViolation
+		return newExecError("invalid transaction state")
 	}
 	if db.txn.IsActive() {
 		db.pager.RestoreDirtyPages()
@@ -349,7 +349,7 @@ func (db *DB) rollbackTxn() error {
 		return nil
 	}
 	if db.txn.CanCommit() {
-		return ErrTxnInvariantViolation
+		return newExecError("invalid transaction state")
 	}
 	return nil
 }
@@ -403,16 +403,16 @@ func (db *DB) commitTxn() error {
 		return nil
 	}
 	if db.pager == nil {
-		return ErrTxnInvariantViolation
+		return newExecError("invalid transaction state")
 	}
 	if !db.txn.CanCommit() {
-		return ErrTxnCommitWithoutActive
+		return newExecError("invalid transaction state")
 	}
 	if db.txn.IsDirty() {
 		journalPages := db.pager.DirtyPagesWithOriginals()
 		if len(journalPages) > 0 {
 			if err := storage.WriteRollbackJournal(storage.JournalPath(db.path), db.pager.PageSize(), journalPages); err != nil {
-				return err
+				return wrapStorageError(err)
 			}
 			if db.afterJournalWriteHook != nil {
 				if err := db.afterJournalWriteHook(); err != nil {
@@ -421,10 +421,10 @@ func (db *DB) commitTxn() error {
 			}
 		}
 		if err := db.pager.FlushDirty(); err != nil {
-			return err
+			return wrapStorageError(err)
 		}
 		if err := db.pager.Sync(); err != nil {
-			return err
+			return wrapStorageError(err)
 		}
 		if db.afterDatabaseSyncHook != nil {
 			if err := db.afterDatabaseSyncHook(); err != nil {
@@ -433,7 +433,7 @@ func (db *DB) commitTxn() error {
 		}
 		if len(journalPages) > 0 {
 			if err := os.Remove(storage.JournalPath(db.path)); err != nil && !os.IsNotExist(err) {
-				return err
+				return wrapStorageError(err)
 			}
 		}
 	}
@@ -444,11 +444,11 @@ func (db *DB) commitTxn() error {
 	if _, err := os.Stat(storage.JournalPath(db.path)); err == nil {
 		return ErrTxnInvariantViolation
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
+		return wrapStorageError(err)
 	}
 	if err := db.txn.Commit(); err != nil {
 		if errors.Is(err, txn.ErrNoActiveTxn) || errors.Is(err, txn.ErrInvalidCommitState) {
-			return ErrTxnCommitWithoutActive
+			return newExecError("invalid transaction state")
 		}
 		return err
 	}
@@ -470,11 +470,11 @@ func (db *DB) applyStagedCreate(stagedTables map[string]*executor.Table, tableNa
 
 	catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
 	if err != nil {
-		return err
+		return wrapStorageError(err)
 	}
 	rootPageData, err := storage.BuildTablePageData(nil)
 	if err != nil {
-		return err
+		return wrapStorageError(err)
 	}
 
 	if err := db.stageDirtyState(catalogData, []stagedPage{{
@@ -505,11 +505,11 @@ func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, t
 	}
 	tablePageData, err := storage.BuildTablePageData(encodedRows)
 	if err != nil {
-		return err
+		return wrapStorageError(err)
 	}
 	catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
 	if err != nil {
-		return err
+		return wrapStorageError(err)
 	}
 
 	if err := db.stageDirtyState(catalogData, []stagedPage{{
@@ -535,13 +535,13 @@ func (db *DB) stageDirtyState(catalogData []byte, pages []stagedPage) error {
 			page = db.pager.NewPage()
 			if page.ID() != staged.id {
 				db.pager.DiscardNewPage(page.ID())
-				return errors.New("rovadb: unexpected new page id")
+				return newStorageError("unexpected new page id")
 			}
 		} else {
 			var err error
 			page, err = db.pager.Get(staged.id)
 			if err != nil {
-				return err
+				return wrapStorageError(err)
 			}
 		}
 
@@ -552,7 +552,7 @@ func (db *DB) stageDirtyState(catalogData []byte, pages []stagedPage) error {
 
 	catalogPage, err := db.pager.Get(0)
 	if err != nil {
-		return err
+		return wrapStorageError(err)
 	}
 	db.pager.MarkDirtyWithOriginal(catalogPage)
 	clear(catalogPage.Data())
@@ -567,7 +567,7 @@ func encodeRows(rows [][]parser.Value) ([][]byte, error) {
 	for _, row := range rows {
 		encoded, err := storage.EncodeRow(row)
 		if err != nil {
-			return nil, err
+			return nil, wrapStorageError(err)
 		}
 		encodedRows = append(encodedRows, encoded)
 	}
@@ -751,7 +751,7 @@ func (db *DB) defineBasicIndex(tableName, columnName string) error {
 		stagedTables := cloneTables(db.tables)
 		table := stagedTables[tableName]
 		if table == nil {
-			return errors.New("rovadb: table does not exist")
+			return newExecError("table not found")
 		}
 		columnNames := columnNamesForTable(table)
 		found := false
@@ -761,7 +761,7 @@ func (db *DB) defineBasicIndex(tableName, columnName string) error {
 			}
 		}
 		if !found {
-			return errors.New("rovadb: column does not exist")
+			return newExecError("column not found")
 		}
 		if table.Indexes == nil {
 			table.Indexes = make(map[string]*planner.BasicIndex)
@@ -774,7 +774,7 @@ func (db *DB) defineBasicIndex(tableName, columnName string) error {
 
 		catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
 		if err != nil {
-			return err
+			return wrapStorageError(err)
 		}
 		if err := db.stageDirtyState(catalogData, nil); err != nil {
 			return err
@@ -799,11 +799,11 @@ func loadPersistedRows(pager *storage.Pager, tables map[string]*executor.Table) 
 
 		page, err := pager.Get(table.RootPageID())
 		if err != nil {
-			return err
+			return wrapStorageError(err)
 		}
 		payloads, err := storage.ReadRowsFromTablePage(page)
 		if err != nil {
-			return err
+			return wrapStorageError(err)
 		}
 		if uint32(len(payloads)) != table.PersistedRowCount() {
 			return errPersistedRowCountMismatch
@@ -813,7 +813,7 @@ func loadPersistedRows(pager *storage.Pager, tables map[string]*executor.Table) 
 		for _, payload := range payloads {
 			row, err := storage.DecodeRow(payload)
 			if err != nil {
-				return err
+				return wrapStorageError(err)
 			}
 			table.Rows = append(table.Rows, row)
 		}
@@ -838,6 +838,25 @@ func parserColumnType(columnType uint8) (string, error) {
 	case storage.CatalogColumnTypeText:
 		return parser.ColumnTypeText, nil
 	default:
-		return "", errors.New("rovadb: invalid catalog column type")
+		return "", newStorageError("invalid catalog column type")
 	}
+}
+
+func classifyQueryParseError(sql string) error {
+	upper := strings.ToUpper(strings.TrimSpace(sql))
+	if strings.HasPrefix(upper, "SELECT ") && strings.Contains(upper, " WHERE ") {
+		return newParseError("invalid where clause")
+	}
+	return newParseError("unsupported query form")
+}
+
+func wrapStorageError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var dbErr *DBError
+	if errors.As(err, &dbErr) {
+		return err
+	}
+	return newStorageError(err.Error())
 }

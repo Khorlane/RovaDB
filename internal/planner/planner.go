@@ -11,6 +11,10 @@ type TableMetadata struct {
 // Current behavior defaults to table scan unless optional metadata supports
 // a simple equality index scan decision.
 func PlanSelect(stmt *parser.SelectExpr, tables ...map[string]*TableMetadata) (*SelectPlan, error) {
+	if stmt == nil {
+		return nil, newPlanError("unsupported query form")
+	}
+
 	plan := &SelectPlan{
 		Stmt: stmt,
 	}

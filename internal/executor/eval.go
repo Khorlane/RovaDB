@@ -1,14 +1,12 @@
 package executor
 
 import (
-	"errors"
-
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
-var errInvalidExpression = errors.New("executor: invalid expression")
+var errInvalidExpression = newExecError("unsupported query form")
 
-var errUnsupportedComparisonOp = errors.New("executor: unsupported comparison operator")
+var errUnsupportedComparisonOp = newExecError("unsupported query form")
 
 // Eval evaluates the tiny Stage 1 expression model into a Value.
 func Eval(expr *parser.Expr) (parser.Value, error) {

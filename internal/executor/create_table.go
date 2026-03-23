@@ -1,22 +1,20 @@
 package executor
 
 import (
-	"errors"
-
 	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/planner"
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
 var (
-	errTableAlreadyExists      = errors.New("executor: table already exists")
-	errTableDoesNotExist       = errors.New("executor: table does not exist")
-	errWrongValueCount         = errors.New("executor: wrong value count")
-	errColumnDoesNotExist      = errors.New("executor: column does not exist")
-	errTypeMismatch            = errors.New("executor: type mismatch")
-	errUnsupportedStatement    = errors.New("executor: unsupported statement")
-	errCountOrderByUnsupported = errors.New("executor: ORDER BY not supported for COUNT(*)")
-	errInvalidSelectPlan       = errors.New("executor: invalid select plan")
+	errTableAlreadyExists      = newExecError("table already exists")
+	errTableDoesNotExist       = newExecError("table not found")
+	errWrongValueCount         = newExecError("wrong value count")
+	errColumnDoesNotExist      = newExecError("column not found")
+	errTypeMismatch            = newExecError("type mismatch")
+	errUnsupportedStatement    = newExecError("unsupported query form")
+	errCountOrderByUnsupported = newExecError("unsupported query form")
+	errInvalidSelectPlan       = newExecError("invalid select plan")
 )
 
 // Table is the tiny in-memory table catalog entry.

@@ -506,8 +506,8 @@ func TestCommitTxnWithoutActiveTxnReturnsError(t *testing.T) {
 	if err := db.txn.Commit(); err != nil {
 		t.Fatalf("txn.Commit() error = %v", err)
 	}
-	if err := db.commitTxn(); !errors.Is(err, ErrTxnCommitWithoutActive) {
-		t.Fatalf("commitTxn() error = %v, want %v", err, ErrTxnCommitWithoutActive)
+	if err := db.commitTxn(); err == nil || err.Error() != "execution: invalid transaction state" {
+		t.Fatalf("commitTxn() error = %v, want %q", err, "execution: invalid transaction state")
 	}
 }
 

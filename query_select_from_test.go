@@ -874,8 +874,8 @@ func TestQuerySelectCountColumnUnsupported(t *testing.T) {
 	if rows.Next() {
 		t.Fatal("Next() = true, want false")
 	}
-	if !errors.Is(rows.Err(), ErrNotImplemented) {
-		t.Fatalf("Err() = %v, want ErrNotImplemented", rows.Err())
+	if rows.Err() == nil || rows.Err().Error() != "parse: unsupported query form" {
+		t.Fatalf("Err() = %v, want %q", rows.Err(), "parse: unsupported query form")
 	}
 }
 
@@ -895,8 +895,8 @@ func TestQuerySelectCountMixedProjectionUnsupported(t *testing.T) {
 	if rows.Next() {
 		t.Fatal("Next() = true, want false")
 	}
-	if !errors.Is(rows.Err(), ErrNotImplemented) {
-		t.Fatalf("Err() = %v, want ErrNotImplemented", rows.Err())
+	if rows.Err() == nil || rows.Err().Error() != "parse: unsupported query form" {
+		t.Fatalf("Err() = %v, want %q", rows.Err(), "parse: unsupported query form")
 	}
 }
 
@@ -950,8 +950,8 @@ func TestQuerySelectMalformedWhereBooleanChain(t *testing.T) {
 	if rows.Next() {
 		t.Fatal("Next() = true, want false")
 	}
-	if !errors.Is(rows.Err(), ErrNotImplemented) {
-		t.Fatalf("Err() = %v, want ErrNotImplemented", rows.Err())
+	if rows.Err() == nil || rows.Err().Error() != "parse: invalid where clause" {
+		t.Fatalf("Err() = %v, want %q", rows.Err(), "parse: invalid where clause")
 	}
 }
 
