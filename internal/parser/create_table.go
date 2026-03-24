@@ -10,6 +10,7 @@ const (
 	ColumnTypeInt  = "INT"
 	ColumnTypeText = "TEXT"
 	ColumnTypeBool = "BOOL"
+	ColumnTypeReal = "REAL"
 )
 
 /*
@@ -126,7 +127,7 @@ func parseCreateTable(input string) (*CreateTableStmt, error) {
 		if _, ok := seen[name]; ok {
 			return nil, newParseError("unsupported query form")
 		}
-		if typeName != ColumnTypeInt && typeName != ColumnTypeText && typeName != ColumnTypeBool {
+		if typeName != ColumnTypeInt && typeName != ColumnTypeText && typeName != ColumnTypeBool && typeName != ColumnTypeReal {
 			return nil, newParseError("unsupported query form")
 		}
 		seen[name] = struct{}{}
