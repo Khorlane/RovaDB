@@ -50,6 +50,7 @@ type Value struct {
 	Kind ValueKind
 	I64  int64
 	Str  string
+	Bool bool
 }
 
 // NullValue builds a NULL Value.
@@ -67,6 +68,11 @@ func StringValue(v string) Value {
 	return Value{Kind: ValueKindString, Str: v}
 }
 
+// BoolValue builds a bool Value.
+func BoolValue(v bool) Value {
+	return Value{Kind: ValueKindBool, Bool: v}
+}
+
 // Any converts the internal value to its Go representation.
 func (v Value) Any() any {
 	switch v.Kind {
@@ -76,6 +82,8 @@ func (v Value) Any() any {
 		return v.I64
 	case ValueKindString:
 		return v.Str
+	case ValueKindBool:
+		return v.Bool
 	default:
 		return nil
 	}

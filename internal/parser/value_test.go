@@ -32,6 +32,51 @@ func TestStringValue(t *testing.T) {
 	}
 }
 
+func TestBoolValue(t *testing.T) {
+	got := BoolValue(true)
+	if got.Kind != ValueKindBool {
+		t.Fatalf("BoolValue().Kind = %v, want %v", got.Kind, ValueKindBool)
+	}
+	if !got.Bool {
+		t.Fatalf("BoolValue().Bool = %v, want true", got.Bool)
+	}
+	if got.Any() != true {
+		t.Fatalf("BoolValue().Any() = %#v, want true", got.Any())
+	}
+}
+
+func TestParseLiteralValueBool(t *testing.T) {
+	tests := []struct {
+		name  string
+		token string
+		want  Value
+	}{
+		{name: "true upper", token: "TRUE", want: BoolValue(true)},
+		{name: "false upper", token: "FALSE", want: BoolValue(false)},
+		{name: "true lower", token: "true", want: BoolValue(true)},
+		{name: "false lower", token: "false", want: BoolValue(false)},
+		{name: "true title", token: "True", want: BoolValue(true)},
+		{name: "false title", token: "False", want: BoolValue(false)},
+		{name: "quoted true text", token: "'true'", want: StringValue("true")},
+		{name: "quoted false text", token: "'false'", want: StringValue("false")},
+		{name: "zero remains int", token: "0", want: Int64Value(0)},
+		{name: "one remains int", token: "1", want: Int64Value(1)},
+		{name: "null regression", token: "NULL", want: NullValue()},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseLiteralValue(tc.token)
+			if !ok {
+				t.Fatalf("parseLiteralValue(%q) ok = false, want true", tc.token)
+			}
+			if got != tc.want {
+				t.Fatalf("parseLiteralValue(%q) = %#v, want %#v", tc.token, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseSelectExprValueKinds(t *testing.T) {
 	intSel, ok := ParseSelectExpr("SELECT 1")
 	if !ok {
@@ -59,6 +104,34 @@ func TestParseSelectExprValueKinds(t *testing.T) {
 	}
 	if strSel.Expr.Str != "hi" {
 		t.Fatalf("ParseSelectExpr(SELECT 'hi').Expr.Str = %q, want %q", strSel.Expr.Str, "hi")
+	}
+
+	trueSel, ok := ParseSelectExpr("SELECT TRUE")
+	if !ok {
+		t.Fatal("ParseSelectExpr(SELECT TRUE) ok = false, want true")
+	}
+	if trueSel.Expr == nil {
+		t.Fatal("ParseSelectExpr(SELECT TRUE).Expr = nil, want value")
+	}
+	if trueSel.Expr.Kind != ExprKindBoolLiteral {
+		t.Fatalf("ParseSelectExpr(SELECT TRUE).Expr.Kind = %v, want %v", trueSel.Expr.Kind, ExprKindBoolLiteral)
+	}
+	if !trueSel.Expr.Bool {
+		t.Fatalf("ParseSelectExpr(SELECT TRUE).Expr.Bool = %v, want true", trueSel.Expr.Bool)
+	}
+
+	falseSel, ok := ParseSelectExpr("SELECT False")
+	if !ok {
+		t.Fatal("ParseSelectExpr(SELECT False) ok = false, want true")
+	}
+	if falseSel.Expr == nil {
+		t.Fatal("ParseSelectExpr(SELECT False).Expr = nil, want value")
+	}
+	if falseSel.Expr.Kind != ExprKindBoolLiteral {
+		t.Fatalf("ParseSelectExpr(SELECT False).Expr.Kind = %v, want %v", falseSel.Expr.Kind, ExprKindBoolLiteral)
+	}
+	if falseSel.Expr.Bool {
+		t.Fatalf("ParseSelectExpr(SELECT False).Expr.Bool = %v, want false", falseSel.Expr.Bool)
 	}
 
 	nullSel, ok := ParseSelectExpr("SELECT * FROM users WHERE name = NULL")

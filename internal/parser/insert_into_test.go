@@ -39,6 +39,18 @@ func TestParseInsert(t *testing.T) {
 			cols:   nil,
 			values: []Value{Int64Value(1), NullValue()},
 		},
+		{
+			name:   "bool literal true",
+			input:  "INSERT INTO users VALUES (TRUE)",
+			cols:   nil,
+			values: []Value{BoolValue(true)},
+		},
+		{
+			name:   "bool literal false mixed case",
+			input:  "INSERT INTO users VALUES (False)",
+			cols:   nil,
+			values: []Value{BoolValue(false)},
+		},
 	}
 
 	for _, tc := range tests {

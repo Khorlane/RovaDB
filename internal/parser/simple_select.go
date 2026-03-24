@@ -12,6 +12,7 @@ const (
 	ExprKindInvalid ExprKind = iota
 	ExprKindInt64Literal
 	ExprKindStringLiteral
+	ExprKindBoolLiteral
 	ExprKindInt64Binary
 	ExprKindParen
 )
@@ -30,6 +31,7 @@ type Expr struct {
 	Kind  ExprKind
 	I64   int64
 	Str   string
+	Bool  bool
 	Left  *Expr
 	Right *Expr
 	Op    BinaryOp
@@ -296,6 +298,12 @@ func parseExpr(token string) (*Expr, bool) {
 
 	if isSingleQuotedStringLiteral(token) {
 		return &Expr{Kind: ExprKindStringLiteral, Str: token[1 : len(token)-1]}, true
+	}
+	if strings.EqualFold(token, "TRUE") {
+		return &Expr{Kind: ExprKindBoolLiteral, Bool: true}, true
+	}
+	if strings.EqualFold(token, "FALSE") {
+		return &Expr{Kind: ExprKindBoolLiteral, Bool: false}, true
 	}
 
 	return parseIntBinaryExpr(token)

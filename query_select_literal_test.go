@@ -233,6 +233,18 @@ func TestParseSelectExprDirect(t *testing.T) {
 			want: &parser.Expr{Kind: parser.ExprKindStringLiteral, Str: "hello"},
 		},
 		{
+			name: "select true",
+			sql:  "SELECT TRUE",
+			ok:   true,
+			want: &parser.Expr{Kind: parser.ExprKindBoolLiteral, Bool: true},
+		},
+		{
+			name: "select false mixed case",
+			sql:  "SELECT False",
+			ok:   true,
+			want: &parser.Expr{Kind: parser.ExprKindBoolLiteral, Bool: false},
+		},
+		{
 			name: "select one plus two",
 			sql:  "SELECT 1+2",
 			ok:   true,
@@ -411,7 +423,7 @@ func equalExpr(got, want *parser.Expr) bool {
 	if got == nil || want == nil {
 		return got == want
 	}
-	if got.Kind != want.Kind || got.I64 != want.I64 || got.Str != want.Str || got.Op != want.Op {
+	if got.Kind != want.Kind || got.I64 != want.I64 || got.Str != want.Str || got.Bool != want.Bool || got.Op != want.Op {
 		return false
 	}
 
