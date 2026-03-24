@@ -34,7 +34,7 @@ func TestUpdatePersistsAcrossReopen(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT id, name FROM users")
+	rows, err := db.Query("SELECT id, name FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -76,7 +76,7 @@ func TestDeletePersistsAcrossReopen(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT id, name FROM users")
+	rows, err := db.Query("SELECT id, name FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -123,7 +123,7 @@ func TestUpdateDeleteMixedPersistence(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT id, name FROM users")
+	rows, err := db.Query("SELECT id, name FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}

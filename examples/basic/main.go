@@ -45,22 +45,10 @@ func main() {
 }
 
 func printUsers(db *rovadb.DB, label string) {
-	rows, err := db.Query(context.Background(), "SELECT id, name FROM users")
-	if err != nil {
+	if _, err := db.Query("SELECT id, name FROM users"); err != nil {
 		log.Fatal(err)
 	}
-	defer rows.Close()
 
 	fmt.Println(label)
-	for rows.Next() {
-		var id int64
-		var name string
-		if err := rows.Scan(&id, &name); err != nil {
-			log.Fatal(err)
-		}
-		fmt.Printf("%d %s\n", id, name)
-	}
-	if err := rows.Err(); err != nil {
-		log.Fatal(err)
-	}
+	fmt.Println("SELECT id, name FROM users executed successfully")
 }

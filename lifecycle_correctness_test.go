@@ -223,7 +223,7 @@ func TestLifecycleIndexedQueryAfterReopenRemainsCorrect(t *testing.T) {
 func assertSelectRowsWithNames(t *testing.T, db *DB, sql string, want [][2]any) {
 	t.Helper()
 
-	rows, err := db.Query(context.Background(), sql)
+	rows, err := db.Query(sql)
 	if err != nil {
 		t.Fatalf("Query(%q) error = %v", sql, err)
 	}

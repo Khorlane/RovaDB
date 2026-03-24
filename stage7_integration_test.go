@@ -283,7 +283,7 @@ func assertQueryIntRows(t *testing.T, db *DB, sql string, want ...int64) {
 func collectIntRows(t *testing.T, db *DB, sql string) []int64 {
 	t.Helper()
 
-	rows, err := db.Query(context.Background(), sql)
+	rows, err := db.Query(sql)
 	if err != nil {
 		t.Fatalf("Query(%q) error = %v", sql, err)
 	}

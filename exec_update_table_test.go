@@ -30,7 +30,7 @@ func TestExecUpdateWhere(t *testing.T) {
 		t.Fatalf("Exec(update).RowsAffected() = %d, want 1", result.RowsAffected())
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM users")
+	rows, err := db.Query("SELECT * FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -107,7 +107,7 @@ func TestExecUpdateWhereOr(t *testing.T) {
 		t.Fatalf("Exec(update).RowsAffected() = %d, want 2", result.RowsAffected())
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT name FROM users ORDER BY id")
+	rows, err := db.Query("SELECT name FROM users ORDER BY id")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}

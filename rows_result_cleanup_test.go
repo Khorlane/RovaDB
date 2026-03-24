@@ -13,7 +13,7 @@ func TestRowsScanBeforeNext(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT 1")
+	rows, err := db.Query("SELECT 1")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -33,7 +33,7 @@ func TestRowsScanAfterIterationEnds(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT 1")
+	rows, err := db.Query("SELECT 1")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -103,7 +103,7 @@ func TestQueryZeroRowSelectCleanup(t *testing.T) {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM users")
+	rows, err := db.Query("SELECT * FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}

@@ -196,7 +196,7 @@ func TestCloseReopenRoundTripFinal(t *testing.T) {
 }
 
 func assertFinalUsersState(db *DB) error {
-	rows, err := db.Query(context.Background(), "SELECT id, name FROM users")
+	rows, err := db.Query("SELECT id, name FROM users")
 	if err != nil {
 		return err
 	}

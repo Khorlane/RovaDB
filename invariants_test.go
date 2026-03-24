@@ -73,7 +73,7 @@ func TestQueryRejectsIndexTableMismatch(t *testing.T) {
 
 	db.tables["users"].Indexes["name"].Entries[planner.IndexKey("string:alice")] = []int{99}
 
-	rows, err := db.Query(context.Background(), "SELECT id FROM users WHERE name = 'alice'")
+	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -97,7 +97,7 @@ func TestQueryRejectsInvalidTransactionState(t *testing.T) {
 	page := db.pager.NewPage()
 	db.pager.MarkDirty(page)
 
-	rows, err := db.Query(context.Background(), "SELECT 1")
+	rows, err := db.Query("SELECT 1")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}

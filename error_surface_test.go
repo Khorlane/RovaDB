@@ -77,7 +77,7 @@ func TestQueryInvalidWhereReturnsParseError(t *testing.T) {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM users WHERE id =")
+	rows, err := db.Query("SELECT * FROM users WHERE id =")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}

@@ -23,7 +23,7 @@ func TestQuerySelectFromTable(t *testing.T) {
 		t.Fatalf("Exec(insert 2) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT id, name FROM users")
+	rows, err := db.Query("SELECT id, name FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -75,7 +75,7 @@ func TestQuerySelectAllFromTable(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM users")
+	rows, err := db.Query("SELECT * FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -108,7 +108,7 @@ func TestQuerySelectInvalidColumn(t *testing.T) {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT email FROM users")
+	rows, err := db.Query("SELECT email FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -133,7 +133,7 @@ func TestQuerySelectFromEmptyTable(t *testing.T) {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM users")
+	rows, err := db.Query("SELECT * FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -161,7 +161,7 @@ func TestQuerySelectSubsetOrder(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT name, id FROM users")
+	rows, err := db.Query("SELECT name, id FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -197,7 +197,7 @@ func TestQuerySelectSingleProjectedColumn(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT id FROM users")
+	rows, err := db.Query("SELECT id FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -225,7 +225,7 @@ func TestQuerySelectMissingTable(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM users")
+	rows, err := db.Query("SELECT * FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -253,7 +253,7 @@ func TestQuerySelectWrongScanShape(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT id, name FROM users")
+	rows, err := db.Query("SELECT id, name FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -286,7 +286,7 @@ func TestQuerySelectWhereIntEquality(t *testing.T) {
 		t.Fatalf("Exec(insert 2) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT name FROM users WHERE id = 1")
+	rows, err := db.Query("SELECT name FROM users WHERE id = 1")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -330,7 +330,7 @@ func TestQuerySelectWhereIndexedEquality(t *testing.T) {
 		t.Fatalf("defineBasicIndex() error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT id FROM users WHERE name = 'alice'")
+	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -356,7 +356,7 @@ func TestQuerySelectWhereIndexedEqualityNoMatch(t *testing.T) {
 		t.Fatalf("defineBasicIndex() error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM users WHERE name = 'bob'")
+	rows, err := db.Query("SELECT * FROM users WHERE name = 'bob'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -393,7 +393,7 @@ func TestQuerySelectWhereIndexedEqualityWithProjectionAndOrderBy(t *testing.T) {
 		t.Fatalf("defineBasicIndex() error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT id FROM users WHERE name = 'alice' ORDER BY id DESC")
+	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice' ORDER BY id DESC")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -425,7 +425,7 @@ func TestQuerySelectCountStarWithIndexedEquality(t *testing.T) {
 		t.Fatalf("defineBasicIndex() error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT COUNT(*) FROM users WHERE name = 'alice'")
+	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE name = 'alice'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -454,7 +454,7 @@ func TestQuerySelectWhereNumericComparisons(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT id FROM users WHERE id >= 2")
+	rows, err := db.Query("SELECT id FROM users WHERE id >= 2")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -501,7 +501,7 @@ func TestQuerySelectWhereStringEquality(t *testing.T) {
 		t.Fatalf("Exec(insert 2) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT name FROM users WHERE name = 'bob'")
+	rows, err := db.Query("SELECT name FROM users WHERE name = 'bob'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -539,7 +539,7 @@ func TestQuerySelectWhereStringNotEqual(t *testing.T) {
 		t.Fatalf("Exec(insert 2) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT name FROM users WHERE name != 'bob'")
+	rows, err := db.Query("SELECT name FROM users WHERE name != 'bob'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -574,7 +574,7 @@ func TestQuerySelectWhereTypeMismatch(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM users WHERE id = 'abc'")
+	rows, err := db.Query("SELECT * FROM users WHERE id = 'abc'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -609,7 +609,7 @@ func TestQuerySelectWhereAndConditions(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT id FROM users WHERE id > 1 AND id < 4")
+	rows, err := db.Query("SELECT id FROM users WHERE id > 1 AND id < 4")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -659,7 +659,7 @@ func TestQuerySelectWhereOrConditions(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT id FROM users WHERE id = 1 OR id = 3")
+	rows, err := db.Query("SELECT id FROM users WHERE id = 1 OR id = 3")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -682,7 +682,7 @@ func TestQuerySelectWhereOrNoMatches(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM users WHERE id = 2 OR name = 'bob'")
+	rows, err := db.Query("SELECT * FROM users WHERE id = 2 OR name = 'bob'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -717,7 +717,7 @@ func TestQuerySelectWhereLeftToRightWithoutPrecedence(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT name FROM users WHERE id = 1 OR id = 2 AND name = 'bob'")
+	rows, err := db.Query("SELECT name FROM users WHERE id = 1 OR id = 2 AND name = 'bob'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -737,7 +737,7 @@ func TestQuerySelectCountStarEmptyTable(t *testing.T) {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT COUNT(*) FROM users")
+	rows, err := db.Query("SELECT COUNT(*) FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -769,7 +769,7 @@ func TestQuerySelectCountStarPopulatedTable(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT COUNT(*) FROM users")
+	rows, err := db.Query("SELECT COUNT(*) FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -798,7 +798,7 @@ func TestQuerySelectCountStarWithWhere(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT COUNT(*) FROM users WHERE id > 1")
+	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE id > 1")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -821,7 +821,7 @@ func TestQuerySelectCountStarWithWhereNoMatches(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT COUNT(*) FROM users WHERE id > 10")
+	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE id > 10")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -844,7 +844,7 @@ func TestQuerySelectCountStarOrderByUnsupported(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT COUNT(*) FROM users ORDER BY id")
+	rows, err := db.Query("SELECT COUNT(*) FROM users ORDER BY id")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -865,7 +865,7 @@ func TestQuerySelectCountColumnUnsupported(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT COUNT(id) FROM users")
+	rows, err := db.Query("SELECT COUNT(id) FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -886,7 +886,7 @@ func TestQuerySelectCountMixedProjectionUnsupported(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT COUNT(*), name FROM users")
+	rows, err := db.Query("SELECT COUNT(*), name FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -925,7 +925,7 @@ func TestQuerySelectCountStarAfterReopen(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT COUNT(*) FROM users")
+	rows, err := db.Query("SELECT COUNT(*) FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -941,7 +941,7 @@ func TestQuerySelectMalformedWhereBooleanChain(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM users WHERE id = 1 OR")
+	rows, err := db.Query("SELECT * FROM users WHERE id = 1 OR")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -975,7 +975,7 @@ func TestQuerySelectOrderByIntAsc(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT id FROM users ORDER BY id")
+	rows, err := db.Query("SELECT id FROM users ORDER BY id")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -1004,7 +1004,7 @@ func TestQuerySelectOrderByIntDesc(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT id FROM users ORDER BY id DESC")
+	rows, err := db.Query("SELECT id FROM users ORDER BY id DESC")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -1033,7 +1033,7 @@ func TestQuerySelectOrderByStringAsc(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT name FROM users ORDER BY name ASC")
+	rows, err := db.Query("SELECT name FROM users ORDER BY name ASC")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -1062,7 +1062,7 @@ func TestQuerySelectOrderByStringDesc(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT name FROM users ORDER BY name DESC")
+	rows, err := db.Query("SELECT name FROM users ORDER BY name DESC")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -1091,7 +1091,7 @@ func TestQuerySelectOrderByWithWhere(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT name FROM users WHERE id > 1 ORDER BY id DESC")
+	rows, err := db.Query("SELECT name FROM users WHERE id > 1 ORDER BY id DESC")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -1111,7 +1111,7 @@ func TestQuerySelectOrderByUnknownColumn(t *testing.T) {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM users ORDER BY age")
+	rows, err := db.Query("SELECT * FROM users ORDER BY age")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -1185,7 +1185,7 @@ func TestQuerySelectWhereNoMatches(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM users WHERE name = 'bob'")
+	rows, err := db.Query("SELECT * FROM users WHERE name = 'bob'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -1213,7 +1213,7 @@ func TestQuerySelectNullRoundTrip(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT name FROM users")
+	rows, err := db.Query("SELECT name FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -1250,7 +1250,7 @@ func TestQuerySelectWhereEqualsNull(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT id FROM users WHERE name = NULL")
+	rows, err := db.Query("SELECT id FROM users WHERE name = NULL")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -1278,7 +1278,7 @@ func TestQuerySelectWhereNotEqualsNull(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT id FROM users WHERE name != NULL")
+	rows, err := db.Query("SELECT id FROM users WHERE name != NULL")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -1301,7 +1301,7 @@ func TestQuerySelectWhereLessThanNullErrors(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM users WHERE name < NULL")
+	rows, err := db.Query("SELECT * FROM users WHERE name < NULL")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -1332,7 +1332,7 @@ func TestQueryUpdateSetsNull(t *testing.T) {
 		t.Fatalf("Exec(update) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT name FROM users WHERE id = 1")
+	rows, err := db.Query("SELECT name FROM users WHERE id = 1")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -1370,7 +1370,7 @@ func TestQueryNullPersistsAcrossReopen(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT name FROM users WHERE id = 1")
+	rows, err := db.Query("SELECT name FROM users WHERE id = 1")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}

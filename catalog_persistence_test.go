@@ -30,7 +30,7 @@ func TestCreateTablePersistsAcrossReopen(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT name FROM users")
+	rows, err := db.Query("SELECT name FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}

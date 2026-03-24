@@ -23,7 +23,7 @@ func TestAlterTableAddColumnBasic(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT id, age FROM users ORDER BY id")
+	rows, err := db.Query("SELECT id, age FROM users ORDER BY id")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -78,7 +78,7 @@ func TestAlterTableAddColumnInsertAndUpdate(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT id, age FROM users ORDER BY id")
+	rows, err := db.Query("SELECT id, age FROM users ORDER BY id")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -131,7 +131,7 @@ func TestAlterTableAddColumnReopenAndWhere(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT id FROM users WHERE age = NULL")
+	rows, err := db.Query("SELECT id FROM users WHERE age = NULL")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}

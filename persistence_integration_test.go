@@ -38,7 +38,7 @@ func TestCreateTablePersistence(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM t")
+	rows, err := db.Query("SELECT * FROM t")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -73,7 +73,7 @@ func TestInsertPersistence(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM t")
+	rows, err := db.Query("SELECT * FROM t")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -109,7 +109,7 @@ func TestUpdatePersistence(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM t")
+	rows, err := db.Query("SELECT * FROM t")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -145,7 +145,7 @@ func TestDeletePersistence(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM t")
+	rows, err := db.Query("SELECT * FROM t")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -184,7 +184,7 @@ func TestMixedMutationPersistence(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM t")
+	rows, err := db.Query("SELECT * FROM t")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -221,7 +221,7 @@ func TestMutationsStillPersistUnderAutocommit(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM t")
+	rows, err := db.Query("SELECT * FROM t")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -419,7 +419,7 @@ func assertIntRows(t *testing.T, rows *Rows, want ...int64) {
 func assertSelectIntRows(t *testing.T, db *DB, sql string, want ...int64) {
 	t.Helper()
 
-	rows, err := db.Query(context.Background(), sql)
+	rows, err := db.Query(sql)
 	if err != nil {
 		t.Fatalf("Query(%q) error = %v", sql, err)
 	}

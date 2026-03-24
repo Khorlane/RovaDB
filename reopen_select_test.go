@@ -31,7 +31,7 @@ func TestInsertSelectAfterReopen(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT * FROM users")
+	rows, err := db.Query("SELECT * FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -95,7 +95,7 @@ func TestMultipleTablesReloadRowsOnOpen(t *testing.T) {
 	}
 	defer db.Close()
 
-	userRows, err := db.Query(context.Background(), "SELECT * FROM users")
+	userRows, err := db.Query("SELECT * FROM users")
 	if err != nil {
 		t.Fatalf("Query(users) error = %v", err)
 	}
@@ -113,7 +113,7 @@ func TestMultipleTablesReloadRowsOnOpen(t *testing.T) {
 		t.Fatalf("users row = (%d, %q), want (1, %q)", userID, userName, "steve")
 	}
 
-	teamRows, err := db.Query(context.Background(), "SELECT * FROM teams")
+	teamRows, err := db.Query("SELECT * FROM teams")
 	if err != nil {
 		t.Fatalf("Query(teams) error = %v", err)
 	}

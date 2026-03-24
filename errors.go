@@ -36,4 +36,6 @@ var (
 	ErrClosed = errors.New("rovadb: closed")
 	// ErrInvalidArgument reports invalid input provided to the API.
 	ErrInvalidArgument = errors.New("rovadb: invalid argument")
+	// ErrQueryRequiresSelect reports Query use with a non-SELECT statement.
+	ErrQueryRequiresSelect = errors.New("rovadb: Query requires SELECT statement")
 )

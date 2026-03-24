@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -40,7 +39,7 @@ func TestQuerySelectLiteral(t *testing.T) {
 			}
 			defer db.Close()
 
-			rows, err := db.Query(context.Background(), tc.sql)
+			rows, err := db.Query(tc.sql)
 			if err != nil {
 				t.Fatalf("Query() error = %v", err)
 			}
@@ -87,7 +86,7 @@ func TestQuerySelectStringLiteral(t *testing.T) {
 			}
 			defer db.Close()
 
-			rows, err := db.Query(context.Background(), tc.sql)
+			rows, err := db.Query(tc.sql)
 			if err != nil {
 				t.Fatalf("Query() error = %v", err)
 			}
@@ -148,7 +147,7 @@ func TestQueryUnsupportedLiteral(t *testing.T) {
 			}
 			defer db.Close()
 
-			rows, err := db.Query(context.Background(), tc.sql)
+			rows, err := db.Query(tc.sql)
 			if err != nil {
 				t.Fatalf("Query() error = %v", err)
 			}
@@ -171,7 +170,7 @@ func TestRowsScanStringIntoAny(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT 'hello'")
+	rows, err := db.Query("SELECT 'hello'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -197,7 +196,7 @@ func TestRowsScanStringIntoInt64(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(context.Background(), "SELECT 'hello'")
+	rows, err := db.Query("SELECT 'hello'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -419,15 +418,14 @@ func equalExpr(got, want *parser.Expr) bool {
 	return equalExpr(got.Left, want.Left) && equalExpr(got.Right, want.Right) && equalExpr(got.Inner, want.Inner)
 }
 
-func TestQueryNilContext(t *testing.T) {
+func TestQueryEmptySQL(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer db.Close()
 
-	var nilCtx context.Context
-	rows, err := db.Query(nilCtx, "SELECT 1")
+	rows, err := db.Query(" ")
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("Query() error = %v, want ErrInvalidArgument", err)
 	}
@@ -445,7 +443,7 @@ func TestQueryClosedDB(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	rows, err := db.Query(context.Background(), "SELECT 1")
+	rows, err := db.Query("SELECT 1")
 	if !errors.Is(err, ErrClosed) {
 		t.Fatalf("Query() error = %v, want ErrClosed", err)
 	}

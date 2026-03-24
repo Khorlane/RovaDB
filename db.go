@@ -284,52 +284,57 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 	}
 }
 
-// Query validates the call and reserves query execution for a later engine pass.
-func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error) {
-	if ctx == nil {
-		return nil, ErrInvalidArgument
-	}
+// Query executes a SELECT statement and returns a fully materialized row set.
+func (db *DB) Query(query string) (*Rows, error) {
 	if db == nil {
 		return nil, ErrInvalidArgument
 	}
 	if db.closed {
 		return nil, ErrClosed
 	}
-	if strings.TrimSpace(sql) == "" {
+	if strings.TrimSpace(query) == "" {
 		return nil, ErrInvalidArgument
 	}
 	if err := db.validateTxnState(); err != nil {
 		return &Rows{err: err, idx: -1}, nil
 	}
 
-	sel, ok := parser.ParseSelectExpr(sql)
-	if ok {
-		if sel.TableName != "" {
-			if err := validateTables(db.tables, false); err != nil {
-				return &Rows{err: err, idx: -1}, nil
-			}
-			plan, err := planner.PlanSelect(sel, plannerTableMetadata(db.tables))
-			if err != nil {
-				return &Rows{err: err, idx: -1}, nil
-			}
-			rows, err := executor.Select(plan, db.tables)
-			if err != nil {
-				return &Rows{err: err, idx: -1}, nil
-			}
-			columns, err := executor.ProjectedColumnNames(plan, db.tables[sel.TableName])
-			if err != nil {
-				return &Rows{err: err, idx: -1}, nil
-			}
-			return newRows(columns, materializeRows(rows)), nil
+	stmt, err := parser.Parse(query)
+	if err != nil {
+		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(query)), "SELECT ") {
+			return &Rows{err: classifyQueryParseError(query), idx: -1}, nil
 		}
-
-		value, err := executor.Eval(sel.Expr)
-		if err == nil {
-			return newRows(nil, [][]any{{value.Any()}}), nil
-		}
+		return nil, err
+	}
+	sel, ok := stmt.(*parser.SelectExpr)
+	if !ok {
+		return nil, ErrQueryRequiresSelect
 	}
 
-	return &Rows{err: classifyQueryParseError(sql), idx: -1}, nil
+	if sel.TableName != "" {
+		if err := validateTables(db.tables, false); err != nil {
+			return &Rows{err: err, idx: -1}, nil
+		}
+		plan, err := planner.PlanSelect(sel, plannerTableMetadata(db.tables))
+		if err != nil {
+			return &Rows{err: err, idx: -1}, nil
+		}
+		rows, err := executor.Select(plan, db.tables)
+		if err != nil {
+			return &Rows{err: err, idx: -1}, nil
+		}
+		columns, err := executor.ProjectedColumnNames(plan, db.tables[sel.TableName])
+		if err != nil {
+			return &Rows{err: err, idx: -1}, nil
+		}
+		return newRows(columns, materializeRows(rows)), nil
+	}
+
+	value, err := executor.Eval(sel.Expr)
+	if err != nil {
+		return &Rows{err: err, idx: -1}, nil
+	}
+	return newRows(nil, [][]any{{apiValue(value)}}), nil
 }
 
 func materializeRows(rows [][]parser.Value) [][]any {
@@ -337,11 +342,24 @@ func materializeRows(rows [][]parser.Value) [][]any {
 	for _, row := range rows {
 		values := make([]any, 0, len(row))
 		for _, value := range row {
-			values = append(values, value.Any())
+			values = append(values, apiValue(value))
 		}
 		materialized = append(materialized, values)
 	}
 	return materialized
+}
+
+func apiValue(value parser.Value) any {
+	switch value.Kind {
+	case parser.ValueKindNull:
+		return nil
+	case parser.ValueKindInt64:
+		return int(value.I64)
+	case parser.ValueKindString:
+		return value.Str
+	default:
+		return value.Any()
+	}
 }
 
 func plannerTableMetadata(tables map[string]*executor.Table) map[string]*planner.TableMetadata {
