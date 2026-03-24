@@ -393,3 +393,74 @@ func TestRealRowsRoundTripAfterReopen(t *testing.T) {
 		t.Fatalf("Err() = %v, want nil", err)
 	}
 }
+
+func TestRealRowsUpdateDeleteRoundTripAfterReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+	for _, sql := range []string{
+		"CREATE TABLE measurements (id INT, x REAL, label TEXT)",
+		"INSERT INTO measurements VALUES (1, 0.0, 'zero')",
+		"INSERT INTO measurements VALUES (2, 3.14, 'pi')",
+		"INSERT INTO measurements VALUES (3, -2.5, 'neg')",
+		"INSERT INTO measurements VALUES (4, 10.25, 'hi')",
+		"DELETE FROM measurements WHERE x < 0.0",
+		"UPDATE measurements SET x = 1.25 WHERE id = 1",
+		"UPDATE measurements SET x = NULL WHERE id = 2",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+
+	assertSelectRealRows(t, db, "SELECT id, x, label FROM measurements ORDER BY id", [][3]any{
+		{int(1), 1.25, "zero"},
+		{int(2), nil, "pi"},
+		{int(4), 10.25, "hi"},
+	})
+}
+
+func assertSelectRealRows(t *testing.T, db *DB, sql string, want [][3]any) {
+	t.Helper()
+
+	rows, err := db.Query(sql)
+	if err != nil {
+		t.Fatalf("Query(%q) error = %v", sql, err)
+	}
+	defer rows.Close()
+
+	got := make([][3]any, 0, len(want))
+	for rows.Next() {
+		var id int
+		var x any
+		var label string
+		if err := rows.Scan(&id, &x, &label); err != nil {
+			t.Fatalf("Scan(%q) error = %v", sql, err)
+		}
+		got = append(got, [3]any{id, x, label})
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Rows.Err(%q) = %v", sql, err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("rows(%q) len = %d, want %d; got = %#v", sql, len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("rows(%q)[%d] = %#v, want %#v", sql, i, got[i], want[i])
+		}
+	}
+}

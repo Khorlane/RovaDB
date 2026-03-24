@@ -642,6 +642,59 @@ func TestBoolRollbackCloseReopenKeepsCommittedState(t *testing.T) {
 	})
 }
 
+func TestRealRollbackCloseReopenKeepsCommittedState(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	for _, sql := range []string{
+		"CREATE TABLE measurements (id INT, label TEXT, x REAL)",
+		"INSERT INTO measurements VALUES (1, 'zero', 0.0)",
+		"INSERT INTO measurements VALUES (2, 'pi', 3.14)",
+		"INSERT INTO measurements VALUES (3, 'missing', NULL)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	err = db.execMutatingStatement(func() error {
+		stagedTables := cloneTables(db.tables)
+		table := stagedTables["measurements"]
+		table.Rows[0][2] = parser.RealValue(1.25)
+		table.Rows[1][2] = parser.RealValue(-2.5)
+		table.Rows[2][2] = parser.RealValue(10.25)
+		if err := db.applyStagedTableRewrite(stagedTables, "measurements"); err != nil {
+			return err
+		}
+		return errors.New("force rollback")
+	})
+	if err == nil || err.Error() != "force rollback" {
+		t.Fatalf("execMutatingStatement() error = %v, want %q", err, "force rollback")
+	}
+
+	assertSelectRealCommitRows(t, db, "SELECT id, label, x FROM measurements ORDER BY id", [][3]any{
+		{int(1), "zero", 0.0},
+		{int(2), "pi", 3.14},
+		{int(3), "missing", nil},
+	})
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	assertSelectRealCommitRows(t, db, "SELECT id, label, x FROM measurements ORDER BY id", [][3]any{
+		{int(1), "zero", 0.0},
+		{int(2), "pi", 3.14},
+		{int(3), "missing", nil},
+	})
+}
+
 func assertSelectBoolRows(t *testing.T, db *DB, sql string, want [][3]any) {
 	t.Helper()
 
@@ -660,6 +713,38 @@ func assertSelectBoolRows(t *testing.T, db *DB, sql string, want [][3]any) {
 			t.Fatalf("Scan(%q) error = %v", sql, err)
 		}
 		got = append(got, [3]any{id, name, active})
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Rows.Err(%q) = %v", sql, err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("rows(%q) len = %d, want %d; got = %#v", sql, len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("rows(%q)[%d] = %#v, want %#v", sql, i, got[i], want[i])
+		}
+	}
+}
+
+func assertSelectRealCommitRows(t *testing.T, db *DB, sql string, want [][3]any) {
+	t.Helper()
+
+	rows, err := db.Query(sql)
+	if err != nil {
+		t.Fatalf("Query(%q) error = %v", sql, err)
+	}
+	defer rows.Close()
+
+	got := make([][3]any, 0, len(want))
+	for rows.Next() {
+		var id int
+		var label string
+		var x any
+		if err := rows.Scan(&id, &label, &x); err != nil {
+			t.Fatalf("Scan(%q) error = %v", sql, err)
+		}
+		got = append(got, [3]any{id, label, x})
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("Rows.Err(%q) = %v", sql, err)
