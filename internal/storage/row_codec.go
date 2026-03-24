@@ -10,6 +10,7 @@ const (
 	rowTypeNull   = 0
 	rowTypeInt64  = 1
 	rowTypeString = 2
+	rowTypeBool   = 3
 )
 
 // EncodeRow encodes one row payload using the storage row format.
@@ -32,6 +33,13 @@ func EncodeRow(values []parser.Value) ([]byte, error) {
 			binary.LittleEndian.PutUint32(raw[:], uint32(len(value.Str)))
 			buf = append(buf, raw[:]...)
 			buf = append(buf, value.Str...)
+		case parser.ValueKindBool:
+			buf = append(buf, rowTypeBool)
+			if value.Bool {
+				buf = append(buf, 1)
+			} else {
+				buf = append(buf, 0)
+			}
 		default:
 			return nil, errCorruptedRowData
 		}
@@ -80,6 +88,19 @@ func DecodeRow(data []byte) ([]parser.Value, error) {
 			}
 			values = append(values, parser.StringValue(string(data[offset:offset+length])))
 			offset += length
+		case rowTypeBool:
+			if offset >= len(data) {
+				return nil, errCorruptedRowData
+			}
+			switch data[offset] {
+			case 0:
+				values = append(values, parser.BoolValue(false))
+			case 1:
+				values = append(values, parser.BoolValue(true))
+			default:
+				return nil, errCorruptedRowData
+			}
+			offset++
 		default:
 			return nil, errCorruptedRowData
 		}

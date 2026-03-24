@@ -130,3 +130,85 @@ func TestMultipleTablesReloadRowsOnOpen(t *testing.T) {
 		t.Fatalf("teams row = (%d, %q), want (10, %q)", teamID, teamName, "ravens")
 	}
 }
+
+func TestBoolRowsRoundTripAfterReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE flags (id INT, active BOOL, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO flags VALUES (1, TRUE, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert true) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO flags VALUES (2, FALSE, 'bob')"); err != nil {
+		t.Fatalf("Exec(insert false) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO flags VALUES (3, NULL, 'cara')"); err != nil {
+		t.Fatalf("Exec(insert null) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT * FROM flags ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() first = false, want true")
+	}
+	var id1 int
+	var active1 bool
+	var name1 string
+	if err := rows.Scan(&id1, &active1, &name1); err != nil {
+		t.Fatalf("Scan() first error = %v", err)
+	}
+	if id1 != 1 || active1 != true || name1 != "alice" {
+		t.Fatalf("first row = (%d, %v, %q), want (1, true, %q)", id1, active1, name1, "alice")
+	}
+
+	if !rows.Next() {
+		t.Fatal("Next() second = false, want true")
+	}
+	var id2 int
+	var active2 bool
+	var name2 string
+	if err := rows.Scan(&id2, &active2, &name2); err != nil {
+		t.Fatalf("Scan() second error = %v", err)
+	}
+	if id2 != 2 || active2 != false || name2 != "bob" {
+		t.Fatalf("second row = (%d, %v, %q), want (2, false, %q)", id2, active2, name2, "bob")
+	}
+
+	if !rows.Next() {
+		t.Fatal("Next() third = false, want true")
+	}
+	var id3 int
+	var active3 any
+	var name3 string
+	if err := rows.Scan(&id3, &active3, &name3); err != nil {
+		t.Fatalf("Scan() third error = %v", err)
+	}
+	if id3 != 3 || active3 != nil || name3 != "cara" {
+		t.Fatalf("third row = (%d, %#v, %q), want (3, nil, %q)", id3, active3, name3, "cara")
+	}
+
+	if rows.Next() {
+		t.Fatal("Next() fourth = true, want false")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil", err)
+	}
+}
