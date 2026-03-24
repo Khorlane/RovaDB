@@ -299,40 +299,49 @@ func (db *DB) Query(ctx context.Context, sql string, args ...any) (*Rows, error)
 		return nil, ErrInvalidArgument
 	}
 	if err := db.validateTxnState(); err != nil {
-		return &Rows{err: err, index: -1}, nil
+		return &Rows{err: err, idx: -1}, nil
 	}
 
 	sel, ok := parser.ParseSelectExpr(sql)
 	if ok {
 		if sel.TableName != "" {
 			if err := validateTables(db.tables, false); err != nil {
-				return &Rows{err: err, index: -1}, nil
+				return &Rows{err: err, idx: -1}, nil
 			}
 			plan, err := planner.PlanSelect(sel, plannerTableMetadata(db.tables))
 			if err != nil {
-				return &Rows{err: err, index: -1}, nil
+				return &Rows{err: err, idx: -1}, nil
 			}
 			rows, err := executor.Select(plan, db.tables)
 			if err != nil {
-				return &Rows{err: err, index: -1}, nil
+				return &Rows{err: err, idx: -1}, nil
 			}
 			columns, err := executor.ProjectedColumnNames(plan, db.tables[sel.TableName])
 			if err != nil {
-				return &Rows{err: err, index: -1}, nil
+				return &Rows{err: err, idx: -1}, nil
 			}
-			return &Rows{values: rows, cols: columns, index: -1}, nil
+			return newRows(columns, materializeRows(rows)), nil
 		}
 
 		value, err := executor.Eval(sel.Expr)
 		if err == nil {
-			return &Rows{
-				index:  -1,
-				values: [][]parser.Value{{value}},
-			}, nil
+			return newRows(nil, [][]any{{value.Any()}}), nil
 		}
 	}
 
-	return &Rows{err: classifyQueryParseError(sql), index: -1}, nil
+	return &Rows{err: classifyQueryParseError(sql), idx: -1}, nil
+}
+
+func materializeRows(rows [][]parser.Value) [][]any {
+	materialized := make([][]any, 0, len(rows))
+	for _, row := range rows {
+		values := make([]any, 0, len(row))
+		for _, value := range row {
+			values = append(values, value.Any())
+		}
+		materialized = append(materialized, values)
+	}
+	return materialized
 }
 
 func plannerTableMetadata(tables map[string]*executor.Table) map[string]*planner.TableMetadata {

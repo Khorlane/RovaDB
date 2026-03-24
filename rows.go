@@ -1,29 +1,45 @@
 package rovadb
 
-import "github.com/Khorlane/RovaDB/internal/parser"
-
-// Rows represents a result stream from a query.
+// Rows represents a fully materialized query result.
 type Rows struct {
-	err    error
-	index  int
-	cols   []string
-	values [][]parser.Value
+	columns []string
+	data    [][]any
+	idx     int
+	err     error
+	closed  bool
+}
+
+// Row is a thin QueryRow wrapper over Rows.
+type Row struct {
+	rows *Rows
+}
+
+func newRows(cols []string, data [][]any) *Rows {
+	return &Rows{
+		columns: cols,
+		data:    data,
+		idx:     -1,
+	}
+}
+
+func newRow(r *Rows) *Row {
+	return &Row{rows: r}
 }
 
 // Next reports whether another row is available.
 func (r *Rows) Next() bool {
-	if r == nil {
+	if r == nil || r.closed {
 		return false
 	}
 	if r.err != nil {
 		return false
 	}
-	if r.index+1 >= len(r.values) {
-		r.index = len(r.values)
+	if r.idx+1 >= len(r.data) {
+		r.idx = len(r.data)
 		return false
 	}
 
-	r.index++
+	r.idx++
 	return true
 }
 
@@ -35,10 +51,14 @@ func (r *Rows) Scan(dest ...any) error {
 	if r.err != nil {
 		return r.err
 	}
-	if r.index < 0 || r.index >= len(r.values) {
+	if r.closed {
+		return ErrClosed
+	}
+	if r.idx < 0 || r.idx >= len(r.data) {
 		return ErrInvalidArgument
 	}
-	row := r.values[r.index]
+
+	row := r.data[r.idx]
 	if len(dest) != len(row) {
 		return ErrInvalidArgument
 	}
@@ -52,46 +72,43 @@ func (r *Rows) Scan(dest ...any) error {
 	return nil
 }
 
-func scanValue(dest any, value parser.Value) error {
+func scanValue(dest any, value any) error {
 	switch v := dest.(type) {
 	case *int:
 		if v == nil {
 			return ErrInvalidArgument
 		}
-		if value.Kind == parser.ValueKindNull {
+		n, ok := value.(int64)
+		if !ok {
 			return ErrInvalidArgument
 		}
-		if value.Kind == parser.ValueKindInt64 {
-			*v = int(value.I64)
-			return nil
-		}
+		*v = int(n)
+		return nil
 	case *int64:
 		if v == nil {
 			return ErrInvalidArgument
 		}
-		if value.Kind == parser.ValueKindNull {
+		n, ok := value.(int64)
+		if !ok {
 			return ErrInvalidArgument
 		}
-		if value.Kind == parser.ValueKindInt64 {
-			*v = value.I64
-			return nil
-		}
+		*v = n
+		return nil
 	case *string:
 		if v == nil {
 			return ErrInvalidArgument
 		}
-		if value.Kind == parser.ValueKindNull {
+		s, ok := value.(string)
+		if !ok {
 			return ErrInvalidArgument
 		}
-		if value.Kind == parser.ValueKindString {
-			*v = value.Str
-			return nil
-		}
+		*v = s
+		return nil
 	case *any:
 		if v == nil {
 			return ErrInvalidArgument
 		}
-		*v = value.Any()
+		*v = value
 		return nil
 	}
 
@@ -100,11 +117,18 @@ func scanValue(dest any, value parser.Value) error {
 
 // Close releases any resources held by the row stream.
 func (r *Rows) Close() error {
+	if r == nil {
+		return nil
+	}
+	r.closed = true
 	return nil
 }
 
 // Err reports any terminal row iteration error.
 func (r *Rows) Err() error {
+	if r == nil {
+		return nil
+	}
 	return r.err
 }
 
@@ -113,5 +137,5 @@ func (r *Rows) Columns() []string {
 	if r == nil {
 		return nil
 	}
-	return append([]string(nil), r.cols...)
+	return append([]string(nil), r.columns...)
 }
