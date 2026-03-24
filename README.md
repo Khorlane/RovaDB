@@ -95,19 +95,45 @@ db, err := rovadb.Open("app.db")
 if err != nil {
 	log.Fatal(err)
 }
+defer db.Close()
 
 if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 	log.Fatal(err)
 }
-if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
-	log.Fatal(err)
+for _, sql := range []string{
+	"INSERT INTO users VALUES (1, 'alice')",
+	"INSERT INTO users VALUES (2, 'bob')",
+} {
+	if _, err := db.Exec(sql); err != nil {
+		log.Fatal(err)
+	}
 }
 
-rows, err := db.Query("SELECT id, name FROM users")
+rows, err := db.Query("SELECT id, name FROM users ORDER BY id")
 if err != nil {
 	log.Fatal(err)
 }
 defer rows.Close()
+
+fmt.Println(rows.Columns())
+for rows.Next() {
+	var id int
+	var name string
+	if err := rows.Scan(&id, &name); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(id, name)
+}
+if err := rows.Err(); err != nil {
+	log.Fatal(err)
+}
+
+row := db.QueryRow("SELECT name FROM users WHERE id = 1")
+var name string
+if err := row.Scan(&name); err != nil {
+	log.Fatal(err)
+}
+fmt.Println(name)
 ```
 
 See [examples/basic/main.go](/c:/Projects/RovaDB/examples/basic/main.go) for a complete open -> write -> close -> reopen -> query flow.

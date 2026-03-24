@@ -40,14 +40,37 @@ func main() {
 	}
 	defer db.Close()
 
-	printUsers(db, "after reopen")
+	printUserByID(db, 2)
 }
 
 func printUsers(db *rovadb.DB, label string) {
-	if _, err := db.Query("SELECT id, name FROM users"); err != nil {
+	rows, err := db.Query("SELECT id, name FROM users ORDER BY id")
+	if err != nil {
 		log.Fatal(err)
 	}
+	defer rows.Close()
 
 	fmt.Println(label)
-	fmt.Println("SELECT id, name FROM users executed successfully")
+	fmt.Printf("columns: %v\n", rows.Columns())
+	for rows.Next() {
+		var id int
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("%d %s\n", id, name)
+	}
+	if err := rows.Err(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func printUserByID(db *rovadb.DB, id int) {
+	row := db.QueryRow(fmt.Sprintf("SELECT name FROM users WHERE id = %d", id))
+
+	var name string
+	if err := row.Scan(&name); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("after reopen: id=%d name=%s\n", id, name)
 }
