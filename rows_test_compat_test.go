@@ -1,21 +1,5 @@
 package rovadb
 
-func (r *Rows) Next() bool {
-	if r == nil || r.closed {
-		return false
-	}
-	if r.err != nil {
-		return false
-	}
-	if r.idx+1 >= len(r.data) {
-		r.idx = len(r.data)
-		return false
-	}
-
-	r.idx++
-	return true
-}
-
 func (r *Rows) Scan(dest ...any) error {
 	if r == nil {
 		return ErrInvalidArgument
@@ -42,21 +26,6 @@ func (r *Rows) Scan(dest ...any) error {
 	}
 
 	return nil
-}
-
-func (r *Rows) Close() error {
-	if r == nil {
-		return nil
-	}
-	r.closed = true
-	return nil
-}
-
-func (r *Rows) Err() error {
-	if r == nil {
-		return nil
-	}
-	return r.err
 }
 
 func (r *Rows) Columns() []string {
