@@ -21,10 +21,6 @@ func newParseError(msg string) error {
 	return dberr.NewParse(msg)
 }
 
-func newPlanError(msg string) error {
-	return dberr.NewPlan(msg)
-}
-
 func newExecError(msg string) error {
 	return dberr.NewExec(msg)
 }

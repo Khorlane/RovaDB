@@ -6,16 +6,50 @@ RovaDB is a Go-first embedded relational database engine designed for clarity, p
 
 > **Status:** Early design / pre-release. The goal is to build a real, usable foundation first, then expand carefully.
 
-## Intended Use
+## Product Boundary
 
-RovaDB is currently aimed at:
+### Intended Use
 
-- embedded use inside Go applications
-- small application data sets
-- simple CRUD-style workflows
-- deterministic behavior over feature breadth
+- Embedded database for small applications
+- Local, single-process usage
+- Simple CRUD over a small number of tables
+- Deterministic behavior prioritized over feature breadth
+- Suitable for tooling, prototypes, and lightweight persistence needs
 
-It is a good fit when you want a compact SQL engine with readable behavior and a narrow, explicit contract.
+### Non-Goals
+
+- No JOIN support
+- No multi-table queries
+- No advanced query optimization
+- No `GROUP BY` / `HAVING` / aggregates beyond `COUNT(*)`
+- No subqueries
+- No concurrent multi-writer support
+- No distributed usage
+- No large-scale performance tuning
+- No full SQL compliance
+
+### Guarantees
+
+- Deterministic query behavior
+- Deterministic error surface with stable error messages and types
+- Crash-safe writes via the existing transaction and rollback-journal model
+- Correctness across open, close, reopen, and recovery lifecycle boundaries
+- Explicit corruption detection with no silent recovery
+- Simple, predictable execution model
+
+### Supported Features (Stage 8)
+
+- `CREATE TABLE`
+- `INSERT INTO ... VALUES`
+- `SELECT` over a single table with projection, `WHERE`, `ORDER BY`, and `COUNT(*)`
+- `UPDATE`
+- `DELETE`
+- `ALTER TABLE ... ADD COLUMN`
+- Indexed equality query support when index metadata already exists
+
+### Feature Freeze
+
+Stage 8 is the feature-complete baseline for this intended use case. Future changes should prioritize correctness and clarity over expansion, and any new feature should justify crossing this boundary.
 
 ## Supported SQL
 
@@ -111,17 +145,6 @@ RovaDB is being designed to:
 - keep the codebase understandable
 - separate major engine layers cleanly
 - allow future growth toward a broader SQL engine without forcing a rewrite
-
-## Non-goals
-
-At least initially, RovaDB is **not** trying to be:
-
-- a full SQLite clone
-- a drop-in SQLite compatibility layer
-- a distributed database
-- a heavy ORM-like abstraction
-- a feature-maximal SQL implementation
-- a system optimized for every edge case before it is useful
 
 ## Design principles
 
