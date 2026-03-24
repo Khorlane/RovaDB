@@ -16,12 +16,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL, score REAL)"); err != nil {
 		log.Fatal(err)
 	}
 	for _, sql := range []string{
-		"INSERT INTO users VALUES (1, 'Alice', TRUE)",
-		"INSERT INTO users VALUES (2, 'Bob', FALSE)",
+		"INSERT INTO users VALUES (1, 'Alice', TRUE, 3.14)",
+		"INSERT INTO users VALUES (2, 'Bob', FALSE, 1.25)",
 	} {
 		if _, err := db.Exec(sql); err != nil {
 			log.Fatal(err)
@@ -41,6 +41,7 @@ func main() {
 	defer db.Close()
 
 	printUserStatusByID(db, 2)
+	printUserScoreByID(db, 1)
 }
 
 func printActiveUsers(db *rovadb.DB, label string) {
@@ -74,4 +75,14 @@ func printUserStatusByID(db *rovadb.DB, id int) {
 		log.Fatal(err)
 	}
 	fmt.Printf("after reopen: id=%d name=%s active=%v\n", id, name, active)
+}
+
+func printUserScoreByID(db *rovadb.DB, id int) {
+	row := db.QueryRow(fmt.Sprintf("SELECT score FROM users WHERE id = %d", id))
+
+	var score float64
+	if err := row.Scan(&score); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("after reopen: id=%d score=%.2f\n", id, score)
 }

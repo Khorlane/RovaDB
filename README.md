@@ -93,6 +93,7 @@ Only the following SQL forms are supported today.
 - `INT`
 - `TEXT`
 - `BOOL`
+- `REAL`
 
 ### BOOL semantics
 
@@ -103,6 +104,17 @@ Only the following SQL forms are supported today.
 - no implicit type coercion
 - BOOL works in `CREATE TABLE`, strict `INSERT` / `UPDATE` validation, `SELECT` result values, and `WHERE` equality / inequality within the supported query subset
 
+### REAL semantics
+
+- REAL values are exposed to Go as `float64`
+- decimal literals such as `3.14` and `-2.5` are `REAL`
+- unquoted whole numbers such as `1` remain `INT`
+- quoted numeric-looking values such as `'3.14'` remain `TEXT`
+- REAL columns accept only `REAL` or `NULL`
+- there is no implicit coercion between `INT` and `REAL`
+- REAL-to-REAL `WHERE` comparisons support `=`, `!=`, `<`, `<=`, `>`, and `>=`
+- mixed `INT` / `REAL`, `TEXT` / `REAL`, and `BOOL` / `REAL` comparisons remain strict type mismatches
+
 ## Canonical Example
 
 ```go
@@ -112,12 +124,12 @@ if err != nil {
 }
 defer db.Close()
 
-if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL)"); err != nil {
+if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL, score REAL)"); err != nil {
 	log.Fatal(err)
 }
 for _, sql := range []string{
-	"INSERT INTO users VALUES (1, 'Alice', TRUE)",
-	"INSERT INTO users VALUES (2, 'Bob', FALSE)",
+	"INSERT INTO users VALUES (1, 'Alice', TRUE, 3.14)",
+	"INSERT INTO users VALUES (2, 'Bob', FALSE, 1.25)",
 } {
 	if _, err := db.Exec(sql); err != nil {
 		log.Fatal(err)
@@ -149,6 +161,12 @@ if err := row.Scan(&active); err != nil {
 	log.Fatal(err)
 }
 fmt.Println(active)
+
+var score float64
+if err := db.QueryRow("SELECT score FROM users WHERE id = 1").Scan(&score); err != nil {
+	log.Fatal(err)
+}
+fmt.Println(score)
 ```
 
 See [examples/basic_usage/main.go](/c:/Projects/RovaDB/examples/basic_usage/main.go) for a complete open -> write -> close -> reopen -> query flow.
