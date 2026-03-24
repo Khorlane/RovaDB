@@ -35,6 +35,11 @@ func normalizeIndexKey(v parser.Value) IndexKey {
 		return IndexKey("int:" + strconv.FormatInt(v.I64, 10))
 	case parser.ValueKindString:
 		return IndexKey("string:" + v.Str)
+	case parser.ValueKindBool:
+		if v.Bool {
+			return "bool:true"
+		}
+		return "bool:false"
 	default:
 		return "invalid"
 	}

@@ -1198,6 +1198,90 @@ func TestQuerySelectWhereNoMatches(t *testing.T) {
 	}
 }
 
+func TestQuerySelectWhereBoolComparisons(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE flags (id INT, active BOOL, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO flags VALUES (1, TRUE, 'alpha')",
+		"INSERT INTO flags VALUES (2, FALSE, 'beta')",
+		"INSERT INTO flags VALUES (3, NULL, 'gamma')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	tests := []struct {
+		name string
+		sql  string
+		want []int
+	}{
+		{name: "equals true", sql: "SELECT id FROM flags WHERE active = TRUE", want: []int{1}},
+		{name: "equals false", sql: "SELECT id FROM flags WHERE active = FALSE", want: []int{2}},
+		{name: "not equals true", sql: "SELECT id FROM flags WHERE active != TRUE", want: []int{2, 3}},
+		{name: "not equals false", sql: "SELECT id FROM flags WHERE active != FALSE", want: []int{1, 3}},
+		{name: "zero match", sql: "SELECT id FROM flags WHERE active = TRUE AND id = 2", want: nil},
+		{name: "null equals null", sql: "SELECT id FROM flags WHERE active = NULL", want: []int{3}},
+		{name: "null not equals true", sql: "SELECT id FROM flags WHERE active != TRUE AND id = 3", want: []int{3}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := db.Query(tc.sql)
+			if err != nil {
+				t.Fatalf("Query() error = %v", err)
+			}
+			defer rows.Close()
+
+			assertRowsIntSequence(t, rows, tc.want...)
+		})
+	}
+}
+
+func TestQuerySelectWhereBoolTypeMismatch(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE flags (id INT, active BOOL, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO flags VALUES (1, TRUE, 'alpha')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	tests := []string{
+		"SELECT id FROM flags WHERE active = 1",
+		"SELECT id FROM flags WHERE active = 'true'",
+	}
+
+	for _, sql := range tests {
+		t.Run(sql, func(t *testing.T) {
+			rows, err := db.Query(sql)
+			if err != nil {
+				t.Fatalf("Query() error = %v", err)
+			}
+			defer rows.Close()
+
+			if rows.Next() {
+				t.Fatal("Next() = true, want false")
+			}
+			if rows.Err() == nil {
+				t.Fatal("Err() = nil, want type mismatch error")
+			}
+		})
+	}
+}
+
 func TestQuerySelectNullRoundTrip(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

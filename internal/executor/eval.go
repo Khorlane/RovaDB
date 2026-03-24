@@ -99,6 +99,15 @@ func compareValues(op string, left, right parser.Value) (bool, error) {
 		default:
 			return false, errUnsupportedComparisonOp
 		}
+	case parser.ValueKindBool:
+		switch op {
+		case "=":
+			return left.Bool == right.Bool, nil
+		case "!=":
+			return left.Bool != right.Bool, nil
+		default:
+			return false, errUnsupportedComparisonOp
+		}
 	default:
 		return false, errTypeMismatch
 	}

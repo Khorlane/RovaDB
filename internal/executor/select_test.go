@@ -27,6 +27,10 @@ func typedCols() []parser.ColumnDef {
 	return []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}}
 }
 
+func boolCols() []parser.ColumnDef {
+	return []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "active", Type: parser.ColumnTypeBool}, {Name: "name", Type: parser.ColumnTypeText}}
+}
+
 func TestSelectAllColumns(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {
@@ -217,6 +221,61 @@ func TestSelectWhereTypeMismatch(t *testing.T) {
 	}
 
 	_, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", Where: where(parser.Condition{Left: "id", Operator: "=", Right: parser.StringValue("abc")})}), tables)
+	if err != errTypeMismatch {
+		t.Fatalf("Select() error = %v, want %v", err, errTypeMismatch)
+	}
+}
+
+func TestSelectWithBoolWhere(t *testing.T) {
+	tables := map[string]*Table{
+		"flags": {Name: "flags", Columns: boolCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.BoolValue(true), parser.StringValue("alpha")},
+			{parser.Int64Value(2), parser.BoolValue(false), parser.StringValue("beta")},
+			{parser.Int64Value(3), parser.NullValue(), parser.StringValue("gamma")},
+		}},
+	}
+
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
+		TableName: "flags",
+		Columns:   []string{"id"},
+		Where:     where(parser.Condition{Left: "active", Operator: "=", Right: parser.BoolValue(true)}),
+	}), tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 1 || rows[0][0] != parser.Int64Value(1) {
+		t.Fatalf("Select() rows = %#v, want [[1]]", rows)
+	}
+}
+
+func TestSelectWithBoolNotEqualWhere(t *testing.T) {
+	tables := map[string]*Table{
+		"flags": {Name: "flags", Columns: boolCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.BoolValue(true), parser.StringValue("alpha")},
+			{parser.Int64Value(2), parser.BoolValue(false), parser.StringValue("beta")},
+			{parser.Int64Value(3), parser.NullValue(), parser.StringValue("gamma")},
+		}},
+	}
+
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
+		TableName: "flags",
+		Columns:   []string{"id"},
+		Where:     where(parser.Condition{Left: "active", Operator: "!=", Right: parser.BoolValue(true)}),
+	}), tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 2 || rows[0][0] != parser.Int64Value(2) || rows[1][0] != parser.Int64Value(3) {
+		t.Fatalf("Select() rows = %#v, want [[2] [3]]", rows)
+	}
+}
+
+func TestSelectWhereBoolTypeMismatch(t *testing.T) {
+	tables := map[string]*Table{
+		"flags": {Name: "flags", Columns: boolCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.BoolValue(true), parser.StringValue("alpha")}}},
+	}
+
+	_, err := Select(planSelect(t, &parser.SelectExpr{TableName: "flags", Where: where(parser.Condition{Left: "active", Operator: "=", Right: parser.Int64Value(1)})}), tables)
 	if err != errTypeMismatch {
 		t.Fatalf("Select() error = %v, want %v", err, errTypeMismatch)
 	}
