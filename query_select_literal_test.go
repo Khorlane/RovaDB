@@ -11,7 +11,7 @@ func TestQuerySelectLiteral(t *testing.T) {
 	tests := []struct {
 		name  string
 		sql   string
-		value int64
+		value int
 	}{
 		{name: "select one", sql: "SELECT 1", value: 1},
 		{name: "select forty two", sql: "SELECT 42", value: 42},
@@ -49,7 +49,7 @@ func TestQuerySelectLiteral(t *testing.T) {
 				t.Fatal("Next() = false, want true")
 			}
 
-			var got int64
+			var got int
 			if err := rows.Scan(&got); err != nil {
 				t.Fatalf("Scan() error = %v", err)
 			}
@@ -189,7 +189,7 @@ func TestRowsScanStringIntoAny(t *testing.T) {
 	}
 }
 
-func TestRowsScanStringIntoInt64(t *testing.T) {
+func TestRowsScanStringIntoInt(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -206,10 +206,10 @@ func TestRowsScanStringIntoInt64(t *testing.T) {
 		t.Fatal("Next() = false, want true")
 	}
 
-	var got int64
+	var got int
 	err = rows.Scan(&got)
-	if !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("Scan() error = %v, want ErrInvalidArgument", err)
+	if !errors.Is(err, ErrUnsupportedScanType) {
+		t.Fatalf("Scan() error = %v, want ErrUnsupportedScanType", err)
 	}
 }
 

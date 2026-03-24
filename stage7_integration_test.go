@@ -201,8 +201,8 @@ func TestStage7IndexEdgeCases(t *testing.T) {
 		}
 
 		got := collectIntRows(t, db, "SELECT COUNT(*) FROM users WHERE name = 'same'")
-		if !reflect.DeepEqual(got, []int64{50}) {
-			t.Fatalf("count rows = %#v, want []int64{50}", got)
+		if !reflect.DeepEqual(got, []int{50}) {
+			t.Fatalf("count rows = %#v, want []int{50}", got)
 		}
 		assertIndexConsistency(t, db.tables["users"])
 	})
@@ -271,7 +271,7 @@ func assertIndexConsistency(t *testing.T, table *executor.Table) {
 	}
 }
 
-func assertQueryIntRows(t *testing.T, db *DB, sql string, want ...int64) {
+func assertQueryIntRows(t *testing.T, db *DB, sql string, want ...int) {
 	t.Helper()
 	got := collectIntRows(t, db, sql)
 	if !reflect.DeepEqual(got, want) {
@@ -279,7 +279,7 @@ func assertQueryIntRows(t *testing.T, db *DB, sql string, want ...int64) {
 	}
 }
 
-func collectIntRows(t *testing.T, db *DB, sql string) []int64 {
+func collectIntRows(t *testing.T, db *DB, sql string) []int {
 	t.Helper()
 
 	rows, err := db.Query(sql)
@@ -288,9 +288,9 @@ func collectIntRows(t *testing.T, db *DB, sql string) []int64 {
 	}
 	defer rows.Close()
 
-	got := []int64{}
+	got := []int{}
 	for rows.Next() {
-		var v int64
+		var v int
 		if err := rows.Scan(&v); err != nil {
 			t.Fatalf("Scan(%q) error = %v", sql, err)
 		}

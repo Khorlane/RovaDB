@@ -39,8 +39,8 @@ func TestUpdatePersistsAcrossReopen(t *testing.T) {
 	}
 	defer rows.Close()
 
-	assertRow(t, rows, int64(1), "alice")
-	assertRow(t, rows, int64(2), "robert")
+	assertRow(t, rows, int(1), "alice")
+	assertRow(t, rows, int(2), "robert")
 	if rows.Next() {
 		t.Fatal("Next() third = true, want false")
 	}
@@ -81,7 +81,7 @@ func TestDeletePersistsAcrossReopen(t *testing.T) {
 	}
 	defer rows.Close()
 
-	assertRow(t, rows, int64(2), "bob")
+	assertRow(t, rows, int(2), "bob")
 	if rows.Next() {
 		t.Fatal("Next() second = true, want false")
 	}
@@ -128,20 +128,20 @@ func TestUpdateDeleteMixedPersistence(t *testing.T) {
 	}
 	defer rows.Close()
 
-	assertRow(t, rows, int64(2), "bobby")
-	assertRow(t, rows, int64(3), "carol")
+	assertRow(t, rows, int(2), "bobby")
+	assertRow(t, rows, int(3), "carol")
 	if rows.Next() {
 		t.Fatal("Next() third = true, want false")
 	}
 }
 
-func assertRow(t *testing.T, rows *Rows, wantID int64, wantName string) {
+func assertRow(t *testing.T, rows *Rows, wantID int, wantName string) {
 	t.Helper()
 
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int64
+	var id int
 	var name string
 	if err := rows.Scan(&id, &name); err != nil {
 		t.Fatalf("Scan() error = %v", err)

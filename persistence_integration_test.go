@@ -391,12 +391,12 @@ func TestFailedCreateTableDoesNotPartiallyRegisterTable(t *testing.T) {
 	assertSelectIntRows(t, db, "SELECT * FROM t")
 }
 
-func assertIntRows(t *testing.T, rows *Rows, want ...int64) {
+func assertIntRows(t *testing.T, rows *Rows, want ...int) {
 	t.Helper()
 
-	got := make([]int64, 0, len(want))
+	got := make([]int, 0, len(want))
 	for rows.Next() {
-		var value int64
+		var value int
 		if err := rows.Scan(&value); err != nil {
 			t.Fatalf("Scan() error = %v", err)
 		}
@@ -415,7 +415,7 @@ func assertIntRows(t *testing.T, rows *Rows, want ...int64) {
 	}
 }
 
-func assertSelectIntRows(t *testing.T, db *DB, sql string, want ...int64) {
+func assertSelectIntRows(t *testing.T, db *DB, sql string, want ...int) {
 	t.Helper()
 
 	rows, err := db.Query(sql)

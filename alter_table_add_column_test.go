@@ -31,7 +31,7 @@ func TestAlterTableAddColumnBasic(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id1 int64
+	var id1 int
 	var age1 any
 	if err := rows.Scan(&id1, &age1); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
@@ -42,7 +42,7 @@ func TestAlterTableAddColumnBasic(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() second = false, want true")
 	}
-	var id2 int64
+	var id2 int
 	var age2 any
 	if err := rows.Scan(&id2, &age2); err != nil {
 		t.Fatalf("Scan() second error = %v", err)
@@ -86,8 +86,8 @@ func TestAlterTableAddColumnInsertAndUpdate(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id1 int64
-	var age1 int64
+	var id1 int
+	var age1 int
 	if err := rows.Scan(&id1, &age1); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
 	}
@@ -97,8 +97,8 @@ func TestAlterTableAddColumnInsertAndUpdate(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() second = false, want true")
 	}
-	var id2 int64
-	var age2 int64
+	var id2 int
+	var age2 int
 	if err := rows.Scan(&id2, &age2); err != nil {
 		t.Fatalf("Scan() second error = %v", err)
 	}
@@ -138,7 +138,7 @@ func TestAlterTableAddColumnReopenAndWhere(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int64
+	var id int
 	if err := rows.Scan(&id); err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}

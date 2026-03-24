@@ -204,7 +204,7 @@ func assertFinalUsersState(db *DB) error {
 	if !rows.Next() {
 		return errInvalidArgumentForTest("missing first row")
 	}
-	var id1 int64
+	var id1 int
 	var name1 string
 	if err := rows.Scan(&id1, &name1); err != nil {
 		return err
@@ -216,7 +216,7 @@ func assertFinalUsersState(db *DB) error {
 	if !rows.Next() {
 		return errInvalidArgumentForTest("missing second row")
 	}
-	var id2 int64
+	var id2 int
 	var name2 string
 	if err := rows.Scan(&id2, &name2); err != nil {
 		return err

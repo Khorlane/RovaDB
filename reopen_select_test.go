@@ -39,7 +39,7 @@ func TestInsertSelectAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id1 int64
+	var id1 int
 	var name1 string
 	if err := rows.Scan(&id1, &name1); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
@@ -51,7 +51,7 @@ func TestInsertSelectAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() second = false, want true")
 	}
-	var id2 int64
+	var id2 int
 	var name2 string
 	if err := rows.Scan(&id2, &name2); err != nil {
 		t.Fatalf("Scan() second error = %v", err)
@@ -103,7 +103,7 @@ func TestMultipleTablesReloadRowsOnOpen(t *testing.T) {
 	if !userRows.Next() {
 		t.Fatal("users Next() = false, want true")
 	}
-	var userID int64
+	var userID int
 	var userName string
 	if err := userRows.Scan(&userID, &userName); err != nil {
 		t.Fatalf("users Scan() error = %v", err)
@@ -121,7 +121,7 @@ func TestMultipleTablesReloadRowsOnOpen(t *testing.T) {
 	if !teamRows.Next() {
 		t.Fatal("teams Next() = false, want true")
 	}
-	var teamID int64
+	var teamID int
 	var teamName string
 	if err := teamRows.Scan(&teamID, &teamName); err != nil {
 		t.Fatalf("teams Scan() error = %v", err)

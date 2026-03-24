@@ -31,7 +31,7 @@ func TestQuerySelectFromTable(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id1 int64
+	var id1 int
 	var name1 string
 	if err := rows.Scan(&id1, &name1); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
@@ -43,7 +43,7 @@ func TestQuerySelectFromTable(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() second = false, want true")
 	}
-	var id2 int64
+	var id2 int
 	var name2 string
 	if err := rows.Scan(&id2, &name2); err != nil {
 		t.Fatalf("Scan() second error = %v", err)
@@ -86,7 +86,7 @@ func TestQuerySelectAllFromTable(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int64
+	var id int
 	var name string
 	if err := rows.Scan(&id, &name); err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -173,7 +173,7 @@ func TestQuerySelectSubsetOrder(t *testing.T) {
 		t.Fatal("Next() = false, want true")
 	}
 	var name string
-	var id int64
+	var id int
 	if err := rows.Scan(&name, &id); err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -208,7 +208,7 @@ func TestQuerySelectSingleProjectedColumn(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int64
+	var id int
 	if err := rows.Scan(&id); err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -261,10 +261,10 @@ func TestQuerySelectWrongScanShape(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int64
+	var id int
 	err = rows.Scan(&id)
-	if !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("Scan() error = %v, want ErrInvalidArgument", err)
+	if !errors.Is(err, ErrScanMismatch) {
+		t.Fatalf("Scan() error = %v, want ErrScanMismatch", err)
 	}
 }
 
@@ -462,7 +462,7 @@ func TestQuerySelectWhereNumericComparisons(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id int64
+	var id int
 	if err := rows.Scan(&id); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
 	}
@@ -617,7 +617,7 @@ func TestQuerySelectWhereAndConditions(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id int64
+	var id int
 	if err := rows.Scan(&id); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
 	}
@@ -1124,14 +1124,14 @@ func TestQuerySelectOrderByUnknownColumn(t *testing.T) {
 	}
 }
 
-func assertRowsIntSequence(t *testing.T, rows *Rows, want ...int64) {
+func assertRowsIntSequence(t *testing.T, rows *Rows, want ...int) {
 	t.Helper()
 
 	for i, wantValue := range want {
 		if !rows.Next() {
 			t.Fatalf("Next() row %d = false, want true", i)
 		}
-		var got int64
+		var got int
 		if err := rows.Scan(&got); err != nil {
 			t.Fatalf("Scan() row %d error = %v", i, err)
 		}

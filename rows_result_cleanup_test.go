@@ -18,10 +18,10 @@ func TestRowsScanBeforeNext(t *testing.T) {
 	}
 	defer rows.Close()
 
-	var got int64
+	var got int
 	err = rows.Scan(&got)
-	if !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("Scan() error = %v, want ErrInvalidArgument", err)
+	if !errors.Is(err, ErrScanBeforeNext) {
+		t.Fatalf("Scan() error = %v, want ErrScanBeforeNext", err)
 	}
 }
 
@@ -41,7 +41,7 @@ func TestRowsScanAfterIterationEnds(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var got int64
+	var got int
 	if err := rows.Scan(&got); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
 	}
@@ -50,8 +50,8 @@ func TestRowsScanAfterIterationEnds(t *testing.T) {
 	}
 
 	err = rows.Scan(&got)
-	if !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("Scan() after end error = %v, want ErrInvalidArgument", err)
+	if !errors.Is(err, ErrScanBeforeNext) {
+		t.Fatalf("Scan() after end error = %v, want ErrScanBeforeNext", err)
 	}
 }
 
@@ -112,10 +112,10 @@ func TestQueryZeroRowSelectCleanup(t *testing.T) {
 		t.Fatal("Next() = true, want false")
 	}
 
-	var id int64
+	var id int
 	var name string
 	err = rows.Scan(&id, &name)
-	if !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("Scan() error = %v, want ErrInvalidArgument", err)
+	if !errors.Is(err, ErrScanBeforeNext) {
+		t.Fatalf("Scan() error = %v, want ErrScanBeforeNext", err)
 	}
 }

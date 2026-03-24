@@ -33,8 +33,8 @@ func TestLifecycleWriteCloseReopenQuery(t *testing.T) {
 	defer db.Close()
 
 	assertSelectRowsWithNames(t, db, "SELECT id, name FROM users", [][2]any{
-		{int64(1), "alice"},
-		{int64(2), "bob"},
+		{int(1), "alice"},
+		{int(2), "bob"},
 	})
 }
 
@@ -63,8 +63,8 @@ func TestLifecycleUpdateCloseReopenQuery(t *testing.T) {
 	defer db.Close()
 
 	assertSelectRowsWithNames(t, db, "SELECT id, name FROM users", [][2]any{
-		{int64(1), "alice"},
-		{int64(2), "bobby"},
+		{int(1), "alice"},
+		{int(2), "bobby"},
 	})
 }
 
@@ -94,8 +94,8 @@ func TestLifecycleDeleteCloseReopenQuery(t *testing.T) {
 	defer db.Close()
 
 	assertSelectRowsWithNames(t, db, "SELECT id, name FROM users", [][2]any{
-		{int64(1), "alice"},
-		{int64(3), "cara"},
+		{int(1), "alice"},
+		{int(3), "cara"},
 	})
 }
 
@@ -127,7 +127,7 @@ func TestLifecycleRollbackCloseReopenKeepsCommittedState(t *testing.T) {
 	}
 
 	assertSelectRowsWithNames(t, db, "SELECT id, name FROM users", [][2]any{
-		{int64(1), "alice"},
+		{int(1), "alice"},
 	})
 
 	if err := db.Close(); err != nil {
@@ -138,7 +138,7 @@ func TestLifecycleRollbackCloseReopenKeepsCommittedState(t *testing.T) {
 	defer db.Close()
 
 	assertSelectRowsWithNames(t, db, "SELECT id, name FROM users", [][2]any{
-		{int64(1), "alice"},
+		{int(1), "alice"},
 	})
 }
 
@@ -182,7 +182,7 @@ func TestLifecycleMultipleWritesAcrossReopenBoundaries(t *testing.T) {
 	defer db.Close()
 
 	assertSelectRowsWithNames(t, db, "SELECT id, name FROM users", [][2]any{
-		{int64(2), "bobby"},
+		{int(2), "bobby"},
 	})
 }
 
@@ -230,7 +230,7 @@ func assertSelectRowsWithNames(t *testing.T, db *DB, sql string, want [][2]any) 
 
 	got := make([][2]any, 0, len(want))
 	for rows.Next() {
-		var id int64
+		var id int
 		var name string
 		if err := rows.Scan(&id, &name); err != nil {
 			t.Fatalf("Scan(%q) error = %v", sql, err)

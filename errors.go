@@ -40,4 +40,12 @@ var (
 	ErrQueryRequiresSelect = errors.New("rovadb: Query requires SELECT statement")
 	// ErrExecDisallowsSelect reports Exec use with a SELECT statement.
 	ErrExecDisallowsSelect = errors.New("rovadb: Exec disallows SELECT statement")
+	// ErrScanMismatch reports that Scan destination count does not match the current row width.
+	ErrScanMismatch = errors.New("rovadb: scan destination count mismatch")
+	// ErrUnsupportedScanType reports unsupported or incompatible Scan destination/value types.
+	ErrUnsupportedScanType = errors.New("rovadb: unsupported scan type")
+	// ErrScanBeforeNext reports Scan without a current row selected by Next.
+	ErrScanBeforeNext = errors.New("rovadb: Scan called before Next")
+	// ErrRowsClosed reports Scan on a closed Rows value.
+	ErrRowsClosed = errors.New("rovadb: rows closed")
 )

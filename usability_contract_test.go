@@ -24,8 +24,8 @@ func TestMinimalUsabilityContractExampleFlow(t *testing.T) {
 	}
 
 	assertSelectRowsWithNames(t, db, "SELECT id, name FROM users", [][2]any{
-		{int64(1), "alice"},
-		{int64(2), "bob"},
+		{1, "alice"},
+		{2, "bob"},
 	})
 
 	if err := db.Close(); err != nil {
@@ -36,7 +36,7 @@ func TestMinimalUsabilityContractExampleFlow(t *testing.T) {
 	defer db.Close()
 
 	assertSelectRowsWithNames(t, db, "SELECT id, name FROM users", [][2]any{
-		{int64(1), "alice"},
-		{int64(2), "bob"},
+		{1, "alice"},
+		{2, "bob"},
 	})
 }
