@@ -63,6 +63,20 @@ func (r *Rows) Err() error {
 	return r.err
 }
 
+// Columns reports the projected column names in query order.
+func (r *Rows) Columns() []string {
+	if r == nil {
+		return nil
+	}
+	if len(r.columns) == 0 {
+		return nil
+	}
+
+	cols := make([]string, len(r.columns))
+	copy(cols, r.columns)
+	return cols
+}
+
 // Scan copies the current row into destination pointers using strict positional matching.
 func (r *Rows) Scan(dest ...any) error {
 	if r == nil {
