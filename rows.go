@@ -145,3 +145,37 @@ func scanAssignableValue(dest any, src any) (any, error) {
 		return nil, ErrUnsupportedScanType
 	}
 }
+
+// Scan reads exactly one row from the wrapped Rows result.
+func (r *Row) Scan(dest ...any) error {
+	if r == nil || r.rows == nil {
+		return ErrNoRows
+	}
+	if r.rows.err != nil {
+		return r.rows.err
+	}
+
+	if !r.rows.Next() {
+		defer r.rows.Close()
+		if err := r.rows.Err(); err != nil {
+			return err
+		}
+		return ErrNoRows
+	}
+
+	if err := r.rows.Scan(dest...); err != nil {
+		_ = r.rows.Close()
+		return err
+	}
+
+	if r.rows.Next() {
+		_ = r.rows.Close()
+		return ErrMultipleRows
+	}
+	if err := r.rows.Err(); err != nil {
+		_ = r.rows.Close()
+		return err
+	}
+	_ = r.rows.Close()
+	return nil
+}

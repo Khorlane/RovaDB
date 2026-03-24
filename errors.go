@@ -48,4 +48,8 @@ var (
 	ErrScanBeforeNext = errors.New("rovadb: Scan called before Next")
 	// ErrRowsClosed reports Scan on a closed Rows value.
 	ErrRowsClosed = errors.New("rovadb: rows closed")
+	// ErrNoRows reports that QueryRow.Scan found no rows.
+	ErrNoRows = errors.New("rovadb: no rows")
+	// ErrMultipleRows reports that QueryRow.Scan found more than one row.
+	ErrMultipleRows = errors.New("rovadb: multiple rows")
 )

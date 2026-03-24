@@ -5,6 +5,52 @@ import (
 	"testing"
 )
 
+func TestRowScanSuccessSingleRow(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	row := db.QueryRow("SELECT 1")
+
+	var i int
+	if err := row.Scan(&i); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if i != 1 {
+		t.Fatalf("Scan() got %d, want 1", i)
+	}
+	if row.rows == nil || !row.rows.closed {
+		t.Fatalf("row.rows.closed = %v, want true", row.rows != nil && row.rows.closed)
+	}
+}
+
+func TestRowScanSuccessSingleRowMultipleColumns(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	row := db.QueryRow("SELECT id, name FROM users WHERE id = 1")
+	var i int
+	var s string
+	if err := row.Scan(&i, &s); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if i != 1 || s != "alice" {
+		t.Fatalf("Scan() = (%d, %q), want (1, %q)", i, s, "alice")
+	}
+}
+
 func TestQueryRowReturnsWrapperForLiteralSelect(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
@@ -104,5 +150,131 @@ func TestQueryRowDefersNilDBError(t *testing.T) {
 	}
 	if !errors.Is(row.rows.err, ErrInvalidArgument) {
 		t.Fatalf("QueryRow().rows.err = %v, want ErrInvalidArgument", row.rows.err)
+	}
+}
+
+func TestRowScanNoRows(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	row := db.QueryRow("SELECT id FROM users WHERE id = 999")
+	var i int
+	if err := row.Scan(&i); !errors.Is(err, ErrNoRows) {
+		t.Fatalf("Scan() error = %v, want ErrNoRows", err)
+	}
+	if row.rows == nil || !row.rows.closed {
+		t.Fatalf("row.rows.closed = %v, want true", row.rows != nil && row.rows.closed)
+	}
+}
+
+func TestRowScanMultipleRows(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	row := db.QueryRow("SELECT id FROM users ORDER BY id")
+	var i int
+	if err := row.Scan(&i); !errors.Is(err, ErrMultipleRows) {
+		t.Fatalf("Scan() error = %v, want ErrMultipleRows", err)
+	}
+	if row.rows == nil || !row.rows.closed {
+		t.Fatalf("row.rows.closed = %v, want true", row.rows != nil && row.rows.closed)
+	}
+}
+
+func TestRowScanDeferredQueryErrorPassthrough(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	row := db.QueryRow("CREATE TABLE users (id INT)")
+	var i int
+	if err := row.Scan(&i); !errors.Is(err, ErrQueryRequiresSelect) {
+		t.Fatalf("Scan() error = %v, want ErrQueryRequiresSelect", err)
+	}
+
+	row = db.QueryRow("SELECT * FROM users WHERE id =")
+	if err := row.Scan(&i); err == nil || err.Error() != "parse: invalid where clause" {
+		t.Fatalf("Scan() error = %v, want %q", err, "parse: invalid where clause")
+	}
+}
+
+func TestRowScanClosedAndNilDBDeferredErrors(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	var i int
+	row := db.QueryRow("SELECT 1")
+	if err := row.Scan(&i); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Scan() error = %v, want ErrClosed", err)
+	}
+
+	var nilDB *DB
+	row = nilDB.QueryRow("SELECT 1")
+	if err := row.Scan(&i); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("Scan() error = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestRowScanMismatchAndTypeMismatchPassthrough(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	row := db.QueryRow("SELECT id, name FROM users")
+	var i int
+	if err := row.Scan(&i); !errors.Is(err, ErrScanMismatch) {
+		t.Fatalf("Scan() error = %v, want ErrScanMismatch", err)
+	}
+
+	row = db.QueryRow("SELECT name FROM users")
+	if err := row.Scan(&i); !errors.Is(err, ErrUnsupportedScanType) {
+		t.Fatalf("Scan() error = %v, want ErrUnsupportedScanType", err)
+	}
+}
+
+func TestRowScanNilReceiver(t *testing.T) {
+	var row *Row
+	var i int
+
+	if err := row.Scan(&i); !errors.Is(err, ErrNoRows) {
+		t.Fatalf("Scan() error = %v, want ErrNoRows", err)
 	}
 }
