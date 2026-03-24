@@ -51,6 +51,18 @@ func TestParseInsert(t *testing.T) {
 			cols:   nil,
 			values: []Value{BoolValue(false)},
 		},
+		{
+			name:   "real literal",
+			input:  "INSERT INTO users VALUES (3.14)",
+			cols:   nil,
+			values: []Value{RealValue(3.14)},
+		},
+		{
+			name:   "negative real literal",
+			input:  "INSERT INTO users VALUES (-2.5)",
+			cols:   nil,
+			values: []Value{RealValue(-2.5)},
+		},
 	}
 
 	for _, tc := range tests {
@@ -95,6 +107,9 @@ func TestParseInsertInvalid(t *testing.T) {
 		{name: "duplicate column", input: "INSERT INTO users (id, id) VALUES (1, 'steve')"},
 		{name: "empty column list", input: "INSERT INTO users () VALUES (1, 'steve')"},
 		{name: "column value mismatch", input: "INSERT INTO users (id, name) VALUES (1)"},
+		{name: "unsupported trailing decimal", input: "INSERT INTO users VALUES (1.)"},
+		{name: "unsupported leading decimal", input: "INSERT INTO users VALUES (.5)"},
+		{name: "unsupported exponent", input: "INSERT INTO users VALUES (1e3)"},
 	}
 
 	for _, tc := range tests {

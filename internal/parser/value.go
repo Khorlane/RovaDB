@@ -1,5 +1,10 @@
 package parser
 
+import (
+	"strconv"
+	"strings"
+)
+
 // ValueKind identifies the stored value type.
 type ValueKind int
 
@@ -9,6 +14,7 @@ const (
 	ValueKindInt64
 	ValueKindString
 	ValueKindBool
+	ValueKindReal
 )
 
 /*
@@ -51,6 +57,7 @@ type Value struct {
 	I64  int64
 	Str  string
 	Bool bool
+	F64  float64
 }
 
 // NullValue builds a NULL Value.
@@ -73,6 +80,11 @@ func BoolValue(v bool) Value {
 	return Value{Kind: ValueKindBool, Bool: v}
 }
 
+// RealValue builds a float64 Value.
+func RealValue(v float64) Value {
+	return Value{Kind: ValueKindReal, F64: v}
+}
+
 // Any converts the internal value to its Go representation.
 func (v Value) Any() any {
 	switch v.Kind {
@@ -84,7 +96,52 @@ func (v Value) Any() any {
 		return v.Str
 	case ValueKindBool:
 		return v.Bool
+	case ValueKindReal:
+		return v.F64
 	default:
 		return nil
 	}
+}
+
+func parseRealLiteral(token string) (float64, bool) {
+	if strings.HasPrefix(token, "+") {
+		return 0, false
+	}
+	if token == "" {
+		return 0, false
+	}
+
+	start := 0
+	if token[0] == '-' {
+		start = 1
+		if len(token) < 4 {
+			return 0, false
+		}
+	}
+
+	dotIndex := -1
+	for i := start; i < len(token); i++ {
+		ch := token[i]
+		if ch == '.' {
+			if dotIndex >= 0 {
+				return 0, false
+			}
+			dotIndex = i
+			continue
+		}
+		if ch < '0' || ch > '9' {
+			return 0, false
+		}
+	}
+
+	if dotIndex <= start || dotIndex == len(token)-1 {
+		return 0, false
+	}
+
+	value, err := strconv.ParseFloat(token, 64)
+	if err != nil {
+		return 0, false
+	}
+
+	return value, true
 }

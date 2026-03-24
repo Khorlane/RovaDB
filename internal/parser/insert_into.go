@@ -100,6 +100,9 @@ func parseLiteralValue(token string) (Value, bool) {
 	if err == nil {
 		return Int64Value(value), true
 	}
+	if value, ok := parseRealLiteral(token); ok {
+		return RealValue(value), true
+	}
 
 	if isSingleQuotedStringLiteral(token) {
 		return StringValue(token[1 : len(token)-1]), true

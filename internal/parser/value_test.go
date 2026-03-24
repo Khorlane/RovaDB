@@ -45,6 +45,19 @@ func TestBoolValue(t *testing.T) {
 	}
 }
 
+func TestRealValue(t *testing.T) {
+	got := RealValue(3.14)
+	if got.Kind != ValueKindReal {
+		t.Fatalf("RealValue().Kind = %v, want %v", got.Kind, ValueKindReal)
+	}
+	if got.F64 != 3.14 {
+		t.Fatalf("RealValue().F64 = %v, want 3.14", got.F64)
+	}
+	if got.Any() != 3.14 {
+		t.Fatalf("RealValue().Any() = %#v, want 3.14", got.Any())
+	}
+}
+
 func TestParseLiteralValueBool(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -77,6 +90,47 @@ func TestParseLiteralValueBool(t *testing.T) {
 	}
 }
 
+func TestParseLiteralValueReal(t *testing.T) {
+	tests := []struct {
+		name  string
+		token string
+		want  Value
+	}{
+		{name: "zero point zero", token: "0.0", want: RealValue(0.0)},
+		{name: "pi-ish", token: "3.14", want: RealValue(3.14)},
+		{name: "negative", token: "-2.5", want: RealValue(-2.5)},
+		{name: "ten point twenty five", token: "10.25", want: RealValue(10.25)},
+		{name: "integer regression", token: "42", want: Int64Value(42)},
+		{name: "quoted decimal text", token: "'3.14'", want: StringValue("3.14")},
+		{name: "bool regression", token: "TRUE", want: BoolValue(true)},
+		{name: "null regression", token: "NULL", want: NullValue()},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseLiteralValue(tc.token)
+			if !ok {
+				t.Fatalf("parseLiteralValue(%q) ok = false, want true", tc.token)
+			}
+			if got != tc.want {
+				t.Fatalf("parseLiteralValue(%q) = %#v, want %#v", tc.token, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseLiteralValueRealInvalid(t *testing.T) {
+	tests := []string{"1.", ".5", "1e3", "-2.5e-1"}
+
+	for _, token := range tests {
+		t.Run(token, func(t *testing.T) {
+			if got, ok := parseLiteralValue(token); ok {
+				t.Fatalf("parseLiteralValue(%q) = %#v, want failure", token, got)
+			}
+		})
+	}
+}
+
 func TestParseSelectExprValueKinds(t *testing.T) {
 	intSel, ok := ParseSelectExpr("SELECT 1")
 	if !ok {
@@ -90,6 +144,20 @@ func TestParseSelectExprValueKinds(t *testing.T) {
 	}
 	if intSel.Expr.I64 != 1 {
 		t.Fatalf("ParseSelectExpr(SELECT 1).Expr.I64 = %d, want 1", intSel.Expr.I64)
+	}
+
+	realSel, ok := ParseSelectExpr("SELECT 3.14")
+	if !ok {
+		t.Fatal("ParseSelectExpr(SELECT 3.14) ok = false, want true")
+	}
+	if realSel.Expr == nil {
+		t.Fatal("ParseSelectExpr(SELECT 3.14).Expr = nil, want value")
+	}
+	if realSel.Expr.Kind != ExprKindRealLiteral {
+		t.Fatalf("ParseSelectExpr(SELECT 3.14).Expr.Kind = %v, want %v", realSel.Expr.Kind, ExprKindRealLiteral)
+	}
+	if realSel.Expr.F64 != 3.14 {
+		t.Fatalf("ParseSelectExpr(SELECT 3.14).Expr.F64 = %v, want 3.14", realSel.Expr.F64)
 	}
 
 	strSel, ok := ParseSelectExpr("SELECT 'hi'")
@@ -143,5 +211,32 @@ func TestParseSelectExprValueKinds(t *testing.T) {
 	}
 	if nullSel.Where.Items[0].Condition.Right.Kind != ValueKindNull {
 		t.Fatalf("ParseSelectExpr(...).Where.Items[0].Condition.Right.Kind = %v, want %v", nullSel.Where.Items[0].Condition.Right.Kind, ValueKindNull)
+	}
+
+	whereRealSel, ok := ParseSelectExpr("SELECT * FROM prices WHERE amount = 10.25")
+	if !ok {
+		t.Fatal("ParseSelectExpr(SELECT * FROM prices WHERE amount = 10.25) ok = false, want true")
+	}
+	if whereRealSel.Where == nil || len(whereRealSel.Where.Items) != 1 {
+		t.Fatalf("ParseSelectExpr(...).Where = %#v, want one condition", whereRealSel.Where)
+	}
+	if whereRealSel.Where.Items[0].Condition.Right != RealValue(10.25) {
+		t.Fatalf("ParseSelectExpr(...).Where.Items[0].Condition.Right = %#v, want %#v", whereRealSel.Where.Items[0].Condition.Right, RealValue(10.25))
+	}
+}
+
+func TestParseSelectExprRealInvalid(t *testing.T) {
+	tests := []string{
+		"SELECT 1.",
+		"SELECT .5",
+		"SELECT 1e3",
+	}
+
+	for _, sql := range tests {
+		t.Run(sql, func(t *testing.T) {
+			if got, ok := ParseSelectExpr(sql); ok {
+				t.Fatalf("ParseSelectExpr(%q) = %#v, want failure", sql, got)
+			}
+		})
 	}
 }
