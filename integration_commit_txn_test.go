@@ -588,3 +588,88 @@ func TestSuccessfulRollbackLeavesNoTxnAndNoTracking(t *testing.T) {
 		t.Fatal("dirty/original tracking remained after successful rollback")
 	}
 }
+
+func TestBoolRollbackCloseReopenKeepsCommittedState(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	for _, sql := range []string{
+		"CREATE TABLE flags (id INT, name TEXT, active BOOL)",
+		"INSERT INTO flags VALUES (1, 'alice', TRUE)",
+		"INSERT INTO flags VALUES (2, 'bob', FALSE)",
+		"INSERT INTO flags VALUES (3, 'cara', NULL)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	err = db.execMutatingStatement(func() error {
+		stagedTables := cloneTables(db.tables)
+		table := stagedTables["flags"]
+		table.Rows[0][2] = parser.BoolValue(false)
+		table.Rows[1][2] = parser.BoolValue(true)
+		table.Rows[2][2] = parser.BoolValue(true)
+		if err := db.applyStagedTableRewrite(stagedTables, "flags"); err != nil {
+			return err
+		}
+		return errors.New("force rollback")
+	})
+	if err == nil || err.Error() != "force rollback" {
+		t.Fatalf("execMutatingStatement() error = %v, want %q", err, "force rollback")
+	}
+
+	assertSelectBoolRows(t, db, "SELECT id, name, active FROM flags ORDER BY id", [][3]any{
+		{int(1), "alice", true},
+		{int(2), "bob", false},
+		{int(3), "cara", nil},
+	})
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	assertSelectBoolRows(t, db, "SELECT id, name, active FROM flags ORDER BY id", [][3]any{
+		{int(1), "alice", true},
+		{int(2), "bob", false},
+		{int(3), "cara", nil},
+	})
+}
+
+func assertSelectBoolRows(t *testing.T, db *DB, sql string, want [][3]any) {
+	t.Helper()
+
+	rows, err := db.Query(sql)
+	if err != nil {
+		t.Fatalf("Query(%q) error = %v", sql, err)
+	}
+	defer rows.Close()
+
+	got := make([][3]any, 0, len(want))
+	for rows.Next() {
+		var id int
+		var name string
+		var active any
+		if err := rows.Scan(&id, &name, &active); err != nil {
+			t.Fatalf("Scan(%q) error = %v", sql, err)
+		}
+		got = append(got, [3]any{id, name, active})
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Rows.Err(%q) = %v", sql, err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("rows(%q) len = %d, want %d; got = %#v", sql, len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("rows(%q)[%d] = %#v, want %#v", sql, i, got[i], want[i])
+		}
+	}
+}
