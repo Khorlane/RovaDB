@@ -31,6 +31,10 @@ func boolCols() []parser.ColumnDef {
 	return []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "active", Type: parser.ColumnTypeBool}, {Name: "name", Type: parser.ColumnTypeText}}
 }
 
+func realCols() []parser.ColumnDef {
+	return []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "x", Type: parser.ColumnTypeReal}, {Name: "name", Type: parser.ColumnTypeText}}
+}
+
 func TestSelectAllColumns(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {
@@ -278,6 +282,65 @@ func TestSelectWhereBoolTypeMismatch(t *testing.T) {
 	_, err := Select(planSelect(t, &parser.SelectExpr{TableName: "flags", Where: where(parser.Condition{Left: "active", Operator: "=", Right: parser.Int64Value(1)})}), tables)
 	if err != errTypeMismatch {
 		t.Fatalf("Select() error = %v, want %v", err, errTypeMismatch)
+	}
+}
+
+func TestSelectWithRealWhereComparisons(t *testing.T) {
+	tests := []struct {
+		name     string
+		where    *parser.WhereClause
+		wantRows []int64
+	}{
+		{name: "equals", where: where(parser.Condition{Left: "x", Operator: "=", Right: parser.RealValue(3.14)}), wantRows: []int64{2}},
+		{name: "not equals", where: where(parser.Condition{Left: "x", Operator: "!=", Right: parser.RealValue(3.14)}), wantRows: []int64{1, 3}},
+		{name: "less than", where: where(parser.Condition{Left: "x", Operator: "<", Right: parser.RealValue(3.0)}), wantRows: []int64{1}},
+		{name: "less equal", where: where(parser.Condition{Left: "x", Operator: "<=", Right: parser.RealValue(3.14)}), wantRows: []int64{1, 2}},
+		{name: "greater than", where: where(parser.Condition{Left: "x", Operator: ">", Right: parser.RealValue(-1.0)}), wantRows: []int64{2, 3}},
+		{name: "greater equal", where: where(parser.Condition{Left: "x", Operator: ">=", Right: parser.RealValue(10.25)}), wantRows: []int64{3}},
+	}
+
+	tables := map[string]*Table{
+		"measurements": {Name: "measurements", Columns: realCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.RealValue(-2.5), parser.StringValue("neg")},
+			{parser.Int64Value(2), parser.RealValue(3.14), parser.StringValue("pi")},
+			{parser.Int64Value(3), parser.RealValue(10.25), parser.StringValue("hi")},
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := Select(planSelect(t, &parser.SelectExpr{TableName: "measurements", Columns: []string{"id"}, Where: tc.where}), tables)
+			if err != nil {
+				t.Fatalf("Select() error = %v", err)
+			}
+			if len(rows) != len(tc.wantRows) {
+				t.Fatalf("len(rows) = %d, want %d", len(rows), len(tc.wantRows))
+			}
+			for i, want := range tc.wantRows {
+				if rows[i][0] != parser.Int64Value(want) {
+					t.Fatalf("rows[%d][0] = %#v, want %#v", i, rows[i][0], parser.Int64Value(want))
+				}
+			}
+		})
+	}
+}
+
+func TestSelectWhereRealTypeMismatch(t *testing.T) {
+	tables := map[string]*Table{
+		"measurements": {Name: "measurements", Columns: realCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.RealValue(3.14), parser.StringValue("pi")}}},
+	}
+
+	tests := []*parser.WhereClause{
+		where(parser.Condition{Left: "x", Operator: "=", Right: parser.Int64Value(3)}),
+		where(parser.Condition{Left: "x", Operator: "=", Right: parser.StringValue("3.14")}),
+		where(parser.Condition{Left: "x", Operator: "=", Right: parser.BoolValue(true)}),
+	}
+
+	for _, clause := range tests {
+		_, err := Select(planSelect(t, &parser.SelectExpr{TableName: "measurements", Where: clause}), tables)
+		if err != errTypeMismatch {
+			t.Fatalf("Select() error = %v, want %v", err, errTypeMismatch)
+		}
 	}
 }
 

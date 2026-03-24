@@ -1282,6 +1282,91 @@ func TestQuerySelectWhereBoolTypeMismatch(t *testing.T) {
 	}
 }
 
+func TestQuerySelectWhereRealComparisons(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE measurements (id INT, x REAL, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO measurements VALUES (1, -2.5, 'neg')",
+		"INSERT INTO measurements VALUES (2, 3.14, 'pi')",
+		"INSERT INTO measurements VALUES (3, 10.25, 'hi')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	tests := []struct {
+		name string
+		sql  string
+		want []int
+	}{
+		{name: "equals", sql: "SELECT id FROM measurements WHERE x = 3.14", want: []int{2}},
+		{name: "not equals", sql: "SELECT id FROM measurements WHERE x != 3.14", want: []int{1, 3}},
+		{name: "less than", sql: "SELECT id FROM measurements WHERE x < 3.0", want: []int{1}},
+		{name: "less equal", sql: "SELECT id FROM measurements WHERE x <= 3.14", want: []int{1, 2}},
+		{name: "greater than", sql: "SELECT id FROM measurements WHERE x > -1.0", want: []int{2, 3}},
+		{name: "greater equal", sql: "SELECT id FROM measurements WHERE x >= 10.25", want: []int{3}},
+		{name: "zero match", sql: "SELECT id FROM measurements WHERE x < -10.0", want: nil},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := db.Query(tc.sql)
+			if err != nil {
+				t.Fatalf("Query() error = %v", err)
+			}
+			defer rows.Close()
+
+			assertRowsIntSequence(t, rows, tc.want...)
+		})
+	}
+}
+
+func TestQuerySelectWhereRealTypeMismatch(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE measurements (id INT, x REAL, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO measurements VALUES (1, 3.14, 'pi')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	tests := []string{
+		"SELECT id FROM measurements WHERE x = 3",
+		"SELECT id FROM measurements WHERE x = '3.14'",
+		"SELECT id FROM measurements WHERE x = TRUE",
+	}
+
+	for _, sql := range tests {
+		t.Run(sql, func(t *testing.T) {
+			rows, err := db.Query(sql)
+			if err != nil {
+				t.Fatalf("Query() error = %v", err)
+			}
+			defer rows.Close()
+
+			if rows.Next() {
+				t.Fatal("Next() = true, want false")
+			}
+			if rows.Err() == nil {
+				t.Fatal("Err() = nil, want type mismatch error")
+			}
+		})
+	}
+}
+
 func TestQuerySelectNullRoundTrip(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

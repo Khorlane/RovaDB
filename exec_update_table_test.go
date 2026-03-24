@@ -177,3 +177,40 @@ func TestExecUpdateWhereOr(t *testing.T) {
 
 	assertRowsStringSequence(t, rows, "updated", "bob", "updated")
 }
+
+func TestExecUpdateWhereRealComparison(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE measurements (id INT, x REAL, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO measurements VALUES (1, -2.5, 'neg')",
+		"INSERT INTO measurements VALUES (2, 3.14, 'pi')",
+		"INSERT INTO measurements VALUES (3, 10.25, 'hi')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	result, err := db.Exec("UPDATE measurements SET name = 'small' WHERE x < 3.0")
+	if err != nil {
+		t.Fatalf("Exec(update) error = %v", err)
+	}
+	if result.RowsAffected() != 1 {
+		t.Fatalf("Exec(update).RowsAffected() = %d, want 1", result.RowsAffected())
+	}
+
+	rows, err := db.Query("SELECT name FROM measurements ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsStringSequence(t, rows, "small", "pi", "hi")
+}

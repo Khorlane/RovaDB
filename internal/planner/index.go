@@ -1,6 +1,7 @@
 package planner
 
 import (
+	"math"
 	"strconv"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
@@ -40,6 +41,8 @@ func normalizeIndexKey(v parser.Value) IndexKey {
 			return "bool:true"
 		}
 		return "bool:false"
+	case parser.ValueKindReal:
+		return IndexKey("real:" + strconv.FormatUint(math.Float64bits(v.F64), 10))
 	default:
 		return "invalid"
 	}

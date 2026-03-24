@@ -110,6 +110,23 @@ func compareValues(op string, left, right parser.Value) (bool, error) {
 		default:
 			return false, errUnsupportedComparisonOp
 		}
+	case parser.ValueKindReal:
+		switch op {
+		case "=":
+			return left.F64 == right.F64, nil
+		case "!=":
+			return left.F64 != right.F64, nil
+		case "<":
+			return left.F64 < right.F64, nil
+		case "<=":
+			return left.F64 <= right.F64, nil
+		case ">":
+			return left.F64 > right.F64, nil
+		case ">=":
+			return left.F64 >= right.F64, nil
+		default:
+			return false, errUnsupportedComparisonOp
+		}
 	default:
 		return false, errTypeMismatch
 	}

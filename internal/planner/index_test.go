@@ -89,3 +89,26 @@ func TestBasicIndexLookupEqualReturnsCopy(t *testing.T) {
 		t.Fatalf("LookupEqual(1) after caller mutation = %#v, want []int{0, 1}", after)
 	}
 }
+
+func TestBasicIndexRealValuesAreDistinct(t *testing.T) {
+	idx := NewBasicIndex("measurements", "x")
+
+	err := idx.Rebuild(
+		[]string{"id", "x"},
+		[][]parser.Value{
+			{parser.Int64Value(1), parser.RealValue(3.14)},
+			{parser.Int64Value(2), parser.RealValue(-2.5)},
+			{parser.Int64Value(3), parser.RealValue(3.14)},
+		},
+	)
+	if err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	if got := idx.LookupEqual(parser.RealValue(3.14)); !reflect.DeepEqual(got, []int{0, 2}) {
+		t.Fatalf("LookupEqual(3.14) = %#v, want []int{0, 2}", got)
+	}
+	if got := idx.LookupEqual(parser.RealValue(-2.5)); !reflect.DeepEqual(got, []int{1}) {
+		t.Fatalf("LookupEqual(-2.5) = %#v, want []int{1}", got)
+	}
+}
