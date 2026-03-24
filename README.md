@@ -40,6 +40,7 @@ Only the following SQL forms are supported today.
 - `ORDER BY <column> [ASC|DESC]`
 - `COUNT(*)`
 - equality lookups may use an index when index metadata exists
+- broader query optimization is not guaranteed; table scan remains the fallback outside the current indexed-equality shape
 
 ### Not supported
 

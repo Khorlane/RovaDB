@@ -80,6 +80,9 @@ func TestPlanSelectEqualityWithIndexUsesIndexScan(t *testing.T) {
 	if plan.IndexScan.TableName != "users" || plan.IndexScan.ColumnName != "id" || plan.IndexScan.Value != parser.Int64Value(1) {
 		t.Fatalf("PlanSelect().IndexScan = %#v, want users.id = 1", plan.IndexScan)
 	}
+	if plan.TableScan != nil {
+		t.Fatalf("PlanSelect().TableScan = %#v, want nil for index scan", plan.TableScan)
+	}
 }
 
 func TestPlanSelectEqualityWithoutIndexFallsBackToTableScan(t *testing.T) {
@@ -117,5 +120,34 @@ func TestPlanSelectComplexWhereFallsBackToTableScan(t *testing.T) {
 		if plan.ScanType != ScanTypeTable || plan.TableScan == nil {
 			t.Fatalf("PlanSelect(%q) = %#v, want table scan", sql, plan)
 		}
+		if plan.IndexScan != nil {
+			t.Fatalf("PlanSelect(%q).IndexScan = %#v, want nil fallback index scan", sql, plan.IndexScan)
+		}
+	}
+}
+
+func TestPlanSelectIsDeterministicForIndexedEquality(t *testing.T) {
+	stmt, ok := parser.ParseSelectExpr("SELECT id FROM users WHERE id = 1")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+
+	plan1, err := PlanSelect(stmt, testPlannerTables("id"))
+	if err != nil {
+		t.Fatalf("first PlanSelect() error = %v", err)
+	}
+	plan2, err := PlanSelect(stmt, testPlannerTables("id"))
+	if err != nil {
+		t.Fatalf("second PlanSelect() error = %v", err)
+	}
+
+	if plan1.ScanType != ScanTypeIndex || plan2.ScanType != ScanTypeIndex {
+		t.Fatalf("scan types = (%q,%q), want both %q", plan1.ScanType, plan2.ScanType, ScanTypeIndex)
+	}
+	if plan1.IndexScan == nil || plan2.IndexScan == nil {
+		t.Fatalf("index scans = (%#v,%#v), want both non-nil", plan1.IndexScan, plan2.IndexScan)
+	}
+	if *plan1.IndexScan != *plan2.IndexScan {
+		t.Fatalf("index scans differ: %#v vs %#v", plan1.IndexScan, plan2.IndexScan)
 	}
 }

@@ -549,6 +549,9 @@ func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, t
 		return nil
 	}
 
+	// UPDATE/DELETE and any persisted row-content change currently use a full
+	// table root-page rewrite. This is the intentional fallback path when the
+	// planner/executor cannot use a narrower persistence strategy.
 	table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
 
 	encodedRows, err := encodeRows(table.Rows)
@@ -578,6 +581,9 @@ func (db *DB) applyStagedCatalogOnly(stagedTables map[string]*executor.Table) er
 		return nil
 	}
 
+	// Schema metadata changes such as ALTER TABLE ... ADD COLUMN are catalog-only
+	// here. Existing stored rows are not rewritten; older rows are padded in
+	// memory when materialized against the wider schema.
 	catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
 	if err != nil {
 		return wrapStorageError(err)
