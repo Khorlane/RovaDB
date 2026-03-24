@@ -939,6 +939,8 @@ func catalogColumnType(columnType string) uint8 {
 	switch columnType {
 	case parser.ColumnTypeInt:
 		return storage.CatalogColumnTypeInt
+	case parser.ColumnTypeBool:
+		return storage.CatalogColumnTypeBool
 	default:
 		return storage.CatalogColumnTypeText
 	}
@@ -948,6 +950,8 @@ func parserColumnType(columnType uint8) (string, error) {
 	switch columnType {
 	case storage.CatalogColumnTypeInt:
 		return parser.ColumnTypeInt, nil
+	case storage.CatalogColumnTypeBool:
+		return parser.ColumnTypeBool, nil
 	case storage.CatalogColumnTypeText:
 		return parser.ColumnTypeText, nil
 	default:

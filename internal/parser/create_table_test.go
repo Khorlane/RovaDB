@@ -15,13 +15,68 @@ func TestParseCreateTable(t *testing.T) {
 	}
 }
 
+func TestParseCreateTableBool(t *testing.T) {
+	got, err := parseCreateTable("CREATE TABLE t (flag BOOL)")
+	if err != nil {
+		t.Fatalf("parseCreateTable() error = %v", err)
+	}
+	if got.Name != "t" {
+		t.Fatalf("parseCreateTable().Name = %q, want %q", got.Name, "t")
+	}
+	if len(got.Columns) != 1 || got.Columns[0] != (ColumnDef{Name: "flag", Type: ColumnTypeBool}) {
+		t.Fatalf("parseCreateTable().Columns = %#v, want BOOL column", got.Columns)
+	}
+}
+
+func TestParseCreateTableMixedBoolSchema(t *testing.T) {
+	got, err := parseCreateTable("CREATE TABLE t (id INT, name TEXT, active BOOL)")
+	if err != nil {
+		t.Fatalf("parseCreateTable() error = %v", err)
+	}
+	want := []ColumnDef{
+		{Name: "id", Type: ColumnTypeInt},
+		{Name: "name", Type: ColumnTypeText},
+		{Name: "active", Type: ColumnTypeBool},
+	}
+	if len(got.Columns) != len(want) {
+		t.Fatalf("len(parseCreateTable().Columns) = %d, want %d", len(got.Columns), len(want))
+	}
+	for i := range want {
+		if got.Columns[i] != want[i] {
+			t.Fatalf("parseCreateTable().Columns[%d] = %#v, want %#v", i, got.Columns[i], want[i])
+		}
+	}
+}
+
+func TestParseCreateTableMultipleBoolColumns(t *testing.T) {
+	got, err := parseCreateTable("CREATE TABLE t (a BOOL, b BOOL, c INT)")
+	if err != nil {
+		t.Fatalf("parseCreateTable() error = %v", err)
+	}
+	want := []ColumnDef{
+		{Name: "a", Type: ColumnTypeBool},
+		{Name: "b", Type: ColumnTypeBool},
+		{Name: "c", Type: ColumnTypeInt},
+	}
+	if len(got.Columns) != len(want) {
+		t.Fatalf("len(parseCreateTable().Columns) = %d, want %d", len(got.Columns), len(want))
+	}
+	for i := range want {
+		if got.Columns[i] != want[i] {
+			t.Fatalf("parseCreateTable().Columns[%d] = %#v, want %#v", i, got.Columns[i], want[i])
+		}
+	}
+}
+
 func TestParseCreateTableInvalid(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
 	}{
 		{name: "missing parens", input: "CREATE TABLE users id INT, name TEXT"},
-		{name: "unsupported type", input: "CREATE TABLE users (id BOOL, name TEXT)"},
+		{name: "unsupported type boolean", input: "CREATE TABLE users (id BOOLEAN, name TEXT)"},
+		{name: "unsupported type boole", input: "CREATE TABLE users (id BOOLE, name TEXT)"},
+		{name: "unsupported type boll", input: "CREATE TABLE users (id BOLL, name TEXT)"},
 		{name: "missing type", input: "CREATE TABLE users (id, name TEXT)"},
 		{name: "duplicate column", input: "CREATE TABLE users (id INT, id TEXT)"},
 		{name: "empty column list", input: "CREATE TABLE users ()"},

@@ -11,6 +11,7 @@ const (
 
 	CatalogColumnTypeInt  = 1
 	CatalogColumnTypeText = 2
+	CatalogColumnTypeBool = 3
 )
 
 // CatalogData is the tiny storage-side catalog DTO persisted in page 0.
@@ -94,7 +95,7 @@ func LoadCatalog(pager *Pager) (*CatalogData, error) {
 			}
 			columnType := page.data[offset]
 			offset++
-			if columnType != CatalogColumnTypeInt && columnType != CatalogColumnTypeText {
+			if columnType != CatalogColumnTypeInt && columnType != CatalogColumnTypeText && columnType != CatalogColumnTypeBool {
 				return nil, errCorruptedCatalogPage
 			}
 			if _, exists := columnNames[columnName]; exists {
@@ -178,7 +179,7 @@ func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
 			if column.Name == "" {
 				return nil, errCorruptedCatalogPage
 			}
-			if column.Type != CatalogColumnTypeInt && column.Type != CatalogColumnTypeText {
+			if column.Type != CatalogColumnTypeInt && column.Type != CatalogColumnTypeText && column.Type != CatalogColumnTypeBool {
 				return nil, errCorruptedCatalogPage
 			}
 			buf = appendString(buf, column.Name)
