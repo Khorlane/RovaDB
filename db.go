@@ -335,6 +335,18 @@ func (db *DB) Query(query string) (*Rows, error) {
 	return newRows(nil, [][]any{{apiValue(value)}}), nil
 }
 
+// QueryRow executes Query and wraps the resulting row set for deferred handling.
+func (db *DB) QueryRow(query string) *Row {
+	rows, err := db.Query(query)
+	if err != nil {
+		rows = &Rows{
+			idx: -1,
+			err: err,
+		}
+	}
+	return newRow(rows)
+}
+
 func materializeRows(rows [][]parser.Value) [][]any {
 	materialized := make([][]any, 0, len(rows))
 	for _, row := range rows {
