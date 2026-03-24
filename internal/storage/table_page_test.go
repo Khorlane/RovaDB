@@ -121,8 +121,8 @@ func TestReadRowsFromTablePageMalformedFreeOffset(t *testing.T) {
 	binary.LittleEndian.PutUint32(page.Data()[4:8], 7)
 
 	_, err := ReadRowsFromTablePage(page)
-	if !errors.Is(err, errInvalidRowData) {
-		t.Fatalf("ReadRowsFromTablePage() error = %v, want %v", err, errInvalidRowData)
+	if !errors.Is(err, errCorruptedTablePage) {
+		t.Fatalf("ReadRowsFromTablePage() error = %v, want %v", err, errCorruptedTablePage)
 	}
 }
 
@@ -134,8 +134,8 @@ func TestReadRowsFromTablePageTruncatedRow(t *testing.T) {
 	binary.LittleEndian.PutUint32(page.Data()[8:12], 12)
 
 	_, err := ReadRowsFromTablePage(page)
-	if !errors.Is(err, errInvalidRowData) {
-		t.Fatalf("ReadRowsFromTablePage() error = %v, want %v", err, errInvalidRowData)
+	if !errors.Is(err, errCorruptedTablePage) {
+		t.Fatalf("ReadRowsFromTablePage() error = %v, want %v", err, errCorruptedTablePage)
 	}
 }
 
@@ -151,7 +151,7 @@ func TestReadRowsFromTablePageCountMismatch(t *testing.T) {
 	binary.LittleEndian.PutUint32(page.Data()[0:4], 2)
 
 	_, err = ReadRowsFromTablePage(page)
-	if !errors.Is(err, errInvalidRowData) {
-		t.Fatalf("ReadRowsFromTablePage() error = %v, want %v", err, errInvalidRowData)
+	if !errors.Is(err, errCorruptedTablePage) {
+		t.Fatalf("ReadRowsFromTablePage() error = %v, want %v", err, errCorruptedTablePage)
 	}
 }

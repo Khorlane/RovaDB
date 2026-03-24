@@ -2,7 +2,6 @@ package storage
 
 import (
 	"encoding/binary"
-	"errors"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
@@ -12,8 +11,6 @@ const (
 	rowTypeInt64  = 1
 	rowTypeString = 2
 )
-
-var errInvalidRowData = errors.New("storage: invalid row data")
 
 // EncodeRow encodes one row payload using the storage row format.
 func EncodeRow(values []parser.Value) ([]byte, error) {
@@ -36,7 +33,7 @@ func EncodeRow(values []parser.Value) ([]byte, error) {
 			buf = append(buf, raw[:]...)
 			buf = append(buf, value.Str...)
 		default:
-			return nil, errInvalidRowData
+			return nil, errCorruptedRowData
 		}
 	}
 
@@ -46,7 +43,7 @@ func EncodeRow(values []parser.Value) ([]byte, error) {
 // DecodeRow decodes one row payload using the storage row format.
 func DecodeRow(data []byte) ([]parser.Value, error) {
 	if len(data) < 2 {
-		return nil, errInvalidRowData
+		return nil, errCorruptedRowData
 	}
 
 	offset := 0
@@ -56,7 +53,7 @@ func DecodeRow(data []byte) ([]parser.Value, error) {
 	values := make([]parser.Value, 0, count)
 	for i := 0; i < count; i++ {
 		if offset >= len(data) {
-			return nil, errInvalidRowData
+			return nil, errCorruptedRowData
 		}
 
 		tag := data[offset]
@@ -67,29 +64,29 @@ func DecodeRow(data []byte) ([]parser.Value, error) {
 			values = append(values, parser.NullValue())
 		case rowTypeInt64:
 			if offset+8 > len(data) {
-				return nil, errInvalidRowData
+				return nil, errCorruptedRowData
 			}
 			value := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
 			offset += 8
 			values = append(values, parser.Int64Value(value))
 		case rowTypeString:
 			if offset+4 > len(data) {
-				return nil, errInvalidRowData
+				return nil, errCorruptedRowData
 			}
 			length := int(binary.LittleEndian.Uint32(data[offset : offset+4]))
 			offset += 4
 			if offset+length > len(data) {
-				return nil, errInvalidRowData
+				return nil, errCorruptedRowData
 			}
 			values = append(values, parser.StringValue(string(data[offset:offset+length])))
 			offset += length
 		default:
-			return nil, errInvalidRowData
+			return nil, errCorruptedRowData
 		}
 	}
 
 	if offset != len(data) {
-		return nil, errInvalidRowData
+		return nil, errCorruptedRowData
 	}
 
 	return values, nil

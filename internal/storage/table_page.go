@@ -2,12 +2,9 @@ package storage
 
 import (
 	"encoding/binary"
-	"errors"
 )
 
 const tablePageHeaderSize = 8
-
-var errTablePageFull = errors.New("storage: table page full")
 
 // InitTableRootPage initializes a blank table root page header.
 func InitTableRootPage(page *Page) {
@@ -28,13 +25,13 @@ func InitTableRootPage(page *Page) {
 // AppendRowToTablePage appends one encoded row to a table root page.
 func AppendRowToTablePage(page *Page, row []byte) error {
 	if page == nil {
-		return errInvalidRowData
+		return errCorruptedTablePage
 	}
 	InitTableRootPage(page)
 
 	freeOffset := tablePageFreeOffset(page)
 	if freeOffset < tablePageHeaderSize || freeOffset > PageSize {
-		return errInvalidRowData
+		return errCorruptedTablePage
 	}
 
 	required := 4 + len(row)
@@ -64,25 +61,25 @@ func TablePageRowCount(page *Page) uint32 {
 // ReadRowsFromTablePage reads all encoded row payloads from a table root page.
 func ReadRowsFromTablePage(page *Page) ([][]byte, error) {
 	if page == nil {
-		return nil, errInvalidRowData
+		return nil, errCorruptedTablePage
 	}
 
 	rowCount := TablePageRowCount(page)
 	freeOffset := tablePageFreeOffset(page)
 	if freeOffset < tablePageHeaderSize || freeOffset > PageSize {
-		return nil, errInvalidRowData
+		return nil, errCorruptedTablePage
 	}
 
 	rows := make([][]byte, 0, rowCount)
 	offset := uint32(tablePageHeaderSize)
 	for offset < freeOffset {
 		if offset+4 > freeOffset {
-			return nil, errInvalidRowData
+			return nil, errCorruptedTablePage
 		}
 		rowLen := binary.LittleEndian.Uint32(page.data[offset : offset+4])
 		offset += 4
 		if offset+rowLen > freeOffset {
-			return nil, errInvalidRowData
+			return nil, errCorruptedTablePage
 		}
 
 		payload := append([]byte(nil), page.data[offset:offset+rowLen]...)
@@ -91,7 +88,7 @@ func ReadRowsFromTablePage(page *Page) ([][]byte, error) {
 	}
 
 	if offset != freeOffset || uint32(len(rows)) != rowCount {
-		return nil, errInvalidRowData
+		return nil, errCorruptedTablePage
 	}
 
 	return rows, nil
@@ -118,7 +115,7 @@ func BuildTablePageData(encodedRows [][]byte) ([]byte, error) {
 // RewriteTablePage rebuilds a table root page from the provided encoded rows.
 func RewriteTablePage(page *Page, encodedRows [][]byte) error {
 	if page == nil {
-		return errInvalidRowData
+		return errCorruptedTablePage
 	}
 
 	data, err := BuildTablePageData(encodedRows)

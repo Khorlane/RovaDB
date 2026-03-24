@@ -1,13 +1,10 @@
 package storage
 
 import (
-	"errors"
 	"io"
 	"os"
 	"sort"
 )
-
-var errInvalidPageFileSize = errors.New("storage: invalid page-aligned file size")
 
 // Pager loads pages, tracks dirty/original images for one in-process
 // transaction window, and flushes pages in a deterministic order.
@@ -27,10 +24,10 @@ func NewPager(f *os.File) (*Pager, error) {
 
 	size := info.Size()
 	if size < HeaderSize {
-		return nil, errFileTooSmall
+		return nil, errCorruptedDatabaseHeader
 	}
 	if size > HeaderSize && (size-HeaderSize)%PageSize != 0 {
-		return nil, errInvalidPageFileSize
+		return nil, errCorruptedPageHeader
 	}
 
 	nextPageID := PageID(1)

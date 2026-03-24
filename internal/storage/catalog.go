@@ -2,7 +2,6 @@ package storage
 
 import (
 	"encoding/binary"
-	"errors"
 )
 
 const (
@@ -12,11 +11,6 @@ const (
 
 	CatalogColumnTypeInt  = 1
 	CatalogColumnTypeText = 2
-)
-
-var (
-	errCatalogTooLarge = errors.New("storage: catalog too large")
-	errInvalidCatalog  = errors.New("storage: invalid catalog")
 )
 
 // CatalogData is the tiny storage-side catalog DTO persisted in page 0.
@@ -57,30 +51,30 @@ func LoadCatalog(pager *Pager) (*CatalogData, error) {
 	offset := 0
 	version, ok := readUint32(page.data, &offset)
 	if !ok || (version != catalogVersionV1 && version != catalogVersion) {
-		return nil, errInvalidCatalog
+		return nil, errCorruptedCatalogPage
 	}
 	tableCount, ok := readUint32(page.data, &offset)
 	if !ok {
-		return nil, errInvalidCatalog
+		return nil, errCorruptedCatalogPage
 	}
 
 	cat := &CatalogData{Tables: make([]CatalogTable, 0, tableCount)}
 	for i := uint32(0); i < tableCount; i++ {
 		name, ok := readString(page.data, &offset)
 		if !ok || name == "" {
-			return nil, errInvalidCatalog
+			return nil, errCorruptedCatalogPage
 		}
 		rootPageID, ok := readUint32(page.data, &offset)
 		if !ok || rootPageID < 1 {
-			return nil, errInvalidCatalog
+			return nil, errCorruptedCatalogPage
 		}
 		rowCount, ok := readUint32(page.data, &offset)
 		if !ok {
-			return nil, errInvalidCatalog
+			return nil, errCorruptedCatalogPage
 		}
 		columnCount, ok := readUint16(page.data, &offset)
 		if !ok {
-			return nil, errInvalidCatalog
+			return nil, errCorruptedCatalogPage
 		}
 
 		table := CatalogTable{
@@ -89,19 +83,24 @@ func LoadCatalog(pager *Pager) (*CatalogData, error) {
 			RowCount:   rowCount,
 			Columns:    make([]CatalogColumn, 0, columnCount),
 		}
+		columnNames := make(map[string]struct{}, columnCount)
 		for j := uint16(0); j < columnCount; j++ {
 			columnName, ok := readString(page.data, &offset)
 			if !ok || columnName == "" {
-				return nil, errInvalidCatalog
+				return nil, errCorruptedCatalogPage
 			}
 			if offset >= len(page.data) {
-				return nil, errInvalidCatalog
+				return nil, errCorruptedCatalogPage
 			}
 			columnType := page.data[offset]
 			offset++
 			if columnType != CatalogColumnTypeInt && columnType != CatalogColumnTypeText {
-				return nil, errInvalidCatalog
+				return nil, errCorruptedCatalogPage
 			}
+			if _, exists := columnNames[columnName]; exists {
+				return nil, errCorruptedCatalogPage
+			}
+			columnNames[columnName] = struct{}{}
 
 			table.Columns = append(table.Columns, CatalogColumn{
 				Name: columnName,
@@ -111,14 +110,22 @@ func LoadCatalog(pager *Pager) (*CatalogData, error) {
 		if version >= catalogVersion {
 			indexCount, ok := readUint16(page.data, &offset)
 			if !ok {
-				return nil, errInvalidCatalog
+				return nil, errCorruptedCatalogPage
 			}
 			table.Indexes = make([]CatalogIndex, 0, indexCount)
+			indexNames := make(map[string]struct{}, indexCount)
 			for j := uint16(0); j < indexCount; j++ {
 				columnName, ok := readString(page.data, &offset)
 				if !ok || columnName == "" {
-					return nil, errInvalidCatalog
+					return nil, errCorruptedCatalogPage
 				}
+				if _, exists := columnNames[columnName]; !exists {
+					return nil, errCorruptedIndexMetadata
+				}
+				if _, exists := indexNames[columnName]; exists {
+					return nil, errCorruptedIndexMetadata
+				}
+				indexNames[columnName] = struct{}{}
 				table.Indexes = append(table.Indexes, CatalogIndex{ColumnName: columnName})
 			}
 		}
@@ -160,7 +167,7 @@ func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
 
 	for _, table := range cat.Tables {
 		if table.Name == "" || table.RootPageID < 1 || len(table.Columns) == 0 {
-			return nil, errInvalidCatalog
+			return nil, errCorruptedCatalogPage
 		}
 		buf = appendString(buf, table.Name)
 		buf = appendUint32(buf, table.RootPageID)
@@ -169,10 +176,10 @@ func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
 
 		for _, column := range table.Columns {
 			if column.Name == "" {
-				return nil, errInvalidCatalog
+				return nil, errCorruptedCatalogPage
 			}
 			if column.Type != CatalogColumnTypeInt && column.Type != CatalogColumnTypeText {
-				return nil, errInvalidCatalog
+				return nil, errCorruptedCatalogPage
 			}
 			buf = appendString(buf, column.Name)
 			buf = append(buf, column.Type)
@@ -183,7 +190,7 @@ func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
 		buf = appendUint16(buf, uint16(len(table.Indexes)))
 		for _, index := range table.Indexes {
 			if index.ColumnName == "" {
-				return nil, errInvalidCatalog
+				return nil, errCorruptedIndexMetadata
 			}
 			buf = appendString(buf, index.ColumnName)
 			if len(buf) > PageSize {

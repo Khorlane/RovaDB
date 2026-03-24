@@ -61,8 +61,8 @@ func TestStructuredStorageErrorPrefix(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Open() error = nil, want non-nil")
 	}
-	if err.Error() != "storage: storage: file too small" {
-		t.Fatalf("err.Error() = %q, want %q", err.Error(), "storage: storage: file too small")
+	if err.Error() != "storage: corrupted database header" {
+		t.Fatalf("err.Error() = %q, want %q", err.Error(), "storage: corrupted database header")
 	}
 }
 

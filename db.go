@@ -16,8 +16,8 @@ import (
 )
 
 var (
-	errDuplicateRootPageID      = errors.New("rovadb: duplicate root page id")
-	errInvalidStoredTableMeta   = errors.New("rovadb: invalid stored table metadata")
+	errDuplicateRootPageID      = newStorageError("corrupted catalog page")
+	errInvalidStoredTableMeta   = newStorageError("corrupted catalog page")
 	ErrTxnAlreadyActive         = errors.New("rovadb: transaction already active")
 	ErrTxnCommitWithoutActive   = errors.New("rovadb: commit requires active transaction")
 	ErrTxnRollbackWithoutActive = errors.New("rovadb: rollback requires active transaction")
@@ -908,7 +908,7 @@ func parserColumnType(columnType uint8) (string, error) {
 	case storage.CatalogColumnTypeText:
 		return parser.ColumnTypeText, nil
 	default:
-		return "", newStorageError("invalid catalog column type")
+		return "", newStorageError("corrupted catalog page")
 	}
 }
 
