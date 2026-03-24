@@ -66,7 +66,7 @@ Only the following SQL forms are supported today.
 
 ### SELECT support
 
-- literal selects such as `SELECT 1`, `SELECT 'hello'`, and simple integer arithmetic forms already supported by the engine
+- literal selects such as `SELECT 1`, `SELECT 'hello'`, `SELECT TRUE`, `SELECT FALSE`, and simple integer arithmetic forms already supported by the engine
 - column projection such as `SELECT id` and `SELECT id, name`
 - single-table `FROM`
 - `WHERE` with flat `AND` / `OR` evaluation from left to right
@@ -88,6 +88,21 @@ Only the following SQL forms are supported today.
 - public `CREATE INDEX` SQL
 - schema changes other than `ALTER TABLE ... ADD COLUMN`
 
+### Supported schema types
+
+- `INT`
+- `TEXT`
+- `BOOL`
+
+### BOOL semantics
+
+- BOOL literals are unquoted `TRUE` and `FALSE`
+- quoted `'true'` and `'false'` are `TEXT`, not `BOOL`
+- `1` and `0` are `INT`, not `BOOL`
+- BOOL columns accept only `TRUE`, `FALSE`, or `NULL`
+- no implicit type coercion
+- BOOL works in `CREATE TABLE`, strict `INSERT` / `UPDATE` validation, `SELECT` result values, and `WHERE` equality / inequality within the supported query subset
+
 ## Canonical Example
 
 ```go
@@ -97,19 +112,19 @@ if err != nil {
 }
 defer db.Close()
 
-if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL)"); err != nil {
 	log.Fatal(err)
 }
 for _, sql := range []string{
-	"INSERT INTO users VALUES (1, 'alice')",
-	"INSERT INTO users VALUES (2, 'bob')",
+	"INSERT INTO users VALUES (1, 'Alice', TRUE)",
+	"INSERT INTO users VALUES (2, 'Bob', FALSE)",
 } {
 	if _, err := db.Exec(sql); err != nil {
 		log.Fatal(err)
 	}
 }
 
-rows, err := db.Query("SELECT id, name FROM users ORDER BY id")
+rows, err := db.Query("SELECT id, name FROM users WHERE active = TRUE ORDER BY id")
 if err != nil {
 	log.Fatal(err)
 }
@@ -128,12 +143,12 @@ if err := rows.Err(); err != nil {
 	log.Fatal(err)
 }
 
-row := db.QueryRow("SELECT name FROM users WHERE id = 1")
-var name string
-if err := row.Scan(&name); err != nil {
+var active any
+row := db.QueryRow("SELECT active FROM users WHERE id = 2")
+if err := row.Scan(&active); err != nil {
 	log.Fatal(err)
 }
-fmt.Println(name)
+fmt.Println(active)
 ```
 
 See [examples/basic_usage/main.go](/c:/Projects/RovaDB/examples/basic_usage/main.go) for a complete open -> write -> close -> reopen -> query flow.

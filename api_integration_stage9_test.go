@@ -137,3 +137,50 @@ func TestStage9APIStrictRoutingAndSingleRowSemantics(t *testing.T) {
 		t.Fatalf("QueryRow(multiple rows).Scan() = %v, want ErrMultipleRows", err)
 	}
 }
+
+func TestStage9APIBoolExampleFlow(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'Alice', TRUE)",
+		"INSERT INTO users VALUES (2, 'Bob', FALSE)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT id, name FROM users WHERE active = TRUE ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if got := rows.Columns(); len(got) != 2 || got[0] != "id" || got[1] != "name" {
+		t.Fatalf("Columns() = %#v, want [id name]", got)
+	}
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+	var id int
+	var userName string
+	if err := rows.Scan(&id, &userName); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if id != 1 || userName != "Alice" {
+		t.Fatalf("row = (%d, %q), want (1, %q)", id, userName, "Alice")
+	}
+	if rows.Next() {
+		t.Fatal("Next() second = true, want false")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil", err)
+	}
+}
