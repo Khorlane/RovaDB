@@ -26,6 +26,16 @@ func TestEvalStringLiteral(t *testing.T) {
 	}
 }
 
+func TestEvalRealLiteral(t *testing.T) {
+	got, err := Eval(&parser.Expr{Kind: parser.ExprKindRealLiteral, F64: 3.14})
+	if err != nil {
+		t.Fatalf("Eval() error = %v", err)
+	}
+	if got != parser.RealValue(3.14) {
+		t.Fatalf("Eval() = %#v, want %#v", got, parser.RealValue(3.14))
+	}
+}
+
 func TestEvalBinaryAdd(t *testing.T) {
 	got, err := Eval(&parser.Expr{
 		Kind:  parser.ExprKindInt64Binary,

@@ -99,6 +99,24 @@ func TestRowsScanTypeMismatchCases(t *testing.T) {
 			t.Fatalf("Scan() error = %v, want ErrUnsupportedScanType", err)
 		}
 	})
+
+	t.Run("real into int", func(t *testing.T) {
+		rows := newRows(nil, [][]any{{3.14}})
+		rows.Next()
+		var i int
+		if err := rows.Scan(&i); !errors.Is(err, ErrUnsupportedScanType) {
+			t.Fatalf("Scan() error = %v, want ErrUnsupportedScanType", err)
+		}
+	})
+
+	t.Run("int into real", func(t *testing.T) {
+		rows := newRows(nil, [][]any{{1}})
+		rows.Next()
+		var f float64
+		if err := rows.Scan(&f); !errors.Is(err, ErrUnsupportedScanType) {
+			t.Fatalf("Scan() error = %v, want ErrUnsupportedScanType", err)
+		}
+	})
 }
 
 func TestRowsScanAnySupport(t *testing.T) {
@@ -149,6 +167,18 @@ func TestRowsScanAnySupport(t *testing.T) {
 			t.Fatalf("Scan() got %#v, want true", got)
 		}
 	})
+
+	t.Run("real", func(t *testing.T) {
+		rows := newRows(nil, [][]any{{3.14}})
+		rows.Next()
+		var got any
+		if err := rows.Scan(&got); err != nil {
+			t.Fatalf("Scan() error = %v", err)
+		}
+		if got != 3.14 {
+			t.Fatalf("Scan() got %#v, want 3.14", got)
+		}
+	})
 }
 
 func TestRowsScanUnsupportedDestinations(t *testing.T) {
@@ -177,6 +207,21 @@ func TestRowsScanBoolSupport(t *testing.T) {
 	}
 	if !b {
 		t.Fatalf("Scan() got %v, want true", b)
+	}
+}
+
+func TestRowsScanRealSupport(t *testing.T) {
+	rows := newRows(nil, [][]any{{3.14}})
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+
+	var f float64
+	if err := rows.Scan(&f); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if f != 3.14 {
+		t.Fatalf("Scan() got %v, want 3.14", f)
 	}
 }
 

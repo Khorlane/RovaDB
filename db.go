@@ -369,6 +369,8 @@ func apiValue(value parser.Value) any {
 		return value.Str
 	case parser.ValueKindBool:
 		return value.Bool
+	case parser.ValueKindReal:
+		return value.F64
 	default:
 		return value.Any()
 	}

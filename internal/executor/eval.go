@@ -17,6 +17,8 @@ func Eval(expr *parser.Expr) (parser.Value, error) {
 	switch expr.Kind {
 	case parser.ExprKindInt64Literal:
 		return parser.Int64Value(expr.I64), nil
+	case parser.ExprKindRealLiteral:
+		return parser.RealValue(expr.F64), nil
 	case parser.ExprKindStringLiteral:
 		return parser.StringValue(expr.Str), nil
 	case parser.ExprKindBoolLiteral:

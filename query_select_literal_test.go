@@ -160,6 +160,52 @@ func TestQuerySelectBoolLiteral(t *testing.T) {
 	}
 }
 
+func TestQuerySelectRealLiteral(t *testing.T) {
+	tests := []struct {
+		name  string
+		sql   string
+		value float64
+	}{
+		{name: "select pi-ish", sql: "SELECT 3.14", value: 3.14},
+		{name: "select negative real", sql: "SELECT -2.5", value: -2.5},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db, err := Open(testDBPath(t))
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			defer db.Close()
+
+			rows, err := db.Query(tc.sql)
+			if err != nil {
+				t.Fatalf("Query() error = %v", err)
+			}
+			defer rows.Close()
+
+			if !rows.Next() {
+				t.Fatal("Next() = false, want true")
+			}
+
+			var got float64
+			if err := rows.Scan(&got); err != nil {
+				t.Fatalf("Scan() error = %v", err)
+			}
+			if got != tc.value {
+				t.Fatalf("Scan() got %v, want %v", got, tc.value)
+			}
+
+			if rows.Next() {
+				t.Fatal("Next() = true after first row, want false")
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatalf("Err() = %v, want nil", err)
+			}
+		})
+	}
+}
+
 func TestRowsScanBoolIntoAny(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
@@ -183,6 +229,72 @@ func TestRowsScanBoolIntoAny(t *testing.T) {
 	}
 	if got != true {
 		t.Fatalf("Scan() got %#v, want true", got)
+	}
+}
+
+func TestRowsScanRealIntoAny(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT 3.14")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+
+	var got any
+	if err := rows.Scan(&got); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if got != 3.14 {
+		t.Fatalf("Scan() got %#v, want 3.14", got)
+	}
+}
+
+func TestQueryRowSelectRealLiteral(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	var got float64
+	if err := db.QueryRow("SELECT 3.14").Scan(&got); err != nil {
+		t.Fatalf("QueryRow().Scan() error = %v", err)
+	}
+	if got != 3.14 {
+		t.Fatalf("QueryRow().Scan() got %v, want 3.14", got)
+	}
+}
+
+func TestRowsScanRealIntoWrongDestination(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT 3.14")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+
+	var got int
+	err = rows.Scan(&got)
+	if !errors.Is(err, ErrUnsupportedScanType) {
+		t.Fatalf("Scan() error = %v, want ErrUnsupportedScanType", err)
 	}
 }
 
@@ -330,6 +442,12 @@ func TestParseSelectExprDirect(t *testing.T) {
 			sql:  "SELECT TRUE",
 			ok:   true,
 			want: &parser.Expr{Kind: parser.ExprKindBoolLiteral, Bool: true},
+		},
+		{
+			name: "select real",
+			sql:  "SELECT 3.14",
+			ok:   true,
+			want: &parser.Expr{Kind: parser.ExprKindRealLiteral, F64: 3.14},
 		},
 		{
 			name: "select false mixed case",
@@ -516,7 +634,7 @@ func equalExpr(got, want *parser.Expr) bool {
 	if got == nil || want == nil {
 		return got == want
 	}
-	if got.Kind != want.Kind || got.I64 != want.I64 || got.Str != want.Str || got.Bool != want.Bool || got.Op != want.Op {
+	if got.Kind != want.Kind || got.I64 != want.I64 || got.F64 != want.F64 || got.Str != want.Str || got.Bool != want.Bool || got.Op != want.Op {
 		return false
 	}
 
