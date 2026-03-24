@@ -6,6 +6,86 @@ RovaDB is a Go-first embedded relational database engine designed for clarity, p
 
 > **Status:** Early design / pre-release. The goal is to build a real, usable foundation first, then expand carefully.
 
+## Intended Use
+
+RovaDB is currently aimed at:
+
+- embedded use inside Go applications
+- small application data sets
+- simple CRUD-style workflows
+- deterministic behavior over feature breadth
+
+It is a good fit when you want a compact SQL engine with readable behavior and a narrow, explicit contract.
+
+## Supported SQL
+
+Only the following SQL forms are supported today.
+
+### Statements
+
+- `CREATE TABLE`
+- `INSERT INTO ... VALUES (...)`
+- `SELECT ...`
+- `UPDATE ... SET ...`
+- `DELETE FROM ...`
+
+### SELECT support
+
+- literal selects such as `SELECT 1`, `SELECT 'hello'`, and simple integer arithmetic forms already supported by the engine
+- column projection such as `SELECT id` and `SELECT id, name`
+- single-table `FROM`
+- `WHERE` with flat `AND` / `OR` evaluation from left to right
+- comparison operators: `=`, `!=`, `<`, `<=`, `>`, `>=`
+- `ORDER BY <column> [ASC|DESC]`
+- `COUNT(*)`
+- equality lookups may use an index when index metadata exists
+
+### Not supported
+
+- `JOIN`
+- `GROUP BY`
+- `HAVING`
+- subqueries
+- multi-table queries
+- aggregate forms other than `COUNT(*)`
+- expression precedence in `WHERE` beyond the current flat left-to-right chain
+- public `CREATE INDEX` SQL
+- advanced schema changes such as `ALTER TABLE`
+
+## Canonical Example
+
+```go
+db, err := rovadb.Open("app.db")
+if err != nil {
+	log.Fatal(err)
+}
+
+if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	log.Fatal(err)
+}
+if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+	log.Fatal(err)
+}
+
+rows, err := db.Query(context.Background(), "SELECT id, name FROM users")
+if err != nil {
+	log.Fatal(err)
+}
+defer rows.Close()
+```
+
+See [examples/basic/main.go](/c:/Projects/RovaDB/examples/basic/main.go) for a complete open -> write -> close -> reopen -> query flow.
+
+## Indexed Equality Note
+
+RovaDB can execute indexed equality queries such as:
+
+```sql
+SELECT id FROM users WHERE name = 'alice'
+```
+
+Index-backed equality scans are supported when index metadata already exists, but there is not yet a public `CREATE INDEX` SQL statement in the user-facing API. The query shape above is supported; index definition remains an internal capability for now.
+
 ## Why RovaDB exists
 
 RovaDB exists to explore a different point in the design space:
@@ -67,37 +147,6 @@ Go developers who want an embedded SQL database with a straightforward mental mo
 
 ### Contributors
 Engineers who want to work on a real database engine in Go without needing to wade into an enormous, opaque codebase.
-
-## Planned V1 scope
-
-The initial target is intentionally narrow.
-
-### SQL surface
-- `CREATE TABLE`
-- `CREATE INDEX`
-- `INSERT`
-- `SELECT ... FROM ... WHERE ...`
-- `UPDATE`
-- `DELETE`
-
-### Initial type focus
-- integer
-- text
-- blob
-- null
-
-### Execution model
-- basic table scans
-- basic index scans
-- simple filtering
-- simple single-statement execution
-- no advanced optimizer in V1
-
-### Transaction model
-- start simple
-- likely autocommit first
-- single-process embedded usage
-- conservative write model before more advanced concurrency work
 
 ## Architectural direction
 
