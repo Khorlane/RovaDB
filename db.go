@@ -201,6 +201,32 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 		}
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
+	case *parser.AlterTableAddColumnStmt:
+		var rowsAffected int64
+		var committedTables map[string]*executor.Table
+		err := db.execMutatingStatement(func() error {
+			stagedTables := cloneTables(db.tables)
+
+			var err error
+			rowsAffected, err = executor.Execute(stmt, stagedTables)
+			if err != nil {
+				return err
+			}
+
+			if err := db.applyStagedCatalogOnly(stagedTables); err != nil {
+				return err
+			}
+			committedTables = stagedTables
+			return nil
+		})
+		if err != nil {
+			return Result{}, err
+		}
+		if err := validateTables(committedTables, false); err != nil {
+			return Result{}, err
+		}
+		db.tables = committedTables
+		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.UpdateStmt:
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table
@@ -547,6 +573,18 @@ func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, t
 	return nil
 }
 
+func (db *DB) applyStagedCatalogOnly(stagedTables map[string]*executor.Table) error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+
+	catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
+	if err != nil {
+		return wrapStorageError(err)
+	}
+	return db.stageDirtyState(catalogData, nil)
+}
+
 // Stage 5 correctness requires proposal/staging before apply so a single
 // statement cannot leak mixed committed and uncommitted visibility. Crash-safe
 // durability is still future work.
@@ -844,7 +882,10 @@ func loadPersistedRows(pager *storage.Pager, tables map[string]*executor.Table) 
 			if err != nil {
 				return wrapStorageError(err)
 			}
-			table.Rows = append(table.Rows, row)
+			if len(row) > len(table.Columns) {
+				return newStorageError("row width mismatch")
+			}
+			table.Rows = append(table.Rows, padRowToSchema(row, len(table.Columns)))
 		}
 	}
 
@@ -888,6 +929,18 @@ func wrapStorageError(err error) error {
 		return err
 	}
 	return newStorageError(err.Error())
+}
+
+func padRowToSchema(row []parser.Value, width int) []parser.Value {
+	if len(row) >= width {
+		return row
+	}
+
+	padded := append([]parser.Value(nil), row...)
+	for len(padded) < width {
+		padded = append(padded, parser.NullValue())
+	}
+	return padded
 }
 
 func validateTables(tables map[string]*executor.Table, storageBoundary bool) error {

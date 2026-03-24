@@ -1,6 +1,9 @@
 package executor
 
-import "github.com/Khorlane/RovaDB/internal/planner"
+import (
+	"github.com/Khorlane/RovaDB/internal/parser"
+	"github.com/Khorlane/RovaDB/internal/planner"
+)
 
 func rebuildIndexesForTable(table *Table) error {
 	if table == nil || len(table.Indexes) == 0 {
@@ -23,4 +26,16 @@ func rebuildIndexesForTable(table *Table) error {
 	}
 
 	return nil
+}
+
+func padRowToWidth(row []parser.Value, width int) []parser.Value {
+	if len(row) >= width {
+		return row
+	}
+
+	padded := append([]parser.Value(nil), row...)
+	for len(padded) < width {
+		padded = append(padded, parser.NullValue())
+	}
+	return padded
 }

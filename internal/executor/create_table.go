@@ -9,7 +9,7 @@ import (
 var (
 	errTableAlreadyExists      = newExecError("table already exists")
 	errTableDoesNotExist       = newExecError("table not found")
-	errWrongValueCount         = newExecError("wrong value count")
+	errWrongValueCount         = newExecError("column count mismatch")
 	errColumnDoesNotExist      = newExecError("column not found")
 	errTypeMismatch            = newExecError("type mismatch")
 	errUnsupportedStatement    = newExecError("unsupported query form")
@@ -66,6 +66,8 @@ func Execute(stmt any, tables map[string]*Table) (int64, error) {
 		return 0, nil
 	case *parser.InsertStmt:
 		return executeInsert(s, tables)
+	case *parser.AlterTableAddColumnStmt:
+		return executeAlterTableAddColumn(s, tables)
 	case *parser.DeleteStmt:
 		return executeDelete(s, tables)
 	case *parser.UpdateStmt:

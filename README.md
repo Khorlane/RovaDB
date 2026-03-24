@@ -24,6 +24,7 @@ Only the following SQL forms are supported today.
 ### Statements
 
 - `CREATE TABLE`
+- `ALTER TABLE <table> ADD COLUMN <column> <type>`
 - `INSERT INTO ... VALUES (...)`
 - `SELECT ...`
 - `UPDATE ... SET ...`
@@ -50,7 +51,7 @@ Only the following SQL forms are supported today.
 - aggregate forms other than `COUNT(*)`
 - expression precedence in `WHERE` beyond the current flat left-to-right chain
 - public `CREATE INDEX` SQL
-- advanced schema changes such as `ALTER TABLE`
+- schema changes other than `ALTER TABLE ... ADD COLUMN`
 
 ## Canonical Example
 

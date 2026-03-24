@@ -1,0 +1,37 @@
+package parser
+
+import "testing"
+
+func TestParseAlterTableAddColumn(t *testing.T) {
+	got, err := parseAlterTable("ALTER TABLE users ADD COLUMN age INT")
+	if err != nil {
+		t.Fatalf("parseAlterTable() error = %v", err)
+	}
+	if got.TableName != "users" {
+		t.Fatalf("parseAlterTable().TableName = %q, want %q", got.TableName, "users")
+	}
+	if got.Column != (ColumnDef{Name: "age", Type: ColumnTypeInt}) {
+		t.Fatalf("parseAlterTable().Column = %#v, want age INT", got.Column)
+	}
+}
+
+func TestParseAlterTableUnsupportedForm(t *testing.T) {
+	tests := []string{
+		"ALTER TABLE users DROP COLUMN age",
+		"ALTER TABLE users ADD age INT",
+		"ALTER TABLE users ADD COLUMN",
+		"ALTER TABLE users ADD COLUMN age BOOL",
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			got, err := parseAlterTable(input)
+			if err == nil {
+				t.Fatalf("parseAlterTable() = %#v, want error", got)
+			}
+			if err.Error() != "parse: unsupported alter table form" {
+				t.Fatalf("parseAlterTable() error = %q, want %q", err.Error(), "parse: unsupported alter table form")
+			}
+		})
+	}
+}
