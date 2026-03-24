@@ -96,14 +96,14 @@ if err != nil {
 	log.Fatal(err)
 }
 
-if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 	log.Fatal(err)
 }
-if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
 	log.Fatal(err)
 }
 
-rows, err := db.Query(context.Background(), "SELECT id, name FROM users")
+rows, err := db.Query("SELECT id, name FROM users")
 if err != nil {
 	log.Fatal(err)
 }
