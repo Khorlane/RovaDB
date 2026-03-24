@@ -114,6 +114,99 @@ func TestQuerySelectStringLiteral(t *testing.T) {
 	}
 }
 
+func TestQuerySelectBoolLiteral(t *testing.T) {
+	tests := []struct {
+		name  string
+		sql   string
+		value bool
+	}{
+		{name: "select true", sql: "SELECT TRUE", value: true},
+		{name: "select false", sql: "SELECT FALSE", value: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db, err := Open(testDBPath(t))
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			defer db.Close()
+
+			rows, err := db.Query(tc.sql)
+			if err != nil {
+				t.Fatalf("Query() error = %v", err)
+			}
+			defer rows.Close()
+
+			if !rows.Next() {
+				t.Fatal("Next() = false, want true")
+			}
+
+			var got bool
+			if err := rows.Scan(&got); err != nil {
+				t.Fatalf("Scan() error = %v", err)
+			}
+			if got != tc.value {
+				t.Fatalf("Scan() got %v, want %v", got, tc.value)
+			}
+
+			if rows.Next() {
+				t.Fatal("Next() = true after first row, want false")
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatalf("Err() = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestRowsScanBoolIntoAny(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT TRUE")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+
+	var got any
+	if err := rows.Scan(&got); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if got != true {
+		t.Fatalf("Scan() got %#v, want true", got)
+	}
+}
+
+func TestQuerySelectNullLiteralRegression(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT NULL")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() == nil || rows.Err().Error() != "parse: unsupported query form" {
+		t.Fatalf("Err() = %v, want %q", rows.Err(), "parse: unsupported query form")
+	}
+}
+
 func TestQueryUnsupportedLiteral(t *testing.T) {
 	tests := []struct {
 		name string

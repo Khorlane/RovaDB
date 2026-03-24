@@ -120,6 +120,8 @@ func (r *Rows) Scan(dest ...any) error {
 			*d = assignment.value.(int)
 		case *string:
 			*d = assignment.value.(string)
+		case *bool:
+			*d = assignment.value.(bool)
 		case *any:
 			*d = assignment.value
 		default:
@@ -150,6 +152,15 @@ func scanAssignableValue(dest any, src any) (any, error) {
 			return nil, ErrUnsupportedScanType
 		}
 		return s, nil
+	case *bool:
+		if d == nil {
+			return nil, ErrUnsupportedScanType
+		}
+		b, ok := src.(bool)
+		if !ok {
+			return nil, ErrUnsupportedScanType
+		}
+		return b, nil
 	case *any:
 		if d == nil {
 			return nil, ErrUnsupportedScanType

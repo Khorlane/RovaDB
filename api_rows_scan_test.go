@@ -137,6 +137,18 @@ func TestRowsScanAnySupport(t *testing.T) {
 			t.Fatalf("Scan() got %#v, want nil", got)
 		}
 	})
+
+	t.Run("bool", func(t *testing.T) {
+		rows := newRows(nil, [][]any{{true}})
+		rows.Next()
+		var got any
+		if err := rows.Scan(&got); err != nil {
+			t.Fatalf("Scan() error = %v", err)
+		}
+		if got != true {
+			t.Fatalf("Scan() got %#v, want true", got)
+		}
+	})
 }
 
 func TestRowsScanUnsupportedDestinations(t *testing.T) {
@@ -147,14 +159,24 @@ func TestRowsScanUnsupportedDestinations(t *testing.T) {
 		t.Fatalf("Scan(nil) = %v, want ErrUnsupportedScanType", err)
 	}
 
-	var b bool
-	if err := rows.Scan(&b); !errors.Is(err, ErrUnsupportedScanType) {
-		t.Fatalf("Scan(*bool) = %v, want ErrUnsupportedScanType", err)
-	}
-
 	var i int
 	if err := rows.Scan(i); !errors.Is(err, ErrUnsupportedScanType) {
 		t.Fatalf("Scan(non-pointer) = %v, want ErrUnsupportedScanType", err)
+	}
+}
+
+func TestRowsScanBoolSupport(t *testing.T) {
+	rows := newRows(nil, [][]any{{true}})
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+
+	var b bool
+	if err := rows.Scan(&b); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if !b {
+		t.Fatalf("Scan() got %v, want true", b)
 	}
 }
 
