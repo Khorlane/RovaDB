@@ -136,7 +136,7 @@ if err := row.Scan(&name); err != nil {
 fmt.Println(name)
 ```
 
-See [examples/basic/main.go](/c:/Projects/RovaDB/examples/basic/main.go) for a complete open -> write -> close -> reopen -> query flow.
+See [examples/basic_usage/main.go](/c:/Projects/RovaDB/examples/basic_usage/main.go) for a complete open -> write -> close -> reopen -> query flow.
 
 ## Indexed Equality Note
 
