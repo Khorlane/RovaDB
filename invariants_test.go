@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
@@ -63,7 +62,7 @@ func TestQueryRejectsIndexTableMismatch(t *testing.T) {
 		"INSERT INTO users VALUES (1, 'alice')",
 		"INSERT INTO users VALUES (2, 'bob')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}

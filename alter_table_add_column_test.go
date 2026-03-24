@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"testing"
 )
 
@@ -18,7 +17,7 @@ func TestAlterTableAddColumnBasic(t *testing.T) {
 		"INSERT INTO users VALUES (2, 'bob')",
 		"ALTER TABLE users ADD COLUMN age INT",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -67,7 +66,7 @@ func TestAlterTableAddColumnInsertAndUpdate(t *testing.T) {
 		"UPDATE users SET age = 30 WHERE id = 1",
 		"INSERT INTO users VALUES (2, 'bob', 40)",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -120,7 +119,7 @@ func TestAlterTableAddColumnReopenAndWhere(t *testing.T) {
 		"INSERT INTO users VALUES (1, 'alice')",
 		"ALTER TABLE users ADD COLUMN age INT",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -159,7 +158,7 @@ func TestAlterTableUnsupportedForms(t *testing.T) {
 		"ALTER TABLE users DROP COLUMN age",
 		"ALTER TABLE users ADD age INT",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err == nil || err.Error() != "parse: unsupported alter table form" {
+		if _, err := db.Exec(sql); err == nil || err.Error() != "parse: unsupported alter table form" {
 			t.Fatalf("Exec(%q) error = %v, want %q", sql, err, "parse: unsupported alter table form")
 		}
 	}

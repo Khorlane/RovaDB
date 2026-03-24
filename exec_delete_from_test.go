@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"testing"
 )
 
@@ -12,20 +11,20 @@ func TestExecDeleteFromWhere(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'steve')"); err != nil {
 		t.Fatalf("Exec(insert 1) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (2, 'bob')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (2, 'bob')"); err != nil {
 		t.Fatalf("Exec(insert 2) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (3, 'sam')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (3, 'sam')"); err != nil {
 		t.Fatalf("Exec(insert 3) error = %v", err)
 	}
 
-	result, err := db.Exec(context.Background(), "DELETE FROM users WHERE id = 1")
+	result, err := db.Exec("DELETE FROM users WHERE id = 1")
 	if err != nil {
 		t.Fatalf("Exec(delete) error = %v", err)
 	}
@@ -75,7 +74,7 @@ func TestExecDeleteFromWhereOr(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -83,12 +82,12 @@ func TestExecDeleteFromWhereOr(t *testing.T) {
 		"INSERT INTO users VALUES (2, 'bob')",
 		"INSERT INTO users VALUES (3, 'cara')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
 
-	result, err := db.Exec(context.Background(), "DELETE FROM users WHERE id = 1 OR name = 'cara'")
+	result, err := db.Exec("DELETE FROM users WHERE id = 1 OR name = 'cara'")
 	if err != nil {
 		t.Fatalf("Exec(delete) error = %v", err)
 	}

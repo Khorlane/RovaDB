@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -73,7 +72,7 @@ func TestQueryInvalidWhereReturnsParseError(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 

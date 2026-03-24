@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
@@ -20,7 +19,7 @@ func TestPlannerGuardrailIndexedEqualityChoosesIndexScan(t *testing.T) {
 		"INSERT INTO users VALUES (1, 'alice')",
 		"INSERT INTO users VALUES (2, 'bob')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -54,7 +53,7 @@ func TestPlannerGuardrailReopenedIndexMetadataStillChoosesIndexScan(t *testing.T
 		"INSERT INTO users VALUES (1, 'alice')",
 		"INSERT INTO users VALUES (2, 'bob')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -95,7 +94,7 @@ func TestIndexedEqualityGuardrailAfterMutationAndReopen(t *testing.T) {
 		"INSERT INTO users VALUES (2, 'bob')",
 		"INSERT INTO users VALUES (3, 'alice')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -105,10 +104,10 @@ func TestIndexedEqualityGuardrailAfterMutationAndReopen(t *testing.T) {
 
 	assertQueryIntRows(t, db, "SELECT id FROM users WHERE name = 'alice' ORDER BY id", 1, 3)
 
-	if _, err := db.Exec(context.Background(), "UPDATE users SET name = 'alice' WHERE id = 2"); err != nil {
+	if _, err := db.Exec("UPDATE users SET name = 'alice' WHERE id = 2"); err != nil {
 		t.Fatalf("Exec(update) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "DELETE FROM users WHERE id = 1"); err != nil {
+	if _, err := db.Exec("DELETE FROM users WHERE id = 1"); err != nil {
 		t.Fatalf("Exec(delete) error = %v", err)
 	}
 
@@ -135,7 +134,7 @@ func TestPlannerGuardrailUnsupportedIndexedPredicateFallsBackToTableScan(t *test
 		"CREATE TABLE users (id INT, name TEXT)",
 		"INSERT INTO users VALUES (1, 'alice')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}

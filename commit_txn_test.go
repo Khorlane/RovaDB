@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"errors"
 	"os"
 	"testing"
@@ -141,13 +140,13 @@ func TestJournaledCommitCreatesAndRemovesJournal(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer db.Close()
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "UPDATE t SET id = 2 WHERE id = 1"); err != nil {
+	if _, err := db.Exec("UPDATE t SET id = 2 WHERE id = 1"); err != nil {
 		t.Fatalf("Exec(update) error = %v", err)
 	}
 	if _, err := os.Stat(storage.JournalPath(path)); !errors.Is(err, os.ErrNotExist) {
@@ -170,10 +169,10 @@ func TestJournalWrittenBeforeDatabaseOverwrite(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer db.Close()
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -215,7 +214,7 @@ func TestJournalWrittenBeforeDatabaseOverwrite(t *testing.T) {
 		return nil
 	}
 
-	if _, err := db.Exec(context.Background(), "UPDATE t SET id = 2 WHERE id = 1"); err != nil {
+	if _, err := db.Exec("UPDATE t SET id = 2 WHERE id = 1"); err != nil {
 		t.Fatalf("Exec(update) error = %v", err)
 	}
 	if !hookCalled {
@@ -231,17 +230,17 @@ func TestCommitFailureLeavesJournalForRecovery(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer db.Close()
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
 	db.afterJournalWriteHook = func() error {
 		return errors.New("boom after journal")
 	}
-	if _, err := db.Exec(context.Background(), "UPDATE t SET id = 2 WHERE id = 1"); err == nil {
+	if _, err := db.Exec("UPDATE t SET id = 2 WHERE id = 1"); err == nil {
 		t.Fatal("Exec(update) error = nil, want failure")
 	}
 
@@ -324,10 +323,10 @@ func TestApplyErrorTriggersRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -433,10 +432,10 @@ func TestRollbackAfterFailedCommitRestoresState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -540,7 +539,7 @@ func TestSuccessfulCommitLeavesNoTxnAndNoTracking(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	if db.txn != nil {
@@ -563,10 +562,10 @@ func TestSuccessfulRollbackLeavesNoTxnAndNoTracking(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 

@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"errors"
 	"os"
 	"reflect"
@@ -123,18 +122,15 @@ func (db *DB) Close() error {
 	return nil
 }
 
-// Exec validates the call and reserves write execution for a later engine pass.
-func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error) {
-	if ctx == nil {
-		return Result{}, ErrInvalidArgument
-	}
+// Exec executes a non-SELECT statement and returns a write result.
+func (db *DB) Exec(query string) (Result, error) {
 	if db == nil {
 		return Result{}, ErrInvalidArgument
 	}
 	if db.closed {
 		return Result{}, ErrClosed
 	}
-	if strings.TrimSpace(sql) == "" {
+	if strings.TrimSpace(query) == "" {
 		return Result{}, ErrInvalidArgument
 	}
 	if db.tables == nil {
@@ -144,11 +140,13 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...any) (Result, error)
 		return Result{}, err
 	}
 
-	stmt, err := parser.Parse(sql)
+	stmt, err := parser.Parse(query)
 	if err != nil {
 		return Result{}, err
 	}
 	switch stmt := stmt.(type) {
+	case *parser.SelectExpr:
+		return Result{}, ErrExecDisallowsSelect
 	case *parser.CreateTableStmt:
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table

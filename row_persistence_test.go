@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/storage"
@@ -14,13 +13,13 @@ func TestInsertPersistsRowsToTableRootPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'steve')"); err != nil {
 		t.Fatalf("Exec(insert 1) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (2, 'bob')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (2, 'bob')"); err != nil {
 		t.Fatalf("Exec(insert 2) error = %v", err)
 	}
 

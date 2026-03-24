@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -17,14 +16,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		log.Fatal(err)
 	}
 	for _, sql := range []string{
 		"INSERT INTO users VALUES (1, 'alice')",
 		"INSERT INTO users VALUES (2, 'bob')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			log.Fatal(err)
 		}
 	}

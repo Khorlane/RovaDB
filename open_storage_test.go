@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -63,16 +62,16 @@ func TestRecoveryOnOpenRestoresLastCommittedState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 	db.afterDatabaseSyncHook = func() error {
 		return errors.New("boom after db sync")
 	}
-	if _, err := db.Exec(context.Background(), "UPDATE t SET id = 2 WHERE id = 1"); err == nil {
+	if _, err := db.Exec("UPDATE t SET id = 2 WHERE id = 1"); err == nil {
 		t.Fatal("Exec(update) error = nil, want failure")
 	}
 	if err := db.Close(); err != nil {
@@ -98,10 +97,10 @@ func TestOpenWithoutJournalSkipsRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 	if err := db.Close(); err != nil {
@@ -172,10 +171,10 @@ func TestRecoveryRunsBeforeCatalogLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 	if err := db.Close(); err != nil {

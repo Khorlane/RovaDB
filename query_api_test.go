@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"errors"
 	"testing"
 )
@@ -38,10 +37,10 @@ func TestQueryAPISelectFromReturnsMaterializedRows(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -67,10 +66,10 @@ func TestQueryAPICountStarStillReturnsRows(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 

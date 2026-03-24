@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"errors"
 	"testing"
 )
@@ -13,13 +12,13 @@ func TestQuerySelectFromTable(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'steve')"); err != nil {
 		t.Fatalf("Exec(insert 1) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (2, 'sam')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (2, 'sam')"); err != nil {
 		t.Fatalf("Exec(insert 2) error = %v", err)
 	}
 
@@ -68,10 +67,10 @@ func TestQuerySelectAllFromTable(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'steve')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -104,7 +103,7 @@ func TestQuerySelectInvalidColumn(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 
@@ -129,7 +128,7 @@ func TestQuerySelectFromEmptyTable(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 
@@ -154,10 +153,10 @@ func TestQuerySelectSubsetOrder(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'steve')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -190,10 +189,10 @@ func TestQuerySelectSingleProjectedColumn(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'steve')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -246,10 +245,10 @@ func TestQuerySelectWrongScanShape(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'steve')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -276,13 +275,13 @@ func TestQuerySelectWhereIntEquality(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'steve')"); err != nil {
 		t.Fatalf("Exec(insert 1) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (2, 'bob')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (2, 'bob')"); err != nil {
 		t.Fatalf("Exec(insert 2) error = %v", err)
 	}
 
@@ -314,7 +313,7 @@ func TestQuerySelectWhereIndexedEquality(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -322,7 +321,7 @@ func TestQuerySelectWhereIndexedEquality(t *testing.T) {
 		"INSERT INTO users VALUES (2, 'bob')",
 		"INSERT INTO users VALUES (3, 'alice')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -346,10 +345,10 @@ func TestQuerySelectWhereIndexedEqualityNoMatch(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 	if err := db.defineBasicIndex("users", "name"); err != nil {
@@ -377,7 +376,7 @@ func TestQuerySelectWhereIndexedEqualityWithProjectionAndOrderBy(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -385,7 +384,7 @@ func TestQuerySelectWhereIndexedEqualityWithProjectionAndOrderBy(t *testing.T) {
 		"INSERT INTO users VALUES (1, 'bob')",
 		"INSERT INTO users VALUES (2, 'alice')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -409,7 +408,7 @@ func TestQuerySelectCountStarWithIndexedEquality(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -417,7 +416,7 @@ func TestQuerySelectCountStarWithIndexedEquality(t *testing.T) {
 		"INSERT INTO users VALUES (2, 'alice')",
 		"INSERT INTO users VALUES (3, 'bob')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -441,7 +440,7 @@ func TestQuerySelectWhereNumericComparisons(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -449,7 +448,7 @@ func TestQuerySelectWhereNumericComparisons(t *testing.T) {
 		"INSERT INTO users VALUES (2, 'bob')",
 		"INSERT INTO users VALUES (3, 'cara')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -491,13 +490,13 @@ func TestQuerySelectWhereStringEquality(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'steve')"); err != nil {
 		t.Fatalf("Exec(insert 1) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (2, 'bob')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (2, 'bob')"); err != nil {
 		t.Fatalf("Exec(insert 2) error = %v", err)
 	}
 
@@ -529,13 +528,13 @@ func TestQuerySelectWhereStringNotEqual(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
 		t.Fatalf("Exec(insert 1) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (2, 'bob')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (2, 'bob')"); err != nil {
 		t.Fatalf("Exec(insert 2) error = %v", err)
 	}
 
@@ -567,10 +566,10 @@ func TestQuerySelectWhereTypeMismatch(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -595,7 +594,7 @@ func TestQuerySelectWhereAndConditions(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -604,7 +603,7 @@ func TestQuerySelectWhereAndConditions(t *testing.T) {
 		"INSERT INTO users VALUES (3, 'cara')",
 		"INSERT INTO users VALUES (4, 'dina')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -646,7 +645,7 @@ func TestQuerySelectWhereOrConditions(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -654,7 +653,7 @@ func TestQuerySelectWhereOrConditions(t *testing.T) {
 		"INSERT INTO users VALUES (2, 'bob')",
 		"INSERT INTO users VALUES (3, 'cara')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -675,10 +674,10 @@ func TestQuerySelectWhereOrNoMatches(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -703,7 +702,7 @@ func TestQuerySelectWhereLeftToRightWithoutPrecedence(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -712,7 +711,7 @@ func TestQuerySelectWhereLeftToRightWithoutPrecedence(t *testing.T) {
 		"INSERT INTO users VALUES (2, 'bob')",
 		"INSERT INTO users VALUES (3, 'cara')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -733,7 +732,7 @@ func TestQuerySelectCountStarEmptyTable(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 
@@ -756,7 +755,7 @@ func TestQuerySelectCountStarPopulatedTable(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -764,7 +763,7 @@ func TestQuerySelectCountStarPopulatedTable(t *testing.T) {
 		"INSERT INTO users VALUES (2, 'bob')",
 		"INSERT INTO users VALUES (3, 'cara')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -785,7 +784,7 @@ func TestQuerySelectCountStarWithWhere(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -793,7 +792,7 @@ func TestQuerySelectCountStarWithWhere(t *testing.T) {
 		"INSERT INTO users VALUES (2, 'bob')",
 		"INSERT INTO users VALUES (3, 'cara')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -814,10 +813,10 @@ func TestQuerySelectCountStarWithWhereNoMatches(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -837,10 +836,10 @@ func TestQuerySelectCountStarOrderByUnsupported(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -907,14 +906,14 @@ func TestQuerySelectCountStarAfterReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
 		"INSERT INTO users VALUES (1, 'alice')",
 		"INSERT INTO users VALUES (2, 'bob')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -962,7 +961,7 @@ func TestQuerySelectOrderByIntAsc(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -970,7 +969,7 @@ func TestQuerySelectOrderByIntAsc(t *testing.T) {
 		"INSERT INTO users VALUES (1, 'alice')",
 		"INSERT INTO users VALUES (2, 'bob')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -991,7 +990,7 @@ func TestQuerySelectOrderByIntDesc(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -999,7 +998,7 @@ func TestQuerySelectOrderByIntDesc(t *testing.T) {
 		"INSERT INTO users VALUES (3, 'cara')",
 		"INSERT INTO users VALUES (2, 'bob')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -1020,7 +1019,7 @@ func TestQuerySelectOrderByStringAsc(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -1028,7 +1027,7 @@ func TestQuerySelectOrderByStringAsc(t *testing.T) {
 		"INSERT INTO users VALUES (1, 'alice')",
 		"INSERT INTO users VALUES (3, 'cara')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -1049,7 +1048,7 @@ func TestQuerySelectOrderByStringDesc(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -1057,7 +1056,7 @@ func TestQuerySelectOrderByStringDesc(t *testing.T) {
 		"INSERT INTO users VALUES (1, 'alice')",
 		"INSERT INTO users VALUES (3, 'cara')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -1078,7 +1077,7 @@ func TestQuerySelectOrderByWithWhere(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -1086,7 +1085,7 @@ func TestQuerySelectOrderByWithWhere(t *testing.T) {
 		"INSERT INTO users VALUES (1, 'alice')",
 		"INSERT INTO users VALUES (2, 'bob')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -1107,7 +1106,7 @@ func TestQuerySelectOrderByUnknownColumn(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 
@@ -1178,10 +1177,10 @@ func TestQuerySelectWhereNoMatches(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'steve')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -1206,10 +1205,10 @@ func TestQuerySelectNullRoundTrip(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, NULL)"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, NULL)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -1238,14 +1237,14 @@ func TestQuerySelectWhereEqualsNull(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
 		"INSERT INTO users VALUES (1, NULL)",
 		"INSERT INTO users VALUES (2, 'bob')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -1266,14 +1265,14 @@ func TestQuerySelectWhereNotEqualsNull(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
 		"INSERT INTO users VALUES (1, NULL)",
 		"INSERT INTO users VALUES (2, 'bob')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -1294,10 +1293,10 @@ func TestQuerySelectWhereLessThanNullErrors(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, NULL)"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, NULL)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -1322,13 +1321,13 @@ func TestQueryUpdateSetsNull(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'alice')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "UPDATE users SET name = NULL WHERE id = 1"); err != nil {
+	if _, err := db.Exec("UPDATE users SET name = NULL WHERE id = 1"); err != nil {
 		t.Fatalf("Exec(update) error = %v", err)
 	}
 
@@ -1357,10 +1356,10 @@ func TestQueryNullPersistsAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, NULL)"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, NULL)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 	if err := db.Close(); err != nil {

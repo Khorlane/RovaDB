@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"reflect"
 	"strconv"
 	"testing"
@@ -19,7 +18,7 @@ func TestStage7IndexLifecycleAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -27,7 +26,7 @@ func TestStage7IndexLifecycleAcrossReopen(t *testing.T) {
 		"INSERT INTO users VALUES (2, 'bob')",
 		"INSERT INTO users VALUES (3, 'alice')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -59,17 +58,17 @@ func TestStage7MutationAndIndexCorrectness(t *testing.T) {
 		"INSERT INTO users VALUES (2, 'bob')",
 		"INSERT INTO users VALUES (3, 'cara')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
 	if err := db.defineBasicIndex("users", "name"); err != nil {
 		t.Fatalf("defineBasicIndex() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "UPDATE users SET name = 'alice' WHERE id = 2"); err != nil {
+	if _, err := db.Exec("UPDATE users SET name = 'alice' WHERE id = 2"); err != nil {
 		t.Fatalf("Exec(update) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "DELETE FROM users WHERE id = 1"); err != nil {
+	if _, err := db.Exec("DELETE FROM users WHERE id = 1"); err != nil {
 		t.Fatalf("Exec(delete) error = %v", err)
 	}
 
@@ -92,7 +91,7 @@ func TestStage7IndexedAndNonIndexedQueriesStayAligned(t *testing.T) {
 		"INSERT INTO users VALUES (3, 'alice')",
 		"INSERT INTO users VALUES (4, 'dina')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -131,7 +130,7 @@ func TestStage7IndexEdgeCases(t *testing.T) {
 			"INSERT INTO users VALUES (2, 'bob')",
 			"INSERT INTO users VALUES (3, NULL)",
 		} {
-			if _, err := db.Exec(context.Background(), sql); err != nil {
+			if _, err := db.Exec(sql); err != nil {
 				t.Fatalf("Exec(%q) error = %v", sql, err)
 			}
 		}
@@ -150,7 +149,7 @@ func TestStage7IndexEdgeCases(t *testing.T) {
 		}
 		defer db.Close()
 
-		if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 			t.Fatalf("Exec(create) error = %v", err)
 		}
 		if err := db.defineBasicIndex("users", "name"); err != nil {
@@ -168,10 +167,10 @@ func TestStage7IndexEdgeCases(t *testing.T) {
 		}
 		defer db.Close()
 
-		if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 			t.Fatalf("Exec(create) error = %v", err)
 		}
-		if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'solo')"); err != nil {
+		if _, err := db.Exec("INSERT INTO users VALUES (1, 'solo')"); err != nil {
 			t.Fatalf("Exec(insert) error = %v", err)
 		}
 		if err := db.defineBasicIndex("users", "name"); err != nil {
@@ -189,11 +188,11 @@ func TestStage7IndexEdgeCases(t *testing.T) {
 		}
 		defer db.Close()
 
-		if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 			t.Fatalf("Exec(create) error = %v", err)
 		}
 		for i := 1; i <= 50; i++ {
-			if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES ("+itoa(i)+", 'same')"); err != nil {
+			if _, err := db.Exec("INSERT INTO users VALUES (" + itoa(i) + ", 'same')"); err != nil {
 				t.Fatalf("Exec(insert %d) error = %v", i, err)
 			}
 		}

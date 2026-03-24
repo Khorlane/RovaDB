@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
@@ -15,7 +14,7 @@ func TestIndexMetadataPersistsAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -23,7 +22,7 @@ func TestIndexMetadataPersistsAcrossReopen(t *testing.T) {
 		"INSERT INTO users VALUES (2, 'bob')",
 		"INSERT INTO users VALUES (3, 'alice')",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -58,7 +57,7 @@ func TestCatalogRoundTripPreservesIndexMetadataForOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	if err := db.defineBasicIndex("users", "id"); err != nil {

@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"testing"
 )
 
@@ -13,7 +12,7 @@ func TestCreateTablePersistsAcrossReopen(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	if err := db.Close(); err != nil {
@@ -26,7 +25,7 @@ func TestCreateTablePersistsAcrossReopen(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "INSERT INTO users VALUES (1, 'steve')"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'steve')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
@@ -73,7 +72,7 @@ func TestCreateTableAllocatesPersistentRootPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	if err := db.Close(); err != nil {
@@ -105,10 +104,10 @@ func TestCreateMultipleTablesGetDistinctRootPages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create users) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE teams (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE teams (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create teams) error = %v", err)
 	}
 

@@ -38,4 +38,6 @@ var (
 	ErrInvalidArgument = errors.New("rovadb: invalid argument")
 	// ErrQueryRequiresSelect reports Query use with a non-SELECT statement.
 	ErrQueryRequiresSelect = errors.New("rovadb: Query requires SELECT statement")
+	// ErrExecDisallowsSelect reports Exec use with a SELECT statement.
+	ErrExecDisallowsSelect = errors.New("rovadb: Exec disallows SELECT statement")
 )

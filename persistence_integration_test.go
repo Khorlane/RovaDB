@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"testing"
 )
 
@@ -28,7 +27,7 @@ func TestCreateTablePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	if err := db.Close(); err != nil {
@@ -54,7 +53,7 @@ func TestInsertPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -62,7 +61,7 @@ func TestInsertPersistence(t *testing.T) {
 		"INSERT INTO t VALUES (2)",
 		"INSERT INTO t VALUES (3)",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -89,7 +88,7 @@ func TestUpdatePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -98,7 +97,7 @@ func TestUpdatePersistence(t *testing.T) {
 		"INSERT INTO t VALUES (3)",
 		"UPDATE t SET id = 10 WHERE id = 1",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -125,7 +124,7 @@ func TestDeletePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -134,7 +133,7 @@ func TestDeletePersistence(t *testing.T) {
 		"INSERT INTO t VALUES (3)",
 		"DELETE FROM t WHERE id = 2",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -161,7 +160,7 @@ func TestMixedMutationPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -173,7 +172,7 @@ func TestMixedMutationPersistence(t *testing.T) {
 		"UPDATE t SET id = 30 WHERE id = 3",
 		"DELETE FROM t WHERE id = 2",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -200,7 +199,7 @@ func TestMutationsStillPersistUnderAutocommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -210,7 +209,7 @@ func TestMutationsStillPersistUnderAutocommit(t *testing.T) {
 		"UPDATE t SET id = 10 WHERE id = 1",
 		"DELETE FROM t WHERE id = 2",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -237,10 +236,10 @@ func TestFailedMutatingStatementClearsTxn(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1, 2)"); err == nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (1, 2)"); err == nil {
 		t.Fatal("Exec(insert) error = nil, want failure")
 	}
 	if db.txn != nil {
@@ -255,7 +254,7 @@ func TestSuccessfulMutatingStatementClearsTxn(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	if db.txn != nil {
@@ -270,14 +269,14 @@ func TestFailedInsertDoesNotChangeState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert baseline) error = %v", err)
 	}
 
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1, 2)"); err == nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (1, 2)"); err == nil {
 		t.Fatal("Exec(failing insert) error = nil, want failure")
 	}
 
@@ -299,19 +298,19 @@ func TestFailedUpdateDoesNotChangeState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
 		"INSERT INTO t VALUES (1)",
 		"INSERT INTO t VALUES (2)",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
 
-	if _, err := db.Exec(context.Background(), "UPDATE t SET missing = 10 WHERE id = 1"); err == nil {
+	if _, err := db.Exec("UPDATE t SET missing = 10 WHERE id = 1"); err == nil {
 		t.Fatal("Exec(failing update) error = nil, want failure")
 	}
 
@@ -333,19 +332,19 @@ func TestFailedDeleteDoesNotChangeState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
 		"INSERT INTO t VALUES (1)",
 		"INSERT INTO t VALUES (2)",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
 
-	if _, err := db.Exec(context.Background(), "DELETE FROM t WHERE missing = 2"); err == nil {
+	if _, err := db.Exec("DELETE FROM t WHERE missing = 2"); err == nil {
 		t.Fatal("Exec(failing delete) error = nil, want failure")
 	}
 
@@ -367,11 +366,11 @@ func TestFailedCreateTableDoesNotPartiallyRegisterTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err == nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err == nil {
 		t.Fatal("Exec(duplicate create) error = nil, want failure")
 	}
 	if len(db.tables) != 1 {

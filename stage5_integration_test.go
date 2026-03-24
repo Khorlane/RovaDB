@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"context"
 	"errors"
 	"os"
 	"testing"
@@ -25,7 +24,7 @@ func TestCommitDurabilityAcrossReopen(t *testing.T) {
 		"UPDATE t SET id = 10 WHERE id = 1",
 		"DELETE FROM t WHERE id = 2",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -45,14 +44,14 @@ func TestFailedMutationDoesNotLeakState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, sql := range []string{
 		"INSERT INTO t VALUES (1)",
 		"INSERT INTO t VALUES (2)",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -63,7 +62,7 @@ func TestFailedMutationDoesNotLeakState(t *testing.T) {
 		"DELETE FROM t WHERE missing = 2",
 		"CREATE TABLE t (id INT)",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err == nil {
+		if _, err := db.Exec(sql); err == nil {
 			t.Fatalf("Exec(%q) error = nil, want failure", sql)
 		}
 		assertSelectIntRows(t, db, "SELECT * FROM t", 1, 2)
@@ -86,17 +85,17 @@ func TestInterruptedCommitRecoversLastCommittedState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
 	db.afterDatabaseSyncHook = func() error {
 		return errors.New("boom after db sync")
 	}
-	if _, err := db.Exec(context.Background(), "UPDATE t SET id = 2 WHERE id = 1"); err == nil {
+	if _, err := db.Exec("UPDATE t SET id = 2 WHERE id = 1"); err == nil {
 		t.Fatal("Exec(update) error = nil, want interrupted commit failure")
 	}
 	if _, err := os.Stat(storage.JournalPath(path)); err != nil {
@@ -126,7 +125,7 @@ func TestMultipleCommittedMutationsAcrossReopen(t *testing.T) {
 		"INSERT INTO t VALUES (1)",
 		"INSERT INTO t VALUES (2)",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
@@ -136,7 +135,7 @@ func TestMultipleCommittedMutationsAcrossReopen(t *testing.T) {
 	}
 
 	db = reopenDB(t, path)
-	if _, err := db.Exec(context.Background(), "UPDATE t SET id = 10 WHERE id = 1"); err != nil {
+	if _, err := db.Exec("UPDATE t SET id = 10 WHERE id = 1"); err != nil {
 		t.Fatalf("Exec(update) error = %v", err)
 	}
 	assertSelectIntRows(t, db, "SELECT * FROM t", 10, 2)
@@ -145,10 +144,10 @@ func TestMultipleCommittedMutationsAcrossReopen(t *testing.T) {
 	}
 
 	db = reopenDB(t, path)
-	if _, err := db.Exec(context.Background(), "DELETE FROM t WHERE id = 2"); err != nil {
+	if _, err := db.Exec("DELETE FROM t WHERE id = 2"); err != nil {
 		t.Fatalf("Exec(delete) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (30)"); err != nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (30)"); err != nil {
 		t.Fatalf("Exec(insert 30) error = %v", err)
 	}
 	assertSelectIntRows(t, db, "SELECT * FROM t", 10, 30)
@@ -168,10 +167,10 @@ func TestJournalAbsentAfterSuccessfulCommitAndRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "CREATE TABLE t (id INT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec(context.Background(), "INSERT INTO t VALUES (1)"); err != nil {
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 	assertAutocommitClean(t, db, path)
@@ -179,7 +178,7 @@ func TestJournalAbsentAfterSuccessfulCommitAndRecovery(t *testing.T) {
 	db.afterDatabaseSyncHook = func() error {
 		return errors.New("boom after db sync")
 	}
-	if _, err := db.Exec(context.Background(), "UPDATE t SET id = 2 WHERE id = 1"); err == nil {
+	if _, err := db.Exec("UPDATE t SET id = 2 WHERE id = 1"); err == nil {
 		t.Fatal("Exec(update) error = nil, want interrupted commit failure")
 	}
 	if _, err := os.Stat(storage.JournalPath(path)); err != nil {
@@ -209,7 +208,7 @@ func TestAutocommitMutationLeavesNoTxnOrTracking(t *testing.T) {
 		"UPDATE t SET id = 10 WHERE id = 1",
 		"DELETE FROM t WHERE id = 10",
 	} {
-		if _, err := db.Exec(context.Background(), sql); err != nil {
+		if _, err := db.Exec(sql); err != nil {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 		assertAutocommitClean(t, db, path)
