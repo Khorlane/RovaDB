@@ -74,6 +74,8 @@ func valueMatchesColumnType(value parser.Value, typeName string) bool {
 		return value.Kind == parser.ValueKindInt64
 	case parser.ColumnTypeText:
 		return value.Kind == parser.ValueKindString
+	case parser.ColumnTypeBool:
+		return value.Kind == parser.ValueKindBool
 	default:
 		return false
 	}

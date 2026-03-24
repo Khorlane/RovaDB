@@ -1,6 +1,7 @@
 package rovadb
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -69,5 +70,34 @@ func TestExecInsertIntoWrongType(t *testing.T) {
 	}
 	if _, err := db.Exec("INSERT INTO users VALUES ('steve', 'bob')"); err == nil {
 		t.Fatal("Exec(insert) error = nil, want type error")
+	}
+}
+
+func TestExecInsertIntoBoolWrongTypeRejected(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE flags (flag BOOL)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	tests := []string{
+		"INSERT INTO flags VALUES (1)",
+		"INSERT INTO flags VALUES (0)",
+		"INSERT INTO flags VALUES ('true')",
+		"INSERT INTO flags VALUES ('false')",
+	}
+
+	for _, sql := range tests {
+		t.Run(sql, func(t *testing.T) {
+			_, err := db.Exec(sql)
+			var dbErr *DBError
+			if !errors.As(err, &dbErr) || dbErr.Kind != ErrExec {
+				t.Fatalf("Exec(%q) error = %v, want exec-type mismatch error", sql, err)
+			}
+		})
 	}
 }

@@ -258,3 +258,76 @@ func TestExecuteUpdateWithOrWhere(t *testing.T) {
 		t.Fatalf("rows = %#v, want ids 1 and 3 updated", tables["users"].Rows)
 	}
 }
+
+func TestExecuteUpdateBoolValue(t *testing.T) {
+	tests := []struct {
+		name  string
+		value parser.Value
+	}{
+		{name: "true", value: parser.BoolValue(true)},
+		{name: "false", value: parser.BoolValue(false)},
+		{name: "null", value: parser.NullValue()},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tables := map[string]*Table{
+				"flags": {
+					Name:    "flags",
+					Columns: []parser.ColumnDef{{Name: "flag", Type: parser.ColumnTypeBool}},
+					Rows:    [][]parser.Value{{parser.BoolValue(false)}},
+				},
+			}
+
+			affected, err := executeUpdate(&parser.UpdateStmt{
+				TableName: "flags",
+				Assignments: []parser.UpdateAssignment{
+					{Column: "flag", Value: tc.value},
+				},
+			}, tables)
+			if err != nil {
+				t.Fatalf("executeUpdate() error = %v", err)
+			}
+			if affected != 1 {
+				t.Fatalf("executeUpdate() affected = %d, want 1", affected)
+			}
+			if tables["flags"].Rows[0][0] != tc.value {
+				t.Fatalf("rows[0][0] = %#v, want %#v", tables["flags"].Rows[0][0], tc.value)
+			}
+		})
+	}
+}
+
+func TestExecuteUpdateBoolRejectsNonBoolScalars(t *testing.T) {
+	tests := []struct {
+		name  string
+		value parser.Value
+	}{
+		{name: "one", value: parser.Int64Value(1)},
+		{name: "zero", value: parser.Int64Value(0)},
+		{name: "text true", value: parser.StringValue("true")},
+		{name: "text false", value: parser.StringValue("false")},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tables := map[string]*Table{
+				"flags": {
+					Name:    "flags",
+					Columns: []parser.ColumnDef{{Name: "flag", Type: parser.ColumnTypeBool}},
+					Rows:    [][]parser.Value{{parser.BoolValue(false)}},
+				},
+			}
+
+			_, err := executeUpdate(&parser.UpdateStmt{
+				TableName: "flags",
+				Assignments: []parser.UpdateAssignment{
+					{Column: "flag", Value: tc.value},
+				},
+			}, tables)
+			if err != errTypeMismatch {
+				t.Fatalf("executeUpdate() error = %v, want %v", err, errTypeMismatch)
+			}
+		})
+	}
+}
