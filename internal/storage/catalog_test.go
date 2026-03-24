@@ -66,6 +66,51 @@ func TestCatalogRoundTripIncludesStorageMetadata(t *testing.T) {
 	}
 }
 
+func TestCatalogRoundTripIncludesRealType(t *testing.T) {
+	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_real.db"))
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+
+	want := &CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "measurements",
+				RootPageID: 1,
+				RowCount:   0,
+				Columns: []CatalogColumn{
+					{Name: "x", Type: CatalogColumnTypeReal},
+				},
+			},
+		},
+	}
+	if err := SaveCatalog(pager, want); err != nil {
+		t.Fatalf("SaveCatalog() error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	pager, err = NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() reload error = %v", err)
+	}
+	got, err := LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+
+	if len(got.Tables) != 1 || len(got.Tables[0].Columns) != 1 || got.Tables[0].Columns[0].Type != CatalogColumnTypeReal {
+		t.Fatalf("got catalog = %#v, want REAL column metadata preserved", got)
+	}
+}
+
 func TestLoadCatalogV1WithoutIndexes(t *testing.T) {
 	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_v1.db"))
 	if err != nil {

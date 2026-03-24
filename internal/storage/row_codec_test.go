@@ -158,11 +158,83 @@ func TestEncodeDecodeRowWithNullAndBool(t *testing.T) {
 	assertRowValuesEqual(t, decoded, values)
 }
 
+func TestEncodeRowReal(t *testing.T) {
+	encoded, err := EncodeRow([]parser.Value{parser.RealValue(3.14)})
+	if err != nil {
+		t.Fatalf("EncodeRow() error = %v", err)
+	}
+
+	if len(encoded) != 11 {
+		t.Fatalf("len(encoded) = %d, want 11", len(encoded))
+	}
+	if encoded[2] != rowTypeReal {
+		t.Fatalf("encoded tag = %d, want %d", encoded[2], rowTypeReal)
+	}
+}
+
+func TestDecodeRowReal(t *testing.T) {
+	encoded, err := EncodeRow([]parser.Value{parser.RealValue(3.14)})
+	if err != nil {
+		t.Fatalf("EncodeRow() error = %v", err)
+	}
+
+	decoded, err := DecodeRow(encoded)
+	if err != nil {
+		t.Fatalf("DecodeRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, []parser.Value{parser.RealValue(3.14)})
+}
+
+func TestEncodeDecodeMultipleRealValues(t *testing.T) {
+	values := []parser.Value{
+		parser.RealValue(0.0),
+		parser.RealValue(3.14),
+		parser.RealValue(-2.5),
+		parser.RealValue(10.25),
+	}
+
+	encoded, err := EncodeRow(values)
+	if err != nil {
+		t.Fatalf("EncodeRow() error = %v", err)
+	}
+
+	decoded, err := DecodeRow(encoded)
+	if err != nil {
+		t.Fatalf("DecodeRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+}
+
 func TestEncodeDecodeRowMixedWithBool(t *testing.T) {
 	values := []parser.Value{
 		parser.Int64Value(7),
 		parser.StringValue("alice"),
 		parser.BoolValue(true),
+		parser.BoolValue(false),
+		parser.NullValue(),
+	}
+
+	encoded, err := EncodeRow(values)
+	if err != nil {
+		t.Fatalf("EncodeRow() error = %v", err)
+	}
+
+	decoded, err := DecodeRow(encoded)
+	if err != nil {
+		t.Fatalf("DecodeRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+}
+
+func TestEncodeDecodeRowMixedWithReal(t *testing.T) {
+	values := []parser.Value{
+		parser.Int64Value(7),
+		parser.StringValue("alice"),
+		parser.BoolValue(true),
+		parser.RealValue(10.25),
 		parser.BoolValue(false),
 		parser.NullValue(),
 	}
@@ -252,6 +324,14 @@ func TestDecodeRowInvalidBoolPayload(t *testing.T) {
 	}
 }
 
+func TestDecodeRowTruncatedReal(t *testing.T) {
+	data := []byte{1, 0, rowTypeReal, 1, 2, 3}
+
+	if err := expectDecodeError(data); !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("DecodeRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
 func TestBoolEncodingIsDistinctFromIntAndString(t *testing.T) {
 	boolEncoded, err := EncodeRow([]parser.Value{parser.BoolValue(true)})
 	if err != nil {
@@ -274,6 +354,35 @@ func TestBoolEncodingIsDistinctFromIntAndString(t *testing.T) {
 	}
 	if boolEncoded[2] == intEncoded[2] || boolEncoded[2] == stringEncoded[2] {
 		t.Fatalf("bool tag %d must differ from int tag %d and string tag %d", boolEncoded[2], intEncoded[2], stringEncoded[2])
+	}
+}
+
+func TestRealEncodingIsDistinctFromIntStringAndBool(t *testing.T) {
+	realEncoded, err := EncodeRow([]parser.Value{parser.RealValue(1.25)})
+	if err != nil {
+		t.Fatalf("EncodeRow(real) error = %v", err)
+	}
+	intEncoded, err := EncodeRow([]parser.Value{parser.Int64Value(1)})
+	if err != nil {
+		t.Fatalf("EncodeRow(int) error = %v", err)
+	}
+	stringEncoded, err := EncodeRow([]parser.Value{parser.StringValue("1.25")})
+	if err != nil {
+		t.Fatalf("EncodeRow(string) error = %v", err)
+	}
+	boolEncoded, err := EncodeRow([]parser.Value{parser.BoolValue(true)})
+	if err != nil {
+		t.Fatalf("EncodeRow(bool) error = %v", err)
+	}
+
+	if binary.LittleEndian.Uint16(realEncoded[:2]) != 1 {
+		t.Fatalf("real row count header = %d, want 1", binary.LittleEndian.Uint16(realEncoded[:2]))
+	}
+	if realEncoded[2] != rowTypeReal {
+		t.Fatalf("real tag = %d, want %d", realEncoded[2], rowTypeReal)
+	}
+	if realEncoded[2] == intEncoded[2] || realEncoded[2] == stringEncoded[2] || realEncoded[2] == boolEncoded[2] {
+		t.Fatalf("real tag %d must differ from int tag %d, string tag %d, and bool tag %d", realEncoded[2], intEncoded[2], stringEncoded[2], boolEncoded[2])
 	}
 }
 

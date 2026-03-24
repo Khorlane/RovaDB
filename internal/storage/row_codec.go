@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/binary"
+	"math"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
@@ -11,6 +12,7 @@ const (
 	rowTypeInt64  = 1
 	rowTypeString = 2
 	rowTypeBool   = 3
+	rowTypeReal   = 4
 )
 
 // EncodeRow encodes one row payload using the storage row format.
@@ -40,6 +42,11 @@ func EncodeRow(values []parser.Value) ([]byte, error) {
 			} else {
 				buf = append(buf, 0)
 			}
+		case parser.ValueKindReal:
+			var raw [8]byte
+			buf = append(buf, rowTypeReal)
+			binary.LittleEndian.PutUint64(raw[:], math.Float64bits(value.F64))
+			buf = append(buf, raw[:]...)
 		default:
 			return nil, errCorruptedRowData
 		}
@@ -101,6 +108,13 @@ func DecodeRow(data []byte) ([]parser.Value, error) {
 				return nil, errCorruptedRowData
 			}
 			offset++
+		case rowTypeReal:
+			if offset+8 > len(data) {
+				return nil, errCorruptedRowData
+			}
+			value := math.Float64frombits(binary.LittleEndian.Uint64(data[offset : offset+8]))
+			offset += 8
+			values = append(values, parser.RealValue(value))
 		default:
 			return nil, errCorruptedRowData
 		}

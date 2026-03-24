@@ -295,3 +295,101 @@ func TestBoolRowsUpdateRoundTripAfterReopen(t *testing.T) {
 		t.Fatalf("Err() = %v, want nil", err)
 	}
 }
+
+func TestRealRowsRoundTripAfterReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE measurements (id INT, x REAL, label TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO measurements VALUES (1, 0.0, 'zero')"); err != nil {
+		t.Fatalf("Exec(insert zero) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO measurements VALUES (2, 3.14, 'pi')"); err != nil {
+		t.Fatalf("Exec(insert pi) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO measurements VALUES (3, -2.5, 'neg')"); err != nil {
+		t.Fatalf("Exec(insert neg) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO measurements VALUES (4, NULL, 'missing')"); err != nil {
+		t.Fatalf("Exec(insert null) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT id, x, label FROM measurements ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() first = false, want true")
+	}
+	var id1 int
+	var x1 float64
+	var label1 string
+	if err := rows.Scan(&id1, &x1, &label1); err != nil {
+		t.Fatalf("Scan() first error = %v", err)
+	}
+	if id1 != 1 || x1 != 0.0 || label1 != "zero" {
+		t.Fatalf("first row = (%d, %v, %q), want (1, 0.0, %q)", id1, x1, label1, "zero")
+	}
+
+	if !rows.Next() {
+		t.Fatal("Next() second = false, want true")
+	}
+	var id2 int
+	var x2 float64
+	var label2 string
+	if err := rows.Scan(&id2, &x2, &label2); err != nil {
+		t.Fatalf("Scan() second error = %v", err)
+	}
+	if id2 != 2 || x2 != 3.14 || label2 != "pi" {
+		t.Fatalf("second row = (%d, %v, %q), want (2, 3.14, %q)", id2, x2, label2, "pi")
+	}
+
+	if !rows.Next() {
+		t.Fatal("Next() third = false, want true")
+	}
+	var id3 int
+	var x3 float64
+	var label3 string
+	if err := rows.Scan(&id3, &x3, &label3); err != nil {
+		t.Fatalf("Scan() third error = %v", err)
+	}
+	if id3 != 3 || x3 != -2.5 || label3 != "neg" {
+		t.Fatalf("third row = (%d, %v, %q), want (3, -2.5, %q)", id3, x3, label3, "neg")
+	}
+
+	if !rows.Next() {
+		t.Fatal("Next() fourth = false, want true")
+	}
+	var id4 int
+	var x4 any
+	var label4 string
+	if err := rows.Scan(&id4, &x4, &label4); err != nil {
+		t.Fatalf("Scan() fourth error = %v", err)
+	}
+	if id4 != 4 || x4 != nil || label4 != "missing" {
+		t.Fatalf("fourth row = (%d, %#v, %q), want (4, nil, %q)", id4, x4, label4, "missing")
+	}
+
+	if rows.Next() {
+		t.Fatal("Next() fifth = true, want false")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil", err)
+	}
+}
