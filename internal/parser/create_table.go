@@ -9,7 +9,42 @@ var errUnsupportedStatement = newParseError("unsupported query form")
 const (
 	ColumnTypeInt  = "INT"
 	ColumnTypeText = "TEXT"
+	ColumnTypeBool = "BOOL"
 )
+
+/*
+--- BOOL DESIGN (LOCKED) ---
+
+Schema type:
+- Name: BOOL
+
+Runtime value:
+- New value kind: Bool
+- Go type: bool
+- NULL remains separate (existing nil handling unchanged)
+
+Literal forms:
+- TRUE, FALSE (case-insensitive if parser already supports it)
+- Quoted 'true'/'false' remain TEXT
+- No numeric coercion (0/1 are INT, not BOOL)
+
+Type enforcement:
+- BOOL columns accept: TRUE, FALSE, NULL
+- Reject: INT (0/1), TEXT ('true', etc.)
+
+Storage encoding:
+- Introduce a new value kind tag for BOOL
+- Encoding:
+    TRUE  -> BOOL tag + 1 byte (1)
+    FALSE -> BOOL tag + 1 byte (0)
+- Must NOT reuse INT or TEXT encoding
+- Must remain backward-compatible with existing rows
+
+Comparison semantics:
+- TRUE == TRUE only
+- FALSE == FALSE only
+- No cross-type equality with INT/TEXT
+*/
 
 // ColumnDef is the tiny parsed form for a typed column definition.
 type ColumnDef struct {
