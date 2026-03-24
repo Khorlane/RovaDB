@@ -110,6 +110,37 @@ func TestExecUpdateBoolWrongTypeRejected(t *testing.T) {
 	}
 }
 
+func TestExecUpdateRealWrongTypeRejected(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE measurements (id INT, x REAL)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO measurements VALUES (1, NULL)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	tests := []string{
+		"UPDATE measurements SET x = 2 WHERE id = 1",
+		"UPDATE measurements SET x = '2.5' WHERE id = 1",
+		"UPDATE measurements SET x = FALSE WHERE id = 1",
+	}
+
+	for _, sql := range tests {
+		t.Run(sql, func(t *testing.T) {
+			_, err := db.Exec(sql)
+			var dbErr *DBError
+			if !errors.As(err, &dbErr) || dbErr.Kind != ErrExec {
+				t.Fatalf("Exec(%q) error = %v, want exec-type mismatch error", sql, err)
+			}
+		})
+	}
+}
+
 func TestExecUpdateWhereOr(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

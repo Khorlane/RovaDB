@@ -231,3 +231,62 @@ func TestExecuteInsertBoolRejectsNonBoolScalars(t *testing.T) {
 		})
 	}
 }
+
+func TestExecuteInsertRealValue(t *testing.T) {
+	tests := []struct {
+		name  string
+		value parser.Value
+	}{
+		{name: "real", value: parser.RealValue(1.25)},
+		{name: "null", value: parser.NullValue()},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			table := &Table{Name: "measurements", Columns: []parser.ColumnDef{{Name: "x", Type: parser.ColumnTypeReal}}}
+			localTables := map[string]*Table{"measurements": table}
+
+			affected, err := Execute(&parser.InsertStmt{
+				TableName: "measurements",
+				Values:    []parser.Value{tc.value},
+			}, localTables)
+			if err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if affected != 1 {
+				t.Fatalf("Execute() affected = %d, want 1", affected)
+			}
+			if len(table.Rows) != 1 || len(table.Rows[0]) != 1 || table.Rows[0][0] != tc.value {
+				t.Fatalf("Execute() row = %#v, want [%#v]", table.Rows, tc.value)
+			}
+		})
+	}
+}
+
+func TestExecuteInsertRealRejectsNonRealScalars(t *testing.T) {
+	tests := []struct {
+		name  string
+		value parser.Value
+	}{
+		{name: "int", value: parser.Int64Value(1)},
+		{name: "text", value: parser.StringValue("1.25")},
+		{name: "bool true", value: parser.BoolValue(true)},
+		{name: "bool false", value: parser.BoolValue(false)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			localTables := map[string]*Table{
+				"measurements": {Name: "measurements", Columns: []parser.ColumnDef{{Name: "x", Type: parser.ColumnTypeReal}}},
+			}
+
+			_, err := Execute(&parser.InsertStmt{
+				TableName: "measurements",
+				Values:    []parser.Value{tc.value},
+			}, localTables)
+			if err != errTypeMismatch {
+				t.Fatalf("Execute() error = %v, want %v", err, errTypeMismatch)
+			}
+		})
+	}
+}

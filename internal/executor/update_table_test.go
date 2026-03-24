@@ -331,3 +331,74 @@ func TestExecuteUpdateBoolRejectsNonBoolScalars(t *testing.T) {
 		})
 	}
 }
+
+func TestExecuteUpdateRealValue(t *testing.T) {
+	tests := []struct {
+		name  string
+		value parser.Value
+	}{
+		{name: "real", value: parser.RealValue(2.5)},
+		{name: "null", value: parser.NullValue()},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tables := map[string]*Table{
+				"measurements": {
+					Name:    "measurements",
+					Columns: []parser.ColumnDef{{Name: "x", Type: parser.ColumnTypeReal}},
+					Rows:    [][]parser.Value{{parser.RealValue(1.25)}},
+				},
+			}
+
+			affected, err := executeUpdate(&parser.UpdateStmt{
+				TableName: "measurements",
+				Assignments: []parser.UpdateAssignment{
+					{Column: "x", Value: tc.value},
+				},
+			}, tables)
+			if err != nil {
+				t.Fatalf("executeUpdate() error = %v", err)
+			}
+			if affected != 1 {
+				t.Fatalf("executeUpdate() affected = %d, want 1", affected)
+			}
+			if tables["measurements"].Rows[0][0] != tc.value {
+				t.Fatalf("rows[0][0] = %#v, want %#v", tables["measurements"].Rows[0][0], tc.value)
+			}
+		})
+	}
+}
+
+func TestExecuteUpdateRealRejectsNonRealScalars(t *testing.T) {
+	tests := []struct {
+		name  string
+		value parser.Value
+	}{
+		{name: "int", value: parser.Int64Value(2)},
+		{name: "text", value: parser.StringValue("2.5")},
+		{name: "bool false", value: parser.BoolValue(false)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tables := map[string]*Table{
+				"measurements": {
+					Name:    "measurements",
+					Columns: []parser.ColumnDef{{Name: "x", Type: parser.ColumnTypeReal}},
+					Rows:    [][]parser.Value{{parser.RealValue(1.25)}},
+				},
+			}
+
+			_, err := executeUpdate(&parser.UpdateStmt{
+				TableName: "measurements",
+				Assignments: []parser.UpdateAssignment{
+					{Column: "x", Value: tc.value},
+				},
+			}, tables)
+			if err != errTypeMismatch {
+				t.Fatalf("executeUpdate() error = %v, want %v", err, errTypeMismatch)
+			}
+		})
+	}
+}

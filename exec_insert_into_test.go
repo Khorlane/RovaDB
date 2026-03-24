@@ -101,3 +101,31 @@ func TestExecInsertIntoBoolWrongTypeRejected(t *testing.T) {
 		})
 	}
 }
+
+func TestExecInsertIntoRealWrongTypeRejected(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE measurements (x REAL)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	tests := []string{
+		"INSERT INTO measurements VALUES (1)",
+		"INSERT INTO measurements VALUES ('1.25')",
+		"INSERT INTO measurements VALUES (TRUE)",
+	}
+
+	for _, sql := range tests {
+		t.Run(sql, func(t *testing.T) {
+			_, err := db.Exec(sql)
+			var dbErr *DBError
+			if !errors.As(err, &dbErr) || dbErr.Kind != ErrExec {
+				t.Fatalf("Exec(%q) error = %v, want exec-type mismatch error", sql, err)
+			}
+		})
+	}
+}
