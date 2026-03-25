@@ -33,7 +33,7 @@ func parseUpdate(input string) (*UpdateStmt, error) {
 
 	tableName := strings.TrimSpace(rest[:split])
 	setPart := strings.TrimSpace(rest[split+len(" SET "):])
-	if tableName == "" {
+	if !isIdentifier(tableName) {
 		return nil, newParseError("unsupported query form")
 	}
 
@@ -79,7 +79,7 @@ func parseAssignments(input string) ([]UpdateAssignment, bool) {
 
 		column := strings.TrimSpace(parts[0])
 		valueToken := strings.TrimSpace(parts[1])
-		if column == "" || valueToken == "" {
+		if !isIdentifier(column) || valueToken == "" {
 			return nil, false
 		}
 		if _, ok := seen[column]; ok {

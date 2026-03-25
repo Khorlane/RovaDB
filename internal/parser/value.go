@@ -15,6 +15,7 @@ const (
 	ValueKindString
 	ValueKindBool
 	ValueKindReal
+	ValueKindPlaceholder
 )
 
 /*
@@ -53,11 +54,12 @@ Comparison semantics:
 
 // Value is the tiny internal value representation for Stage 1 literals.
 type Value struct {
-	Kind ValueKind
-	I64  int64
-	Str  string
-	Bool bool
-	F64  float64
+	Kind             ValueKind
+	I64              int64
+	Str              string
+	Bool             bool
+	F64              float64
+	PlaceholderIndex int
 }
 
 // NullValue builds a NULL Value.
@@ -85,6 +87,11 @@ func RealValue(v float64) Value {
 	return Value{Kind: ValueKindReal, F64: v}
 }
 
+// PlaceholderValue builds a positional placeholder Value.
+func PlaceholderValue() Value {
+	return Value{Kind: ValueKindPlaceholder, PlaceholderIndex: -1}
+}
+
 // Any converts the internal value to its Go representation.
 func (v Value) Any() any {
 	switch v.Kind {
@@ -98,6 +105,8 @@ func (v Value) Any() any {
 		return v.Bool
 	case ValueKindReal:
 		return v.F64
+	case ValueKindPlaceholder:
+		return nil
 	default:
 		return nil
 	}

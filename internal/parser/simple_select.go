@@ -150,7 +150,7 @@ func parseSelectFrom(sql, upper string) (*SelectExpr, bool) {
 		orderBy = parsedOrderBy
 	}
 
-	if selectList == "" || tableName == "" || strings.ContainsAny(tableName, " \t\r\n,") {
+	if selectList == "" || !isIdentifier(tableName) {
 		return nil, false
 	}
 
@@ -177,7 +177,7 @@ func parseSelectFrom(sql, upper string) (*SelectExpr, bool) {
 	columns := make([]string, 0, len(rawColumns))
 	for _, raw := range rawColumns {
 		column := strings.TrimSpace(raw)
-		if column == "" || column == "*" || strings.ContainsAny(column, " \t\r\n()'+-*/") {
+		if column == "*" || !isIdentifier(column) {
 			return nil, false
 		}
 		columns = append(columns, column)
@@ -196,7 +196,7 @@ func parseSelectFrom(sql, upper string) (*SelectExpr, bool) {
 
 func parseOrderByClause(input string) (*OrderByClause, bool) {
 	tokens := strings.Fields(strings.TrimSpace(input))
-	if len(tokens) < 1 || len(tokens) > 2 || tokens[0] == "" || strings.ContainsAny(tokens[0], " \t\r\n,") {
+	if len(tokens) < 1 || len(tokens) > 2 || !isIdentifier(tokens[0]) {
 		return nil, false
 	}
 
@@ -244,7 +244,7 @@ func parseWhereItems(tokens []string) []ConditionChainItem {
 				return nil
 			}
 		}
-		if tokens[i] == "" || !isWhereOperator(tokens[i+1]) {
+		if !isIdentifier(tokens[i]) || !isWhereOperator(tokens[i+1]) {
 			return nil
 		}
 		value, ok := parseLiteralValue(tokens[i+2])

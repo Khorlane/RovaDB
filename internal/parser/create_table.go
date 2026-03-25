@@ -2,6 +2,7 @@ package parser
 
 import (
 	"strings"
+	"unicode"
 )
 
 var errUnsupportedStatement = newParseError("unsupported query form")
@@ -102,7 +103,7 @@ func parseCreateTable(input string) (*CreateTableStmt, error) {
 
 	name := strings.TrimSpace(rest[:split])
 	definition := strings.TrimSpace(rest[split:])
-	if name == "" || !strings.HasPrefix(definition, "(") || !strings.HasSuffix(definition, ")") {
+	if !isIdentifier(name) || !strings.HasPrefix(definition, "(") || !strings.HasSuffix(definition, ")") {
 		return nil, newParseError("unsupported query form")
 	}
 
@@ -121,7 +122,7 @@ func parseCreateTable(input string) (*CreateTableStmt, error) {
 		}
 		name := strings.TrimSpace(parts[0])
 		typeName := strings.ToUpper(strings.TrimSpace(parts[1]))
-		if name == "" {
+		if !isIdentifier(name) {
 			return nil, newParseError("unsupported query form")
 		}
 		if _, ok := seen[name]; ok {
@@ -135,4 +136,24 @@ func parseCreateTable(input string) (*CreateTableStmt, error) {
 	}
 
 	return &CreateTableStmt{Name: name, Columns: columns}, nil
+}
+
+func isIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	for i, r := range s {
+		if i == 0 {
+			if !unicode.IsLetter(r) && r != '_' {
+				return false
+			}
+			continue
+		}
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
+			return false
+		}
+	}
+
+	return true
 }

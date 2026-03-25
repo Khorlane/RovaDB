@@ -36,7 +36,7 @@ func parseDelete(input string) (*DeleteStmt, error) {
 		where = parsedWhere
 	}
 
-	if tableName == "" || strings.ContainsAny(tableName, " \t\r\n,") {
+	if !isIdentifier(tableName) {
 		return nil, newParseError("unsupported query form")
 	}
 

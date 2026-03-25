@@ -58,6 +58,19 @@ func TestRealValue(t *testing.T) {
 	}
 }
 
+func TestPlaceholderValue(t *testing.T) {
+	got := PlaceholderValue()
+	if got.Kind != ValueKindPlaceholder {
+		t.Fatalf("PlaceholderValue().Kind = %v, want %v", got.Kind, ValueKindPlaceholder)
+	}
+	if got.PlaceholderIndex != -1 {
+		t.Fatalf("PlaceholderValue().PlaceholderIndex = %d, want -1", got.PlaceholderIndex)
+	}
+	if got.Any() != nil {
+		t.Fatalf("PlaceholderValue().Any() = %#v, want nil", got.Any())
+	}
+}
+
 func TestParseLiteralValueBool(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -128,6 +141,16 @@ func TestParseLiteralValueRealInvalid(t *testing.T) {
 				t.Fatalf("parseLiteralValue(%q) = %#v, want failure", token, got)
 			}
 		})
+	}
+}
+
+func TestParseLiteralValuePlaceholder(t *testing.T) {
+	got, ok := parseLiteralValue("?")
+	if !ok {
+		t.Fatal("parseLiteralValue(?) ok = false, want true")
+	}
+	if got != PlaceholderValue() {
+		t.Fatalf("parseLiteralValue(?) = %#v, want %#v", got, PlaceholderValue())
 	}
 }
 
@@ -223,6 +246,20 @@ func TestParseSelectExprValueKinds(t *testing.T) {
 	if whereRealSel.Where.Items[0].Condition.Right != RealValue(10.25) {
 		t.Fatalf("ParseSelectExpr(...).Where.Items[0].Condition.Right = %#v, want %#v", whereRealSel.Where.Items[0].Condition.Right, RealValue(10.25))
 	}
+
+	wherePlaceholderSel, ok := ParseSelectExpr("SELECT * FROM t WHERE id = ?")
+	if !ok {
+		t.Fatal("ParseSelectExpr(SELECT * FROM t WHERE id = ?) ok = false, want true")
+	}
+	if wherePlaceholderSel.Where == nil || len(wherePlaceholderSel.Where.Items) != 1 {
+		t.Fatalf("ParseSelectExpr(...).Where = %#v, want one condition", wherePlaceholderSel.Where)
+	}
+	if wherePlaceholderSel.Where.Items[0].Condition.Right.Kind != ValueKindPlaceholder {
+		t.Fatalf("ParseSelectExpr(...).Where.Items[0].Condition.Right.Kind = %v, want %v", wherePlaceholderSel.Where.Items[0].Condition.Right.Kind, ValueKindPlaceholder)
+	}
+	if wherePlaceholderSel.Where.Items[0].Condition.Right.PlaceholderIndex != -1 {
+		t.Fatalf("ParseSelectExpr(...).Where.Items[0].Condition.Right.PlaceholderIndex = %d, want -1", wherePlaceholderSel.Where.Items[0].Condition.Right.PlaceholderIndex)
+	}
 }
 
 func TestParseSelectExprRealInvalid(t *testing.T) {
@@ -238,5 +275,11 @@ func TestParseSelectExprRealInvalid(t *testing.T) {
 				t.Fatalf("ParseSelectExpr(%q) = %#v, want failure", sql, got)
 			}
 		})
+	}
+}
+
+func TestParseRejectsPlaceholderInCreateTableColumnDefinition(t *testing.T) {
+	if stmt, err := Parse("CREATE TABLE t (? INT)"); err == nil {
+		t.Fatalf("Parse(CREATE TABLE t (? INT)) = %#v, want error", stmt)
 	}
 }

@@ -28,7 +28,7 @@ func parseAlterTable(input string) (*AlterTableAddColumnStmt, error) {
 	tableName := strings.TrimSpace(parts[2])
 	columnName := strings.TrimSpace(parts[5])
 	typeName := strings.ToUpper(strings.TrimSpace(parts[6]))
-	if tableName == "" || columnName == "" {
+	if !isIdentifier(tableName) || !isIdentifier(columnName) {
 		return nil, newParseError("unsupported alter table form")
 	}
 	if typeName != ColumnTypeInt && typeName != ColumnTypeText {

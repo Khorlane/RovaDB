@@ -28,7 +28,7 @@ func parseInsert(input string) (*InsertStmt, error) {
 
 	tableName := strings.TrimSpace(rest[:split])
 	afterTable := strings.TrimSpace(rest[split:])
-	if tableName == "" {
+	if !isIdentifier(tableName) {
 		return nil, newParseError("unsupported query form")
 	}
 
@@ -86,6 +86,9 @@ func parseLiteralValue(token string) (Value, bool) {
 	if strings.HasPrefix(token, "+") {
 		return Value{}, false
 	}
+	if token == "?" {
+		return PlaceholderValue(), true
+	}
 	if strings.EqualFold(token, "NULL") {
 		return NullValue(), true
 	}
@@ -122,7 +125,7 @@ func parseInsertColumns(input string) ([]string, bool) {
 	seen := make(map[string]struct{}, len(rawColumns))
 	for _, raw := range rawColumns {
 		column := strings.TrimSpace(raw)
-		if column == "" {
+		if !isIdentifier(column) {
 			return nil, false
 		}
 		if _, ok := seen[column]; ok {
