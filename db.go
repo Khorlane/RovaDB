@@ -335,7 +335,7 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
-		columns, err := executor.ProjectedColumnNames(plan, db.tables[sel.TableName])
+		columns, err := executor.ProjectedColumnNamesForPlan(plan, db.tables)
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}

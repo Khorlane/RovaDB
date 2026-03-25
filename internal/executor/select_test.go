@@ -902,6 +902,81 @@ func TestSelectAliasQualifiedProjectionPredicateAndOrderBy(t *testing.T) {
 	}
 }
 
+func TestSelectExplicitJoinWithAliases(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "name", Type: parser.ColumnTypeText},
+			{Name: "dept_id", Type: parser.ColumnTypeInt},
+		}, Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("alice"), parser.Int64Value(10)},
+			{parser.Int64Value(2), parser.StringValue("bob"), parser.Int64Value(20)},
+			{parser.Int64Value(3), parser.StringValue("cara"), parser.Int64Value(10)},
+		}},
+		"departments": {Name: "departments", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "name", Type: parser.ColumnTypeText},
+		}, Rows: [][]parser.Value{
+			{parser.Int64Value(10), parser.StringValue("eng")},
+			{parser.Int64Value(20), parser.StringValue("ops")},
+		}},
+	}
+
+	stmt, ok := parser.ParseSelectExpr("SELECT u.name, d.name FROM users u JOIN departments d ON u.dept_id = d.id WHERE d.name != 'ops' ORDER BY u.id")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+
+	plan, err := planner.PlanSelect(stmt)
+	if err != nil {
+		t.Fatalf("PlanSelect() error = %v", err)
+	}
+
+	rows, err := Select(plan, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2", len(rows))
+	}
+	if rows[0][0] != parser.StringValue("alice") || rows[0][1] != parser.StringValue("eng") {
+		t.Fatalf("rows[0] = %#v, want [alice eng]", rows[0])
+	}
+	if rows[1][0] != parser.StringValue("cara") || rows[1][1] != parser.StringValue("eng") {
+		t.Fatalf("rows[1] = %#v, want [cara eng]", rows[1])
+	}
+}
+
+func TestProjectedColumnNamesForPlanJoin(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "dept_id", Type: parser.ColumnTypeInt},
+		}},
+		"departments": {Name: "departments", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "name", Type: parser.ColumnTypeText},
+		}},
+	}
+
+	stmt, ok := parser.ParseSelectExpr("SELECT u.id, d.name FROM users u JOIN departments d ON u.dept_id = d.id")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	plan, err := planner.PlanSelect(stmt)
+	if err != nil {
+		t.Fatalf("PlanSelect() error = %v", err)
+	}
+
+	got, err := ProjectedColumnNamesForPlan(plan, tables)
+	if err != nil {
+		t.Fatalf("ProjectedColumnNamesForPlan() error = %v", err)
+	}
+	if len(got) != 2 || got[0] != "u.id" || got[1] != "d.name" {
+		t.Fatalf("ProjectedColumnNamesForPlan() = %#v, want [u.id d.name]", got)
+	}
+}
+
 func TestValidateSelectPlanLiteralAllowsNilTableScan(t *testing.T) {
 	plan, err := planner.PlanSelect(&parser.SelectExpr{
 		Expr: &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: 1},

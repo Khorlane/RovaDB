@@ -8,6 +8,7 @@ type ScanType string
 const (
 	ScanTypeTable ScanType = "table"
 	ScanTypeIndex ScanType = "index"
+	ScanTypeJoin  ScanType = "join"
 )
 
 // TableScan represents a full table scan strategy.
@@ -20,4 +21,14 @@ type IndexScan struct {
 	TableName  string
 	ColumnName string
 	Value      parser.Value
+}
+
+// JoinScan represents a two-table inner equality join.
+type JoinScan struct {
+	LeftTableName   string
+	LeftTableAlias  string
+	LeftColumnName  string
+	RightTableName  string
+	RightTableAlias string
+	RightColumnName string
 }

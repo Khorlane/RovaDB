@@ -203,9 +203,16 @@ At the end of a working session, update this file with:
 - binder traversal now includes join predicates so placeholder/value walking stays structurally complete
 - parser scope remains intentionally ahead of runtime scope: explicit join syntax now parses, but planner/executor still reject joined selects through the normal unsupported-query path
 - full repo verification still passes after the explicit join-syntax milestone
+- `Parser Modernization Slice 24` completed as the first join-runtime milestone
+- planner now recognizes the initial supported join shape: a two-table inner equality join with a single explicit `JOIN ... ON ...` clause
+- executor now supports a conservative nested-loop join path for that initial two-table equality shape
+- join-time name resolution now works across both tables for projections, `WHERE`, and `ORDER BY`
+- public query materialization now reports projected column names correctly for joined selects
+- comma-style multi-table `FROM` remains unsupported at runtime; the active join runtime is intentionally limited to the explicit two-table inner-equality path
+- full repo verification still passes after the first join-runtime milestone
 
 ## Next Recommended Step
 
-- next major parser step is join-aware planning and execution for the initial two-table inner equality shape
-- future `SELECT` growth should keep building on the parsed `FROM` + `JOIN` structure instead of widening the legacy `TableName` path
-- the next high-value seam is turning the parsed join structure into a conservative two-table nested-loop execution path
+- next major parser step is aggregate-function execution beyond `COUNT(*)`
+- future `SELECT` growth should keep using the resolver-based join path for richer expressions and additional join-adjacent features
+- the next high-value seam is turning the currently parsed aggregate surface into real execution semantics for `MIN`, `MAX`, `AVG`, and `SUM`

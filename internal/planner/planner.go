@@ -18,12 +18,17 @@ func PlanSelect(stmt *parser.SelectExpr, tables ...map[string]*TableMetadata) (*
 	if stmt == nil {
 		return nil, newPlanError("unsupported query form")
 	}
-	if len(stmt.From) > 1 || len(stmt.Joins) > 0 {
-		return nil, newPlanError("unsupported query form")
-	}
 
 	plan := &SelectPlan{
 		Stmt: stmt,
+	}
+	if joinScan, ok := chooseJoinScan(stmt); ok {
+		plan.ScanType = ScanTypeJoin
+		plan.JoinScan = joinScan
+		return plan, nil
+	}
+	if len(stmt.From) > 1 || len(stmt.Joins) > 0 {
+		return nil, newPlanError("unsupported query form")
 	}
 	if stmt != nil && stmt.TableName != "" {
 		if indexScan := chooseIndexScan(stmt, firstTableMetadata(tables)); indexScan != nil {
@@ -35,6 +40,70 @@ func PlanSelect(stmt *parser.SelectExpr, tables ...map[string]*TableMetadata) (*
 		plan.TableScan = &TableScan{TableName: stmt.TableName}
 	}
 	return plan, nil
+}
+
+func chooseJoinScan(stmt *parser.SelectExpr) (*JoinScan, bool) {
+	if stmt == nil || len(stmt.From) != 1 || len(stmt.Joins) != 1 {
+		return nil, false
+	}
+	join := stmt.Joins[0]
+	if join.Predicate == nil || join.Predicate.Kind != parser.PredicateKindComparison || join.Predicate.Comparison == nil {
+		return nil, false
+	}
+	cond := join.Predicate.Comparison
+	if cond.Operator != "=" || cond.LeftExpr == nil || cond.RightExpr == nil {
+		return nil, false
+	}
+	_, leftName, ok := parserOperandShape(cond.LeftExpr)
+	if !ok || leftName == "" {
+		return nil, false
+	}
+	_, rightName, ok := parserOperandShape(cond.RightExpr)
+	if !ok || rightName == "" {
+		return nil, false
+	}
+
+	leftRef := stmt.From[0]
+	rightRef := join.Right
+
+	leftColumn, okLeft := normalizeJoinColumnName(leftName, leftRef)
+	rightColumn, okRight := normalizeJoinColumnName(rightName, rightRef)
+	if okLeft && okRight {
+		return &JoinScan{
+			LeftTableName:   leftRef.Name,
+			LeftTableAlias:  leftRef.Alias,
+			LeftColumnName:  leftColumn,
+			RightTableName:  rightRef.Name,
+			RightTableAlias: rightRef.Alias,
+			RightColumnName: rightColumn,
+		}, true
+	}
+
+	leftColumn, okLeft = normalizeJoinColumnName(leftName, rightRef)
+	rightColumn, okRight = normalizeJoinColumnName(rightName, leftRef)
+	if okLeft && okRight {
+		return &JoinScan{
+			LeftTableName:   leftRef.Name,
+			LeftTableAlias:  leftRef.Alias,
+			LeftColumnName:  rightColumn,
+			RightTableName:  rightRef.Name,
+			RightTableAlias: rightRef.Alias,
+			RightColumnName: leftColumn,
+		}, true
+	}
+
+	return nil, false
+}
+
+func normalizeJoinColumnName(name string, tableRef parser.TableRef) (string, bool) {
+	parts := strings.Split(name, ".")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", false
+	}
+	if parts[0] != tableRef.Name && (tableRef.Alias == "" || parts[0] != tableRef.Alias) {
+		return "", false
+	}
+	return parts[1], true
 }
 
 func firstTableMetadata(tables []map[string]*TableMetadata) map[string]*TableMetadata {

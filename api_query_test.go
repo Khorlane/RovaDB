@@ -158,26 +158,42 @@ func TestQueryAPIMultiTableFromStillUnsupported(t *testing.T) {
 	}
 }
 
-func TestQueryAPIExplicitJoinStillUnsupported(t *testing.T) {
+func TestQueryAPIExplicitJoinReturnsRows(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer db.Close()
 
-	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, dept_id INT)"); err != nil {
 		t.Fatalf("Exec(create users) error = %v", err)
 	}
 	if _, err := db.Exec("CREATE TABLE accounts (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create accounts) error = %v", err)
 	}
-
-	rows, err := db.Query("SELECT u.id FROM users u JOIN accounts a ON u.id = a.id")
-	if err != nil {
-		t.Fatalf("Query() error = %v, want nil top-level error", err)
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice', 10)",
+		"INSERT INTO users VALUES (2, 'bob', 20)",
+		"INSERT INTO accounts VALUES (10, 'eng')",
+		"INSERT INTO accounts VALUES (20, 'ops')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
 	}
-	if rows == nil || rows.err == nil {
-		t.Fatalf("rows = %#v, want deferred unsupported-query error", rows)
+
+	rows, err := db.Query("SELECT u.name, a.name FROM users u JOIN accounts a ON u.dept_id = a.id ORDER BY u.id")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || rows.err != nil {
+		t.Fatalf("rows = %#v, want successful joined rowset", rows)
+	}
+	if len(rows.data) != 2 || len(rows.data[0]) != 2 {
+		t.Fatalf("rows.data = %#v, want two joined rows", rows.data)
+	}
+	if rows.data[0][0] != "alice" || rows.data[0][1] != "eng" || rows.data[1][0] != "bob" || rows.data[1][1] != "ops" {
+		t.Fatalf("rows.data = %#v, want [[alice eng] [bob ops]]", rows.data)
 	}
 }
 

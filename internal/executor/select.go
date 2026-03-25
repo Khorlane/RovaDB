@@ -17,18 +17,24 @@ func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Valu
 	if sel.TableName == "" {
 		return nil, errUnsupportedStatement
 	}
-	if len(sel.From) > 1 || len(sel.Joins) > 0 {
+	if len(sel.From) > 1 {
 		return nil, errUnsupportedStatement
 	}
 
-	table, ok := tables[sel.TableName]
-	if !ok {
-		return nil, errTableDoesNotExist
-	}
 	switch plan.ScanType {
+	case planner.ScanTypeJoin:
+		return executeJoinSelect(plan, tables)
 	case planner.ScanTypeTable:
+		table, ok := tables[sel.TableName]
+		if !ok {
+			return nil, errTableDoesNotExist
+		}
 		return executeSelectRows(sel, table, table.Rows)
 	case planner.ScanTypeIndex:
+		table, ok := tables[sel.TableName]
+		if !ok {
+			return nil, errTableDoesNotExist
+		}
 		return executeIndexSelect(plan, table)
 	default:
 		return nil, errInvalidSelectPlan
@@ -121,6 +127,10 @@ func validateSelectPlan(plan *planner.SelectPlan) error {
 		}
 	case planner.ScanTypeIndex:
 		if plan.IndexScan == nil || plan.IndexScan.TableName != plan.Stmt.TableName || plan.IndexScan.ColumnName == "" {
+			return errInvalidSelectPlan
+		}
+	case planner.ScanTypeJoin:
+		if plan.JoinScan == nil || plan.JoinScan.LeftTableName == "" || plan.JoinScan.RightTableName == "" || plan.JoinScan.LeftColumnName == "" || plan.JoinScan.RightColumnName == "" {
 			return errInvalidSelectPlan
 		}
 	default:

@@ -8,4 +8,5 @@ type SelectPlan struct {
 	ScanType  ScanType
 	TableScan *TableScan
 	IndexScan *IndexScan
+	JoinScan  *JoinScan
 }
