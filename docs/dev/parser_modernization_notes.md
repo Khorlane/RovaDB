@@ -139,8 +139,13 @@ At the end of a working session, update this file with:
 - `SELECT` clause-tail parsing now detects `WHERE` and `ORDER BY` through the lexer instead of string prefix/search logic
 - the active `SELECT` path no longer depends on raw substring keyword scanning for clause dispatch
 - full repo verification still passes after the `ORDER BY` and clause-tail modernization
+- `Parser Modernization Slice 15` completed
+- literal `SELECT` expression parsing now uses lexer tokens instead of string splitting and manual parenthesis slicing
+- arithmetic `+` and `-` are now tokenized explicitly for the current literal-expression subset
+- the supported literal-expression surface is intentionally unchanged; this slice modernized the implementation without broadening SQL support
+- full repo verification still passes after the literal-expression modernization
 
 ## Next Recommended Step
 
 - next major parser step is deeper expression modernization
-- future `SELECT` growth should focus on replacing the legacy expression helpers with richer token-driven parsing
+- future `SELECT` and predicate growth should focus on value expressions, function calls, and comparison operands beyond the current literal-only helper path

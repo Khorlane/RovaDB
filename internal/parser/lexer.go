@@ -42,6 +42,8 @@ const (
 	tokenRParen
 	tokenComma
 	tokenStar
+	tokenPlus
+	tokenMinus
 	tokenEq
 	tokenNotEq
 	tokenLT
@@ -99,6 +101,9 @@ func (l *lexer) nextToken() (token, error) {
 	case '*':
 		l.pos++
 		return token{Kind: tokenStar, Lexeme: "*", Pos: start}, nil
+	case '+':
+		l.pos++
+		return token{Kind: tokenPlus, Lexeme: "+", Pos: start}, nil
 	case '?':
 		l.pos++
 		return token{Kind: tokenPlaceholder, Lexeme: "?", Pos: start}, nil
@@ -140,6 +145,10 @@ func (l *lexer) nextToken() (token, error) {
 	if ch == '-' || (ch >= '0' && ch <= '9') {
 		if tok, ok := l.scanNumber(start); ok {
 			return tok, nil
+		}
+		if ch == '-' {
+			l.pos++
+			return token{Kind: tokenMinus, Lexeme: "-", Pos: start}, nil
 		}
 	}
 	if isIdentifierStart(r) {

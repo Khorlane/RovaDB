@@ -14,12 +14,17 @@ func parseSelectFromTokens(input string) (*SelectExpr, bool) {
 }
 
 type selectLiteralTokenParser struct {
-	lexer lexer
+	tokens []token
+	pos    int
 }
 
 func parseSelectLiteralTokens(input string) (*SelectExpr, bool) {
+	tokens, err := lexSQL(input)
+	if err != nil {
+		return nil, false
+	}
 	p := selectLiteralTokenParser{
-		lexer: lexer{input: input},
+		tokens: tokens,
 	}
 	return p.parse()
 }
@@ -183,38 +188,153 @@ func (p *selectLiteralTokenParser) parse() (*SelectExpr, bool) {
 	if _, ok := p.expect(tokenKeywordSelect); !ok {
 		return nil, false
 	}
-
-	remainder := strings.TrimSpace(p.lexer.input[p.lexer.pos:])
-	if remainder == "" {
+	if p.current().Kind == tokenEOF {
 		return nil, false
 	}
-
-	if expr, ok := parseParenExpr(remainder); ok {
-		return &SelectExpr{Expr: expr}, true
+	expr, ok := p.parseExprTokens(true)
+	if !ok || p.current().Kind != tokenEOF {
+		return nil, false
 	}
-
-	tokens := strings.Fields(remainder)
-	if len(tokens) == 1 {
-		expr, ok := parseExpr(tokens[0])
-		if !ok {
-			return nil, false
-		}
-		return &SelectExpr{Expr: expr}, true
-	}
-	if len(tokens) == 3 {
-		return parseSpacedIntBinaryExpr(tokens[0], tokens[1], tokens[2])
-	}
-
-	return nil, false
+	return &SelectExpr{Expr: expr}, true
 }
 
 func (p *selectLiteralTokenParser) expect(kind tokenKind) (token, bool) {
-	tok, err := p.lexer.nextToken()
-	if err != nil {
-		return token{}, false
-	}
+	tok := p.current()
 	if tok.Kind != kind {
 		return token{}, false
 	}
+	p.pos++
 	return tok, true
+}
+
+func (p *selectLiteralTokenParser) current() token {
+	if p.pos >= len(p.tokens) {
+		return token{Kind: tokenEOF}
+	}
+	return p.tokens[p.pos]
+}
+
+func (p *selectLiteralTokenParser) parseExprTokens(allowParen bool) (*Expr, bool) {
+	if allowParen && p.current().Kind == tokenLParen {
+		p.pos++
+		expr, ok := p.parseExprTokens(false)
+		if !ok {
+			return nil, false
+		}
+		if _, ok := p.expect(tokenRParen); !ok {
+			return nil, false
+		}
+		return &Expr{Kind: ExprKindParen, Inner: expr}, true
+	}
+
+	left, ok := parseExprToken(p.current())
+	if !ok {
+		return nil, false
+	}
+	p.pos++
+
+	switch p.current().Kind {
+	case tokenEOF, tokenRParen:
+		return left, true
+	case tokenPlus, tokenMinus:
+		opTok := p.current()
+		p.pos++
+		leftInt, ok := exprAsIntLiteral(left)
+		if !ok {
+			return nil, false
+		}
+		right, ok := parseIntLiteralToken(p.current())
+		if !ok {
+			return nil, false
+		}
+		p.pos++
+
+		op := BinaryOpInvalid
+		switch opTok.Kind {
+		case tokenPlus:
+			op = BinaryOpAdd
+		case tokenMinus:
+			op = BinaryOpSub
+		default:
+			return nil, false
+		}
+
+		return &Expr{
+			Kind:  ExprKindInt64Binary,
+			Left:  leftInt,
+			Right: right,
+			Op:    op,
+		}, true
+	case tokenNumber:
+		leftInt, ok := exprAsIntLiteral(left)
+		if !ok || !strings.HasPrefix(p.current().Lexeme, "-") {
+			return nil, false
+		}
+		right, ok := parseUnsignedIntLiteral(p.current().Lexeme[1:])
+		if !ok {
+			return nil, false
+		}
+		p.pos++
+		return &Expr{
+			Kind:  ExprKindInt64Binary,
+			Left:  leftInt,
+			Right: right,
+			Op:    BinaryOpSub,
+		}, true
+	default:
+		return nil, false
+	}
+}
+
+func parseExprToken(tok token) (*Expr, bool) {
+	switch tok.Kind {
+	case tokenNumber:
+		if i64, ok := parseIntLiteral(tok.Lexeme); ok {
+			return i64, true
+		}
+		if value, ok := parseRealLiteral(tok.Lexeme); ok {
+			return &Expr{Kind: ExprKindRealLiteral, F64: value}, true
+		}
+		return nil, false
+	case tokenString:
+		if !isSingleQuotedStringLiteral(tok.Lexeme) {
+			return nil, false
+		}
+		if strings.Contains(tok.Lexeme[1:len(tok.Lexeme)-1], " ") {
+			return nil, false
+		}
+		return &Expr{Kind: ExprKindStringLiteral, Str: tok.Lexeme[1 : len(tok.Lexeme)-1]}, true
+	case tokenIdentifier:
+		switch {
+		case strings.EqualFold(tok.Lexeme, "TRUE"):
+			return &Expr{Kind: ExprKindBoolLiteral, Bool: true}, true
+		case strings.EqualFold(tok.Lexeme, "FALSE"):
+			return &Expr{Kind: ExprKindBoolLiteral, Bool: false}, true
+		default:
+			return nil, false
+		}
+	default:
+		return nil, false
+	}
+}
+
+func exprAsIntLiteral(expr *Expr) (*Expr, bool) {
+	if expr == nil || expr.Kind != ExprKindInt64Literal {
+		return nil, false
+	}
+	return expr, true
+}
+
+func parseIntLiteralToken(tok token) (*Expr, bool) {
+	if tok.Kind != tokenNumber {
+		return nil, false
+	}
+	return parseIntLiteral(tok.Lexeme)
+}
+
+func parseUnsignedIntLiteral(token string) (*Expr, bool) {
+	if strings.HasPrefix(token, "+") || strings.HasPrefix(token, "-") {
+		return nil, false
+	}
+	return parseIntLiteral(token)
 }
