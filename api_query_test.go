@@ -189,3 +189,40 @@ func TestQueryAPIPlaceholderArgsBoolWhereClause(t *testing.T) {
 		t.Fatalf("rows.data = %#v, want [[\"alice\"]]", rows.data)
 	}
 }
+
+func TestQueryAPILiteralAndBoundQueriesMatch(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	literalRows, err := db.Query("SELECT name FROM users WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Query(literal) error = %v", err)
+	}
+	boundRows, err := db.Query("SELECT name FROM users WHERE id = ?", 1)
+	if err != nil {
+		t.Fatalf("Query(bound) error = %v", err)
+	}
+
+	if literalRows == nil || boundRows == nil {
+		t.Fatalf("literalRows = %#v, boundRows = %#v, want values", literalRows, boundRows)
+	}
+	if len(literalRows.data) != len(boundRows.data) {
+		t.Fatalf("len(literalRows.data) = %d, len(boundRows.data) = %d, want equal", len(literalRows.data), len(boundRows.data))
+	}
+	if len(literalRows.data) != 1 || len(literalRows.data[0]) != 1 || len(boundRows.data[0]) != 1 {
+		t.Fatalf("literalRows.data = %#v, boundRows.data = %#v, want one matching row", literalRows.data, boundRows.data)
+	}
+	if literalRows.data[0][0] != boundRows.data[0][0] {
+		t.Fatalf("literalRows.data = %#v, boundRows.data = %#v, want equal", literalRows.data, boundRows.data)
+	}
+}

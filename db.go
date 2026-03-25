@@ -143,7 +143,6 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 	if err := db.validateTxnState(); err != nil {
 		return Result{}, err
 	}
-	_ = args
 
 	stmt, err := parser.Parse(query)
 	if err != nil {
@@ -308,7 +307,6 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 	if err := db.validateTxnState(); err != nil {
 		return &Rows{err: err, idx: -1}, nil
 	}
-	_ = args
 
 	stmt, err := parser.Parse(query)
 	if err != nil {
@@ -321,7 +319,7 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 	if !ok {
 		return nil, ErrQueryRequiresSelect
 	}
-	if err := parser.BindPlaceholders(sel, args); err != nil {
+	if err := parser.BindPlaceholders(stmt, args); err != nil {
 		return &Rows{err: err, idx: -1}, nil
 	}
 
