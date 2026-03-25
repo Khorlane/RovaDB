@@ -85,6 +85,17 @@ func TestLexSQLDeepWhitespaceAndKeywordCoverage(t *testing.T) {
 				tokenEOF,
 			},
 		},
+		{
+			name:  "insert keywords",
+			input: "InSeRt INTO users VALUES",
+			wantKinds: []tokenKind{
+				tokenKeywordInsert,
+				tokenKeywordInto,
+				tokenIdentifier,
+				tokenKeywordValues,
+				tokenEOF,
+			},
+		},
 	}
 
 	for _, tc := range tests {

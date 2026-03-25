@@ -105,8 +105,13 @@ At the end of a working session, update this file with:
 - `Parse()` now routes `UPDATE` through the token-driven parser path
 - the active `UPDATE` path still intentionally reuses the existing assignment and `WHERE` parsers
 - full repo verification still passes after the integration
+- `Parser Modernization Slice 10` completed in isolation
+- extended the lexer token set to support `INSERT INTO ... VALUES ...`
+- added an isolated token-driven `INSERT` parser
+- the modern `INSERT` parser intentionally reuses the existing column-list and literal-value helpers for now
+- full repo verification still passes after the isolated `INSERT` slice
 
 ## Next Recommended Step
 
-- choose between `INSERT INTO` and `SELECT` as the next parser modernization target
-- keep reusing lower-level legacy helpers where that keeps slices small and low-risk
+- wire the token-driven `INSERT` parser into `Parse()`
+- keep `SELECT` for later, after the simpler statement families are fully integrated

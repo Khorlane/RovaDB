@@ -18,9 +18,12 @@ const (
 	tokenKeywordCreate
 	tokenKeywordDelete
 	tokenKeywordFrom
+	tokenKeywordInsert
+	tokenKeywordInto
 	tokenKeywordTable
 	tokenKeywordSet
 	tokenKeywordUpdate
+	tokenKeywordValues
 	tokenKeywordWhere
 	tokenKeywordInt
 	tokenKeywordText
@@ -124,12 +127,18 @@ func classifyWord(word string) tokenKind {
 		return tokenKeywordDelete
 	case "FROM":
 		return tokenKeywordFrom
+	case "INSERT":
+		return tokenKeywordInsert
+	case "INTO":
+		return tokenKeywordInto
 	case "SET":
 		return tokenKeywordSet
 	case "TABLE":
 		return tokenKeywordTable
 	case "UPDATE":
 		return tokenKeywordUpdate
+	case "VALUES":
+		return tokenKeywordValues
 	case "WHERE":
 		return tokenKeywordWhere
 	case ColumnTypeInt:
