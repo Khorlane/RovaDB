@@ -83,8 +83,12 @@ At the end of a working session, update this file with:
 - extended the lexer token set to support `ALTER TABLE ... ADD COLUMN`
 - added an isolated token-driven `ALTER TABLE` parser that produces the current `AlterTableAddColumnStmt` AST
 - full repo verification still passes after the isolated `ALTER TABLE` slice
+- `Parser Modernization Slice 5` completed
+- `Parse()` now routes `ALTER TABLE ... ADD COLUMN` through the token-driven parser path
+- legacy string-splitting `ALTER TABLE` parsing has been replaced in the active path
+- full repo verification still passes after the integration
 
 ## Next Recommended Step
 
-- wire the token-driven `ALTER TABLE` parser into `Parse()`
-- then continue to the next simple statement family on the lexer foundation
+- continue to the next simple statement family on the lexer foundation
+- likely candidates: `DELETE FROM` or `UPDATE` before moving into `INSERT` or `SELECT`

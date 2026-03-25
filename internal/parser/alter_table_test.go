@@ -15,6 +15,24 @@ func TestParseAlterTableAddColumn(t *testing.T) {
 	}
 }
 
+func TestParseAlterTableViaParse(t *testing.T) {
+	stmt, err := Parse("ALTER TABLE users ADD COLUMN age INT")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	got, ok := stmt.(*AlterTableAddColumnStmt)
+	if !ok {
+		t.Fatalf("Parse() stmt type = %T, want *AlterTableAddColumnStmt", stmt)
+	}
+	if got.TableName != "users" {
+		t.Fatalf("Parse().TableName = %q, want %q", got.TableName, "users")
+	}
+	if got.Column != (ColumnDef{Name: "age", Type: ColumnTypeInt}) {
+		t.Fatalf("Parse().Column = %#v, want age INT", got.Column)
+	}
+}
+
 func TestParseAlterTableTokensAddColumn(t *testing.T) {
 	got, err := parseAlterTableTokens("ALTER TABLE users ADD COLUMN age INT")
 	if err != nil {
