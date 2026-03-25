@@ -1,0 +1,337 @@
+# RovaDB SQL Language Spec
+
+This document defines the SQL subset RovaDB supports and the syntax and behavior boundaries for that subset.
+
+It is intended to guide parser, planner, and executor work by making the supported language explicit before implementation.
+
+## Purpose
+
+- define exactly what SQL RovaDB will support
+- define what SQL RovaDB will reject
+- keep parser growth deliberate and testable
+- provide a durable reference for future implementation work
+
+## Scope
+
+This document is for the supported SQL language surface of RovaDB. It is not an implementation design for the parser internals.
+
+## Sections
+
+### 1. Statement Inventory
+
+- `CREATE TABLE`
+- `CREATE INDEX`
+- `DROP TABLE`
+- `DROP INDEX`
+- `ALTER TABLE ... ADD COLUMN`
+- `INSERT INTO ... VALUES`
+- `SELECT`
+- `UPDATE`
+- `DELETE`
+- `COMMIT`
+- `ROLLBACK`
+
+### 2. Statement Syntax
+
+**CREATE TABLE**
+```
+>>-CREATE TABLE--table-name--(column-definition--+-----------------------+--)--><
+                                                 '-,--column-definition--'
+column-definition:
+>>-column-name--type-name--><
+```
+**CREATE INDEX**
+```
+>>-CREATE--+--------+--INDEX--index-name--ON--table-name--(--index-column--+------------------+--)--><
+           '-UNIQUE-'                                                      '-,--index-column--'
+index-column:
+>>-column-name--+----------+--><
+                '-ASC|DESC-'
+```
+**DROP TABLE**
+```
+>>-DROP TABLE--table-name--><
+```
+**DROP INDEX**
+```
+>>-DROP INDEX--index-name--><
+```
+**ALTER TABLE ... ADD COLUMN**
+```
+>>-ALTER TABLE--table-name--ADD COLUMN--column-definition--><
+```
+**INSERT INTO ... VALUES**
+```
+>>-INSERT INTO--table-name--+------------------+--VALUES--(--value-expr--+---------------+--)--><
+                            '-(--column-list-)-'                         '-,--value-expr-'
+column-list:
+>>-column-name----------------------------------------------><
+  |                        .-,-----------.                  |
+  '-column-name--+-------+-'             '------------------'
+                 '-,--column-name-'
+```
+If no column-list is provided, value-expr items map positionally to the table's column definitions in schema order. Value count and type/constraint compatibility must match the target columns.
+
+**UPDATE**
+```
+>>-UPDATE--table-name--SET--assignment--+---------------+--+-------------+--><
+                                        '-,--assignment-'  '-WHERE--expr-'
+assignment:
+>>-column-name--=--value-expr--><
+```
+**DELETE**
+```
+>>-DELETE FROM--table-name--+-------------+--><
+                            '-WHERE--expr-'
+```
+**COMMIT**
+```
+>>-COMMIT--><
+```
+**ROLLBACK**
+```
+>>-ROLLBACK--><
+```
+**SELECT**
+```
+>>-SELECT--select-list--FROM--from-clause--+-------------------+--+----------------------+--><
+                                           '-WHERE--expr-------'  '-ORDER BY--order-list-'
+select-list:
+>>-*------------------------------------------------------><
+  |                          .-,-------------.            |
+  '-select-item--+---------+-'               '------------'
+                 '-,--select-item-'
+from-clause:
+>>-table-ref----------------------------------------------><
+  |                       .-,----------.                  |
+  '-table-ref--+--------+-'            '------------------'
+               '-,--table-ref-'
+order-list:
+>>-order-item----------------------------------------------><
+  |                       .-,-----------.                 |
+  '-order-item--+-------+-'             '-----------------'
+                '-,--order-item-'
+expr:
+>>-boolean-term--+---------------------------+--><
+                  '-boolean-operator--boolean-term-'
+boolean-term:
+>>-comparison-expr----------------------------><
+  |                     .-------------------.  |
+  '-(--expr--)+--------+                   +--)'
+             '-NOT--'
+comparison-expr:
+>>-value-expr--comparison-operator--value-expr--><
+boolean-operator:
+>>-AND--><
+  '-OR-'
+```
+### 3. Expression Inventory
+
+Expressions are shared across projection, predicates, assignments, and value lists, but each context may apply additional restrictions.
+
+**Core Expression Forms**
+
+- literal value
+- placeholder value
+- column reference
+- qualified column reference
+- parenthesized expression
+- scalar function call
+- aggregate function call
+- arithmetic expression
+- comparison expression
+- boolean expression
+
+Aggregate function calls are context-restricted and are not valid in every expression position.
+
+**Literal Values**
+
+- integer literal
+- string literal
+- boolean literal
+- real literal
+- `NULL`
+
+**Placeholder Values**
+
+- `?`
+- placeholders bind positionally from left to right
+- placeholders are allowed only in value/expression positions
+
+**Column References**
+
+- unqualified column reference
+- qualified column reference using `table-name.column-name`
+- qualified column reference using `alias-name.column-name`
+
+**Arithmetic Expressions**
+
+- arithmetic expressions produce a value
+- arithmetic expressions may appear in projection, predicates, assignments, and value lists where type-compatible
+- exact supported operators will be defined explicitly
+
+**Comparison Expressions**
+
+- comparison expressions compare two value expressions
+- comparison operators will be defined explicitly
+- comparison expressions produce a boolean result
+
+**Boolean Expressions**
+
+- boolean expressions are built from comparison expressions and other boolean expressions
+- `NOT`, `AND`, and `OR` are boolean operators
+- precedence is `NOT`, then `AND`, then `OR`
+
+**Function Calls**
+
+- scalar function calls produce a value
+- aggregate function calls produce an aggregate result
+- supported function names are defined in `Function Inventory` and `Aggregate Inventory`
+
+**Projection Context**
+
+- `SELECT` items may be:
+  - `*`
+  - column references
+  - expressions
+  - scalar function calls
+  - aggregate function calls
+
+**Predicate Context**
+
+- `WHERE` uses boolean expressions
+- boolean expressions may contain:
+  - comparison expressions
+  - parenthesized boolean expressions
+  - scalar function calls inside value expressions
+- aggregate function calls are not allowed in `WHERE`
+
+**Assignment Context**
+
+- `UPDATE ... SET column = value-expr`
+- assignment expressions must produce a value compatible with the target column
+
+**Value List Context**
+
+- `INSERT ... VALUES (...)`
+- each item in a `VALUES` list must be a value expression
+- aggregate function calls are not allowed in `VALUES` lists
+
+### 4. Function Inventory
+
+Supported scalar functions:
+
+- `LOWER(text) -> text`
+- `UPPER(text) -> text`
+- `LENGTH(text) -> int`
+- `ABS(int|real) -> same numeric domain as input`
+
+Supported aggregate functions:
+
+- `MIN(text|int|real) -> same domain as input`
+- `MAX(text|int|real) -> same domain as input`
+- `AVG(int|real) -> real`
+- `SUM(int|real) -> real`
+- `COUNT(*) -> int`
+- `COUNT(expr) -> int`
+
+Function calls may appear only in expression contexts that allow them.
+
+### 5. Join Inventory
+
+Supported join shape:
+
+- inner joins
+- equality join predicates
+- join predicates compare value expressions, but current intended support is table/alias-qualified column reference to table/alias-qualified column reference
+- table aliases are supported
+- the initial supported query scope is up to two joined tables
+
+Design intent:
+
+- the language shape should not box future growth into two-table-only syntax
+- execution strategy is not part of the language spec
+
+Rejected join forms for now:
+
+- outer joins
+- non-equality join predicates
+- natural joins
+- `USING (...)`
+- subquery joins
+- joins over more than two tables
+
+### 6. Aggregate Inventory
+
+Supported aggregate functions:
+
+- `MIN`
+- `MAX`
+- `AVG`
+- `SUM`
+- `COUNT`
+
+Aggregate usage rules:
+
+- aggregate functions are allowed in `SELECT` projection
+- aggregate functions are not allowed in `WHERE`
+- aggregate functions are not allowed in `INSERT ... VALUES (...)`
+- aggregate functions are not allowed in `UPDATE ... SET ...` assignments
+
+Initial aggregate query scope:
+
+- aggregate support is intended for single-result aggregate queries
+- `COUNT(*)` is supported explicitly
+- `COUNT(expr)` is supported explicitly
+- mixed aggregate and non-aggregate projection rules should be defined explicitly before implementation expands
+
+### 7. Accepted Examples
+
+Representative accepted examples:
+
+- `CREATE TABLE users (id INT, name TEXT, active BOOL, score REAL)`
+- `CREATE UNIQUE INDEX idx_users_name ON users (name ASC)`
+- `DROP TABLE users`
+- `DROP INDEX idx_users_name`
+- `ALTER TABLE users ADD COLUMN created_at TEXT`
+- `INSERT INTO users VALUES (1, 'Alice', TRUE, 3.14)`
+- `INSERT INTO users (id, name) VALUES (?, ?)`
+- `UPDATE users SET name = 'Bob' WHERE id = 1`
+- `UPDATE users SET score = ABS(score) WHERE id = ?`
+- `DELETE FROM users WHERE id = ?`
+- `COMMIT`
+- `ROLLBACK`
+- `SELECT * FROM users`
+- `SELECT id, name FROM users WHERE active = TRUE ORDER BY name ASC`
+- `SELECT LOWER(name), LENGTH(name) FROM users WHERE id = 1`
+- `SELECT id FROM users WHERE id = 1 OR id = 2 AND active = TRUE`
+- `SELECT COUNT(*) FROM users WHERE active = TRUE`
+- `SELECT AVG(score), SUM(score), MIN(score), MAX(score) FROM users`
+- `SELECT u.name, d.name FROM users u JOIN departments d ON u.department_id = d.id`
+
+### 8. Rejected Examples
+
+Representative rejected examples:
+
+- `CREATE TABLE users ()`
+- `CREATE TABLE users (id INT, id TEXT)`
+- `CREATE INDEX idx_users_name ON users`
+- `DROP TABLE`
+- `DROP INDEX`
+- `ALTER TABLE users DROP COLUMN created_at`
+- `INSERT INTO users VALUES (1)`
+- `INSERT INTO users VALUES (COUNT(*))`
+- `UPDATE users SET score = AVG(score)`
+- `DELETE FROM users USING archive_users`
+- `SELECT id FROM users GROUP BY id`
+- `SELECT id FROM users HAVING id > 1`
+- `SELECT * FROM users u LEFT JOIN departments d ON u.department_id = d.id`
+- `SELECT * FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.id`
+- `SELECT * FROM users WHERE SUM(score) > 10`
+- `SELECT * FROM users WHERE id IN (SELECT id FROM archived_users)`
+- `SELECT * FROM users NATURAL JOIN departments`
+- `SELECT * FROM users JOIN departments USING (department_id)`
+
+### 9. Notes
+
+Boolean expression precedence is `NOT`, then `AND`, then `OR`. Parenthesized boolean grouping is supported.
