@@ -101,8 +101,12 @@ At the end of a working session, update this file with:
 - added an isolated token-driven `UPDATE` parser
 - the modern `UPDATE` parser intentionally reuses the existing assignment and `WHERE` parsers for now
 - full repo verification still passes after the isolated `UPDATE` slice
+- `Parser Modernization Slice 9` completed
+- `Parse()` now routes `UPDATE` through the token-driven parser path
+- the active `UPDATE` path still intentionally reuses the existing assignment and `WHERE` parsers
+- full repo verification still passes after the integration
 
 ## Next Recommended Step
 
-- wire the token-driven `UPDATE` parser into `Parse()`
-- keep reusing the existing assignment and `WHERE` parsers until expression modernization is ready
+- choose between `INSERT INTO` and `SELECT` as the next parser modernization target
+- keep reusing lower-level legacy helpers where that keeps slices small and low-risk

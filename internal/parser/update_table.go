@@ -1,8 +1,6 @@
 package parser
 
-import (
-	"strings"
-)
+import "strings"
 
 // UpdateAssignment is one SET target/value pair.
 type UpdateAssignment struct {
@@ -18,48 +16,7 @@ type UpdateStmt struct {
 }
 
 func parseUpdate(input string) (*UpdateStmt, error) {
-	const prefix = "UPDATE"
-
-	trimmed := strings.TrimSpace(input)
-	if !strings.HasPrefix(strings.ToUpper(trimmed), prefix+" ") {
-		return nil, errUnsupportedStatement
-	}
-
-	rest := strings.TrimSpace(trimmed[len(prefix):])
-	split := strings.Index(strings.ToUpper(rest), " SET ")
-	if split <= 0 {
-		return nil, newParseError("unsupported query form")
-	}
-
-	tableName := strings.TrimSpace(rest[:split])
-	setPart := strings.TrimSpace(rest[split+len(" SET "):])
-	if !isIdentifier(tableName) {
-		return nil, newParseError("unsupported query form")
-	}
-
-	var where *WhereClause
-	upperSet := strings.ToUpper(setPart)
-	assignmentsPart := setPart
-	if whereIndex := strings.Index(upperSet, " WHERE "); whereIndex >= 0 {
-		assignmentsPart = strings.TrimSpace(setPart[:whereIndex])
-		whereClause := strings.TrimSpace(setPart[whereIndex+len(" WHERE "):])
-		parsedWhere, ok := parseWhereClause(whereClause)
-		if !ok {
-			return nil, newParseError("invalid where clause")
-		}
-		where = parsedWhere
-	}
-
-	assignments, ok := parseAssignments(assignmentsPart)
-	if !ok {
-		return nil, newParseError("unsupported query form")
-	}
-
-	return &UpdateStmt{
-		TableName:   tableName,
-		Assignments: assignments,
-		Where:       where,
-	}, nil
+	return parseUpdateTokens(input)
 }
 
 func parseAssignments(input string) ([]UpdateAssignment, bool) {

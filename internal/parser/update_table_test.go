@@ -108,6 +108,32 @@ func TestParseUpdate(t *testing.T) {
 	}
 }
 
+func TestParseUpdateViaParse(t *testing.T) {
+	stmt, err := Parse("UPDATE users SET name = 'bob' WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	got, ok := stmt.(*UpdateStmt)
+	if !ok {
+		t.Fatalf("Parse() stmt type = %T, want *UpdateStmt", stmt)
+	}
+	if got.TableName != "users" {
+		t.Fatalf("Parse().TableName = %q, want %q", got.TableName, "users")
+	}
+	wantAssignments := []UpdateAssignment{{Column: "name", Value: StringValue("bob")}}
+	if len(got.Assignments) != len(wantAssignments) || got.Assignments[0] != wantAssignments[0] {
+		t.Fatalf("Parse().Assignments = %#v, want %#v", got.Assignments, wantAssignments)
+	}
+	wantWhere := &WhereClause{Items: []ConditionChainItem{{Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(1)}}}}
+	if got.Where == nil {
+		t.Fatal("Parse().Where = nil, want non-nil")
+	}
+	if len(got.Where.Items) != len(wantWhere.Items) || got.Where.Items[0] != wantWhere.Items[0] {
+		t.Fatalf("Parse().Where = %#v, want %#v", got.Where, wantWhere)
+	}
+}
+
 func TestParseUpdateTokens(t *testing.T) {
 	tests := []struct {
 		name        string
