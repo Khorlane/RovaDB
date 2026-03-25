@@ -695,7 +695,7 @@ func TestQuerySelectWhereOrNoMatches(t *testing.T) {
 	}
 }
 
-func TestQuerySelectWhereLeftToRightWithoutPrecedence(t *testing.T) {
+func TestQuerySelectWhereUsesBooleanPrecedence(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -722,7 +722,36 @@ func TestQuerySelectWhereLeftToRightWithoutPrecedence(t *testing.T) {
 	}
 	defer rows.Close()
 
-	assertRowsStringSequence(t, rows, "bob", "bob")
+	assertRowsStringSequence(t, rows, "alice", "bob", "bob")
+}
+
+func TestQuerySelectWhereSupportsNotAndGrouping(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'cara')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT id FROM users WHERE NOT (id = 1 OR name = 'cara')")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsIntSequence(t, rows, 2)
 }
 
 func TestQuerySelectCountStarEmptyTable(t *testing.T) {

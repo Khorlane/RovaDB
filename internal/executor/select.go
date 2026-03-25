@@ -58,7 +58,7 @@ func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]p
 	if err != nil {
 		return nil, err
 	}
-	if err := validateWhereColumns(sel.Where, table); err != nil {
+	if err := validatePredicateOrWhereColumns(sel.Predicate, sel.Where, table); err != nil {
 		return nil, err
 	}
 	if sel.IsCountStar {
@@ -67,7 +67,7 @@ func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]p
 		}
 		count := int64(0)
 		for _, row := range candidateRows {
-			match, err := evalWhere(row, table, sel.Where)
+			match, err := evalPredicateOrWhere(row, table, sel.Predicate, sel.Where)
 			if err != nil {
 				return nil, err
 			}
@@ -79,7 +79,7 @@ func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]p
 	}
 	baseRows := make([][]parser.Value, 0, len(candidateRows))
 	for _, row := range candidateRows {
-		match, err := evalWhere(row, table, sel.Where)
+		match, err := evalPredicateOrWhere(row, table, sel.Predicate, sel.Where)
 		if err != nil {
 			return nil, err
 		}
@@ -215,6 +215,53 @@ func evalWhere(row []parser.Value, table *Table, where *parser.WhereClause) (boo
 	return current, nil
 }
 
+func evalPredicateOrWhere(row []parser.Value, table *Table, predicate *parser.PredicateExpr, where *parser.WhereClause) (bool, error) {
+	if predicate != nil {
+		return evalPredicate(row, table, predicate)
+	}
+	return evalWhere(row, table, where)
+}
+
+func evalPredicate(row []parser.Value, table *Table, predicate *parser.PredicateExpr) (bool, error) {
+	if predicate == nil {
+		return true, nil
+	}
+
+	switch predicate.Kind {
+	case parser.PredicateKindComparison:
+		if predicate.Comparison == nil {
+			return false, errUnsupportedStatement
+		}
+		return evalWhereCondition(row, table, *predicate.Comparison)
+	case parser.PredicateKindAnd:
+		left, err := evalPredicate(row, table, predicate.Left)
+		if err != nil {
+			return false, err
+		}
+		if !left {
+			return false, nil
+		}
+		return evalPredicate(row, table, predicate.Right)
+	case parser.PredicateKindOr:
+		left, err := evalPredicate(row, table, predicate.Left)
+		if err != nil {
+			return false, err
+		}
+		if left {
+			return true, nil
+		}
+		return evalPredicate(row, table, predicate.Right)
+	case parser.PredicateKindNot:
+		inner, err := evalPredicate(row, table, predicate.Inner)
+		if err != nil {
+			return false, err
+		}
+		return !inner, nil
+	default:
+		return false, errUnsupportedStatement
+	}
+}
+
 func evalWhereCondition(row []parser.Value, table *Table, cond parser.Condition) (bool, error) {
 	idx, err := resolveColumnIndex(cond.Left, table)
 	if err != nil {
@@ -236,6 +283,37 @@ func validateWhereColumns(where *parser.WhereClause, table *Table) error {
 	}
 
 	return nil
+}
+
+func validatePredicateOrWhereColumns(predicate *parser.PredicateExpr, where *parser.WhereClause, table *Table) error {
+	if predicate != nil {
+		return validatePredicateColumns(predicate, table)
+	}
+	return validateWhereColumns(where, table)
+}
+
+func validatePredicateColumns(predicate *parser.PredicateExpr, table *Table) error {
+	if predicate == nil {
+		return nil
+	}
+
+	switch predicate.Kind {
+	case parser.PredicateKindComparison:
+		if predicate.Comparison == nil {
+			return errUnsupportedStatement
+		}
+		_, err := resolveColumnIndex(predicate.Comparison.Left, table)
+		return err
+	case parser.PredicateKindAnd, parser.PredicateKindOr:
+		if err := validatePredicateColumns(predicate.Left, table); err != nil {
+			return err
+		}
+		return validatePredicateColumns(predicate.Right, table)
+	case parser.PredicateKindNot:
+		return validatePredicateColumns(predicate.Inner, table)
+	default:
+		return errUnsupportedStatement
+	}
 }
 
 func sortRows(rows [][]parser.Value, table *Table, orderBy *parser.OrderByClause) error {

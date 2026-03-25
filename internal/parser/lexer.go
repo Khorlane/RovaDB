@@ -14,10 +14,13 @@ const (
 	tokenIdentifier
 	tokenKeywordAlter
 	tokenKeywordAdd
+	tokenKeywordAnd
 	tokenKeywordColumn
 	tokenKeywordCreate
 	tokenKeywordDelete
+	tokenKeywordNot
 	tokenKeywordFrom
+	tokenKeywordOr
 	tokenKeywordInsert
 	tokenKeywordInto
 	tokenKeywordBy
@@ -32,10 +35,19 @@ const (
 	tokenKeywordText
 	tokenKeywordBool
 	tokenKeywordReal
+	tokenNumber
+	tokenString
+	tokenPlaceholder
 	tokenLParen
 	tokenRParen
 	tokenComma
 	tokenStar
+	tokenEq
+	tokenNotEq
+	tokenLT
+	tokenLTE
+	tokenGT
+	tokenGTE
 )
 
 type token struct {
@@ -87,9 +99,49 @@ func (l *lexer) nextToken() (token, error) {
 	case '*':
 		l.pos++
 		return token{Kind: tokenStar, Lexeme: "*", Pos: start}, nil
+	case '?':
+		l.pos++
+		return token{Kind: tokenPlaceholder, Lexeme: "?", Pos: start}, nil
+	case '=':
+		l.pos++
+		return token{Kind: tokenEq, Lexeme: "=", Pos: start}, nil
+	case '!':
+		if l.pos+1 < len(l.input) && l.input[l.pos+1] == '=' {
+			l.pos += 2
+			return token{Kind: tokenNotEq, Lexeme: "!=", Pos: start}, nil
+		}
+	case '<':
+		if l.pos+1 < len(l.input) && l.input[l.pos+1] == '=' {
+			l.pos += 2
+			return token{Kind: tokenLTE, Lexeme: "<=", Pos: start}, nil
+		}
+		l.pos++
+		return token{Kind: tokenLT, Lexeme: "<", Pos: start}, nil
+	case '>':
+		if l.pos+1 < len(l.input) && l.input[l.pos+1] == '=' {
+			l.pos += 2
+			return token{Kind: tokenGTE, Lexeme: ">=", Pos: start}, nil
+		}
+		l.pos++
+		return token{Kind: tokenGT, Lexeme: ">", Pos: start}, nil
+	case '\'':
+		l.pos++
+		for l.pos < len(l.input) && l.input[l.pos] != '\'' {
+			l.pos++
+		}
+		if l.pos >= len(l.input) {
+			return token{}, newParseError(fmt.Sprintf("unterminated string literal at position %d", start))
+		}
+		l.pos++
+		return token{Kind: tokenString, Lexeme: l.input[start:l.pos], Pos: start}, nil
 	}
 
 	r := rune(ch)
+	if ch == '-' || (ch >= '0' && ch <= '9') {
+		if tok, ok := l.scanNumber(start); ok {
+			return tok, nil
+		}
+	}
 	if isIdentifierStart(r) {
 		l.pos++
 		for l.pos < len(l.input) {
@@ -126,12 +178,16 @@ func classifyWord(word string) tokenKind {
 		return tokenKeywordAlter
 	case "ADD":
 		return tokenKeywordAdd
+	case "AND":
+		return tokenKeywordAnd
 	case "COLUMN":
 		return tokenKeywordColumn
 	case "CREATE":
 		return tokenKeywordCreate
 	case "DELETE":
 		return tokenKeywordDelete
+	case "NOT":
+		return tokenKeywordNot
 	case "BY":
 		return tokenKeywordBy
 	case "FROM":
@@ -142,6 +198,8 @@ func classifyWord(word string) tokenKind {
 		return tokenKeywordInto
 	case "ORDER":
 		return tokenKeywordOrder
+	case "OR":
+		return tokenKeywordOr
 	case "SELECT":
 		return tokenKeywordSelect
 	case "SET":
@@ -165,6 +223,45 @@ func classifyWord(word string) tokenKind {
 	default:
 		return tokenIdentifier
 	}
+}
+
+func (l *lexer) scanNumber(start int) (token, bool) {
+	pos := l.pos
+	if l.input[pos] == '-' {
+		pos++
+		if pos >= len(l.input) || l.input[pos] < '0' || l.input[pos] > '9' {
+			return token{}, false
+		}
+	}
+
+	hasDigit := false
+	dotCount := 0
+	for pos < len(l.input) {
+		ch := l.input[pos]
+		switch {
+		case ch >= '0' && ch <= '9':
+			hasDigit = true
+			pos++
+		case ch == '.':
+			dotCount++
+			if dotCount > 1 {
+				return token{}, false
+			}
+			pos++
+		default:
+			l.pos = pos
+			if !hasDigit {
+				return token{}, false
+			}
+			return token{Kind: tokenNumber, Lexeme: l.input[start:pos], Pos: start}, true
+		}
+	}
+
+	l.pos = pos
+	if !hasDigit {
+		return token{}, false
+	}
+	return token{Kind: tokenNumber, Lexeme: l.input[start:pos], Pos: start}, true
 }
 
 func isIdentifierStart(r rune) bool {

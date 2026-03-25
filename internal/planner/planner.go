@@ -42,7 +42,7 @@ func chooseIndexScan(stmt *parser.SelectExpr, tables map[string]*TableMetadata) 
 		return nil
 	}
 
-	columnName, value, ok := simpleEqualityPredicate(stmt.Where)
+	columnName, value, ok := simpleEqualityPredicate(stmt)
 	if !ok {
 		return nil
 	}
@@ -59,7 +59,27 @@ func chooseIndexScan(stmt *parser.SelectExpr, tables map[string]*TableMetadata) 
 	}
 }
 
-func simpleEqualityPredicate(where *parser.WhereClause) (string, parser.Value, bool) {
+func simpleEqualityPredicate(stmt *parser.SelectExpr) (string, parser.Value, bool) {
+	if stmt == nil {
+		return "", parser.Value{}, false
+	}
+	if stmt.Predicate != nil {
+		return simpleEqualityPredicateFromPredicate(stmt.Predicate)
+	}
+	return simpleEqualityPredicateFromWhere(stmt.Where)
+}
+
+func simpleEqualityPredicateFromPredicate(predicate *parser.PredicateExpr) (string, parser.Value, bool) {
+	if predicate == nil || predicate.Kind != parser.PredicateKindComparison || predicate.Comparison == nil {
+		return "", parser.Value{}, false
+	}
+	if predicate.Comparison.Operator != "=" {
+		return "", parser.Value{}, false
+	}
+	return predicate.Comparison.Left, predicate.Comparison.Right, true
+}
+
+func simpleEqualityPredicateFromWhere(where *parser.WhereClause) (string, parser.Value, bool) {
 	if where == nil || len(where.Items) != 1 {
 		return "", parser.Value{}, false
 	}

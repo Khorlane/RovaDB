@@ -31,6 +31,7 @@ func (p *updateTokenParser) parse() (*UpdateStmt, error) {
 	}
 
 	var where *WhereClause
+	var predicate *PredicateExpr
 	assignmentsPart := remainder
 	upperRemainder := strings.ToUpper(remainder)
 	if whereIndex := strings.Index(upperRemainder, " WHERE "); whereIndex >= 0 {
@@ -39,11 +40,12 @@ func (p *updateTokenParser) parse() (*UpdateStmt, error) {
 		if whereClause == "" {
 			return nil, newParseError("invalid where clause")
 		}
-		parsedWhere, ok := parseWhereClause(whereClause)
+		parsedWhere, parsedPredicate, ok := parseWhereBridge(whereClause)
 		if !ok {
 			return nil, newParseError("invalid where clause")
 		}
 		where = parsedWhere
+		predicate = parsedPredicate
 	}
 
 	assignments, ok := parseAssignments(assignmentsPart)
@@ -55,6 +57,7 @@ func (p *updateTokenParser) parse() (*UpdateStmt, error) {
 		TableName:   tableTok.Lexeme,
 		Assignments: assignments,
 		Where:       where,
+		Predicate:   predicate,
 	}, nil
 }
 

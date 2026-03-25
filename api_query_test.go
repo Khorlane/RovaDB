@@ -227,7 +227,7 @@ func TestQueryAPILiteralAndBoundQueriesMatch(t *testing.T) {
 	}
 }
 
-func TestQueryAPIPlaceholderArgsWhereChainLeftToRightSemanticsUnaffected(t *testing.T) {
+func TestQueryAPIPlaceholderArgsRespectBooleanPrecedence(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -251,11 +251,11 @@ func TestQueryAPIPlaceholderArgsWhereChainLeftToRightSemanticsUnaffected(t *test
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
-	if rows == nil || len(rows.data) != 1 {
-		t.Fatalf("rows.data = %#v, want one row", rows.data)
+	if rows == nil || len(rows.data) != 2 {
+		t.Fatalf("rows.data = %#v, want two rows", rows.data)
 	}
-	if rows.data[0][0] != 2 {
-		t.Fatalf("rows.data = %#v, want [[2]]", rows.data)
+	if rows.data[0][0] != 1 || rows.data[1][0] != 2 {
+		t.Fatalf("rows.data = %#v, want [[1] [2]]", rows.data)
 	}
 }
 

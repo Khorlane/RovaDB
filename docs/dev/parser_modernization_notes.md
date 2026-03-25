@@ -120,8 +120,23 @@ At the end of a working session, update this file with:
 - literal and simple arithmetic `SELECT` forms now route through a modern token-driven `SELECT` shell
 - the active `SELECT` path still intentionally reuses the existing `WHERE`, `ORDER BY`, and expression helpers
 - full repo verification still passes after the `SELECT` batch
+- predicate modernization batch started
+- added a richer isolated predicate AST with precedence-aware parsing for `NOT`, `AND`, `OR`, and parenthesized grouping
+- extended the lexer with predicate operators, literals, placeholders, and grouping tokens
+- added a bridge field so `SELECT`, `UPDATE`, and `DELETE` can carry both the legacy flat `WhereClause` and the new predicate tree
+- added a conservative adapter that can flatten compatible predicate trees back into the legacy flat `WhereClause`
+- the adapter intentionally rejects grouped, mixed-precedence, and `NOT` shapes when flattening would lose semantics
+- binder now walks predicate trees for placeholder collection and binding
+- binding also backfills the legacy flat `WhereClause` only when a predicate can be flattened safely
+- planner now reads simple equality predicates from the new predicate tree for index-scan selection
+- executor now evaluates and validates the new predicate tree directly for `SELECT`, `UPDATE`, and `DELETE`
+- active `WHERE` parsing now routes through the precedence-aware predicate parser first
+- simple flat chains still populate the legacy `WhereClause` when they can be represented safely
+- grouped and `NOT` predicates now parse and execute with their intended semantics
+- test expectations have been updated from legacy left-to-right boolean evaluation to `NOT` > `AND` > `OR` precedence
 
 ## Next Recommended Step
 
-- the next major parser step is deeper expression modernization
-- future `SELECT` growth should focus on replacing the legacy `WHERE`, `ORDER BY`, and expression helpers with richer token-driven parsing
+- commit the predicate/runtime milestone as the next parser modernization slice
+- next major parser step is deeper expression modernization
+- future `SELECT` growth should focus on replacing the legacy `ORDER BY` and expression helpers with richer token-driven parsing

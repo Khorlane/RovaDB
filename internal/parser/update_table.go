@@ -13,6 +13,7 @@ type UpdateStmt struct {
 	TableName   string
 	Assignments []UpdateAssignment
 	Where       *WhereClause
+	Predicate   *PredicateExpr
 }
 
 func parseUpdate(input string) (*UpdateStmt, error) {

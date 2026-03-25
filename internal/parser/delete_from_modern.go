@@ -42,7 +42,7 @@ func (p *deleteTokenParser) parse() (*DeleteStmt, error) {
 		return nil, newParseError("invalid where clause")
 	}
 
-	parsedWhere, ok := parseWhereClause(whereClause)
+	parsedWhere, parsedPredicate, ok := parseWhereBridge(whereClause)
 	if !ok {
 		return nil, newParseError("invalid where clause")
 	}
@@ -50,6 +50,7 @@ func (p *deleteTokenParser) parse() (*DeleteStmt, error) {
 	return &DeleteStmt{
 		TableName: tableTok.Lexeme,
 		Where:     parsedWhere,
+		Predicate: parsedPredicate,
 	}, nil
 }
 

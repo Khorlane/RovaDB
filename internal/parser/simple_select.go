@@ -78,6 +78,7 @@ type SelectExpr struct {
 	TableName   string
 	Columns     []string
 	Where       *WhereClause
+	Predicate   *PredicateExpr
 	OrderBy     *OrderByClause
 	IsCountStar bool
 }
@@ -132,6 +133,15 @@ func parseWhereClause(input string) (*WhereClause, bool) {
 	}
 
 	return &WhereClause{Items: items}, true
+}
+
+func parseWhereBridge(input string) (*WhereClause, *PredicateExpr, bool) {
+	predicate, ok := parsePredicateExpr(input)
+	if !ok {
+		return nil, nil, false
+	}
+	where, _ := flattenPredicateExpr(predicate)
+	return where, predicate, true
 }
 
 func parseWhereItems(tokens []string) []ConditionChainItem {

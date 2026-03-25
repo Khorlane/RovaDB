@@ -444,7 +444,7 @@ func TestSelectWithOrNoMatches(t *testing.T) {
 	}
 }
 
-func TestSelectWhereLeftToRightWithoutPrecedence(t *testing.T) {
+func TestSelectWhereUsesBooleanPrecedence(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
 			{parser.Int64Value(1), parser.StringValue("alice")},
@@ -457,17 +457,65 @@ func TestSelectWhereLeftToRightWithoutPrecedence(t *testing.T) {
 	rows, err := Select(planSelect(t, &parser.SelectExpr{
 		TableName: "users",
 		Columns:   []string{"name"},
-		Where: where(
-			parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(1)},
-			parser.ConditionChainItem{Op: parser.BooleanOpOr, Condition: parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(2)}},
-			parser.ConditionChainItem{Op: parser.BooleanOpAnd, Condition: parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("bob")}},
-		),
+		Predicate: &parser.PredicateExpr{
+			Kind: parser.PredicateKindOr,
+			Left: &parser.PredicateExpr{
+				Kind:       parser.PredicateKindComparison,
+				Comparison: &parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(1)},
+			},
+			Right: &parser.PredicateExpr{
+				Kind: parser.PredicateKindAnd,
+				Left: &parser.PredicateExpr{
+					Kind:       parser.PredicateKindComparison,
+					Comparison: &parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(2)},
+				},
+				Right: &parser.PredicateExpr{
+					Kind:       parser.PredicateKindComparison,
+					Comparison: &parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("bob")},
+				},
+			},
+		},
 	}), tables)
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
-	if len(rows) != 2 || rows[0][0] != parser.StringValue("bob") || rows[1][0] != parser.StringValue("bob") {
-		t.Fatalf("Select() rows = %#v, want left-to-right [[bob] [bob]]", rows)
+	if len(rows) != 3 || rows[0][0] != parser.StringValue("alice") || rows[1][0] != parser.StringValue("bob") || rows[2][0] != parser.StringValue("bob") {
+		t.Fatalf("Select() rows = %#v, want precedence-aware [[alice] [bob] [bob]]", rows)
+	}
+}
+
+func TestSelectWhereSupportsNotAndGrouping(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.Int64Value(3), parser.StringValue("cara")},
+		}},
+	}
+
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
+		TableName: "users",
+		Columns:   []string{"id"},
+		Predicate: &parser.PredicateExpr{
+			Kind: parser.PredicateKindNot,
+			Inner: &parser.PredicateExpr{
+				Kind: parser.PredicateKindOr,
+				Left: &parser.PredicateExpr{
+					Kind:       parser.PredicateKindComparison,
+					Comparison: &parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(1)},
+				},
+				Right: &parser.PredicateExpr{
+					Kind:       parser.PredicateKindComparison,
+					Comparison: &parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("cara")},
+				},
+			},
+		},
+	}), tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 1 || rows[0][0] != parser.Int64Value(2) {
+		t.Fatalf("Select() rows = %#v, want [[2]]", rows)
 	}
 }
 

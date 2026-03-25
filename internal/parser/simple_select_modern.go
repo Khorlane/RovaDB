@@ -56,6 +56,7 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 	remainder := strings.TrimSpace(p.lexer.input[p.lexer.pos:])
 
 	var where *WhereClause
+	var predicate *PredicateExpr
 	var orderBy *OrderByClause
 
 	if remainder != "" {
@@ -68,11 +69,12 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 				wherePart = strings.TrimSpace(wherePart[:orderByIndex])
 			}
 
-			parsedWhere, ok := parseWhereClause(wherePart)
+			parsedWhere, parsedPredicate, ok := parseWhereBridge(wherePart)
 			if !ok {
 				return nil, false
 			}
 			where = parsedWhere
+			predicate = parsedPredicate
 
 			if orderByPart != "" {
 				parsedOrderBy, ok := parseOrderByClause(orderByPart)
@@ -97,6 +99,7 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 		return &SelectExpr{
 			TableName: tableTok.Lexeme,
 			Where:     where,
+			Predicate: predicate,
 			OrderBy:   orderBy,
 		}, true
 	}
@@ -104,6 +107,7 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 		return &SelectExpr{
 			TableName:   tableTok.Lexeme,
 			Where:       where,
+			Predicate:   predicate,
 			OrderBy:     orderBy,
 			IsCountStar: true,
 		}, true
@@ -129,6 +133,7 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 		TableName: tableTok.Lexeme,
 		Columns:   columns,
 		Where:     where,
+		Predicate: predicate,
 		OrderBy:   orderBy,
 	}, true
 }

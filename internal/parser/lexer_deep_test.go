@@ -110,6 +110,24 @@ func TestLexSQLDeepWhitespaceAndKeywordCoverage(t *testing.T) {
 				tokenEOF,
 			},
 		},
+		{
+			name:  "predicate tokens",
+			input: "WHERE NOT (id <= -2 OR active = TRUE)",
+			wantKinds: []tokenKind{
+				tokenKeywordWhere,
+				tokenKeywordNot,
+				tokenLParen,
+				tokenIdentifier,
+				tokenLTE,
+				tokenNumber,
+				tokenKeywordOr,
+				tokenIdentifier,
+				tokenEq,
+				tokenIdentifier,
+				tokenRParen,
+				tokenEOF,
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -148,7 +166,6 @@ func TestLexSQLDeepRejectsInvalidInput(t *testing.T) {
 	tests := []string{
 		"CREATE TABLE users (id INT);",
 		"CREATE TABLE users (id INT, name TEXT)#",
-		"CREATE TABLE 9users (id INT)",
 	}
 
 	for _, input := range tests {

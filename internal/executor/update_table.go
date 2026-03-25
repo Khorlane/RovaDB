@@ -25,13 +25,13 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 			value parser.Value
 		}{index: idx, value: assignment.Value})
 	}
-	if err := validateWhereColumns(stmt.Where, table); err != nil {
+	if err := validatePredicateOrWhereColumns(stmt.Predicate, stmt.Where, table); err != nil {
 		return 0, err
 	}
 
 	var affected int64
 	for _, row := range table.Rows {
-		match, err := evalWhere(row, table, stmt.Where)
+		match, err := evalPredicateOrWhere(row, table, stmt.Predicate, stmt.Where)
 		if err != nil {
 			return 0, err
 		}

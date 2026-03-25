@@ -4,6 +4,7 @@ package parser
 type DeleteStmt struct {
 	TableName string
 	Where     *WhereClause
+	Predicate *PredicateExpr
 }
 
 func parseDelete(input string) (*DeleteStmt, error) {

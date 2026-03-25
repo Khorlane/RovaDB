@@ -8,7 +8,7 @@ func executeDelete(stmt *parser.DeleteStmt, tables map[string]*Table) (int64, er
 		return 0, errTableDoesNotExist
 	}
 
-	if stmt.Where == nil {
+	if stmt.Where == nil && stmt.Predicate == nil {
 		affected := int64(len(table.Rows))
 		table.Rows = nil
 		if err := rebuildIndexesForTable(table); err != nil {
@@ -16,14 +16,14 @@ func executeDelete(stmt *parser.DeleteStmt, tables map[string]*Table) (int64, er
 		}
 		return affected, nil
 	}
-	if err := validateWhereColumns(stmt.Where, table); err != nil {
+	if err := validatePredicateOrWhereColumns(stmt.Predicate, stmt.Where, table); err != nil {
 		return 0, err
 	}
 
 	kept := make([][]parser.Value, 0, len(table.Rows))
 	var affected int64
 	for _, row := range table.Rows {
-		match, err := evalWhere(row, table, stmt.Where)
+		match, err := evalPredicateOrWhere(row, table, stmt.Predicate, stmt.Where)
 		if err != nil {
 			return 0, err
 		}

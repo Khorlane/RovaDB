@@ -152,11 +152,13 @@ func TestParseSelectExprWhereConditionChain(t *testing.T) {
 		name string
 		sql  string
 		want []ConditionChainItem
+		flat bool
 	}{
 		{
 			name: "single condition",
 			sql:  "SELECT id FROM users WHERE id > 1",
 			want: []ConditionChainItem{{Condition: Condition{Left: "id", Operator: ">", Right: Int64Value(1)}}},
+			flat: true,
 		},
 		{
 			name: "and",
@@ -165,6 +167,7 @@ func TestParseSelectExprWhereConditionChain(t *testing.T) {
 				{Condition: Condition{Left: "id", Operator: ">", Right: Int64Value(1)}},
 				{Op: BooleanOpAnd, Condition: Condition{Left: "name", Operator: "!=", Right: StringValue("bob")}},
 			},
+			flat: true,
 		},
 		{
 			name: "or",
@@ -173,24 +176,15 @@ func TestParseSelectExprWhereConditionChain(t *testing.T) {
 				{Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(1)}},
 				{Op: BooleanOpOr, Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(2)}},
 			},
+			flat: true,
 		},
 		{
 			name: "and or",
 			sql:  "SELECT id FROM users WHERE id = 1 AND id = 2 OR name = 'bob'",
-			want: []ConditionChainItem{
-				{Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(1)}},
-				{Op: BooleanOpAnd, Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(2)}},
-				{Op: BooleanOpOr, Condition: Condition{Left: "name", Operator: "=", Right: StringValue("bob")}},
-			},
 		},
 		{
 			name: "or and",
 			sql:  "SELECT id FROM users WHERE id = 1 OR id = 2 AND name = 'bob'",
-			want: []ConditionChainItem{
-				{Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(1)}},
-				{Op: BooleanOpOr, Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(2)}},
-				{Op: BooleanOpAnd, Condition: Condition{Left: "name", Operator: "=", Right: StringValue("bob")}},
-			},
 		},
 	}
 
@@ -200,7 +194,16 @@ func TestParseSelectExprWhereConditionChain(t *testing.T) {
 			if !ok {
 				t.Fatal("ParseSelectExpr() ok = false, want true")
 			}
-			if got == nil || got.Where == nil {
+			if got == nil || got.Predicate == nil {
+				t.Fatalf("ParseSelectExpr() = %#v, want predicate tree", got)
+			}
+			if !tc.flat {
+				if got.Where != nil {
+					t.Fatalf("ParseSelectExpr().Where = %#v, want nil for non-flattenable predicate", got.Where)
+				}
+				return
+			}
+			if got.Where == nil {
 				t.Fatalf("ParseSelectExpr() = %#v, want WHERE clause", got)
 			}
 			if len(got.Where.Items) != len(tc.want) {
@@ -266,6 +269,9 @@ func TestParseSelectFromTokensOrderBy(t *testing.T) {
 	}
 	if got.OrderBy.Column != "name" || !got.OrderBy.Desc {
 		t.Fatalf("OrderBy = %#v, want column=%q desc=%v", got.OrderBy, "name", true)
+	}
+	if got.Predicate == nil {
+		t.Fatal("Predicate = nil, want populated predicate tree")
 	}
 }
 

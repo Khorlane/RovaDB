@@ -89,6 +89,9 @@ func TestParseDeleteViaParse(t *testing.T) {
 	if len(got.Where.Items) != len(wantWhere.Items) || got.Where.Items[0] != wantWhere.Items[0] {
 		t.Fatalf("Parse().Where = %#v, want %#v", got.Where, wantWhere)
 	}
+	if got.Predicate == nil {
+		t.Fatal("Parse().Predicate = nil, want populated predicate tree")
+	}
 }
 
 func TestParseDeleteTokens(t *testing.T) {

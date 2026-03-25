@@ -28,12 +28,17 @@ func BindPlaceholders(stmt any, args []any) error {
 		return newBindError("unexpected placeholder left unbound")
 	}
 
+	syncLegacyWhereFromPredicate(stmt)
+
 	return nil
 }
 
 func collectBindableValues(stmt any) []*Value {
 	switch stmt := stmt.(type) {
 	case *SelectExpr:
+		if stmt.Predicate != nil {
+			return collectPredicateValues(stmt.Predicate)
+		}
 		return collectWhereValues(stmt.Where)
 	case *InsertStmt:
 		values := make([]*Value, 0, len(stmt.Values))
@@ -50,8 +55,14 @@ func collectBindableValues(stmt any) []*Value {
 				values = append(values, &stmt.Assignments[i].Value)
 			}
 		}
+		if stmt.Predicate != nil {
+			return append(values, collectPredicateValues(stmt.Predicate)...)
+		}
 		return append(values, collectWhereValues(stmt.Where)...)
 	case *DeleteStmt:
+		if stmt.Predicate != nil {
+			return collectPredicateValues(stmt.Predicate)
+		}
 		return collectWhereValues(stmt.Where)
 	default:
 		return nil
@@ -84,6 +95,9 @@ func containsPlaceholder(stmt any) bool {
 func collectAllValues(stmt any) []*Value {
 	switch stmt := stmt.(type) {
 	case *SelectExpr:
+		if stmt.Predicate != nil {
+			return collectAllPredicateValues(stmt.Predicate)
+		}
 		return collectAllWhereValues(stmt.Where)
 	case *InsertStmt:
 		values := make([]*Value, 0, len(stmt.Values))
@@ -96,12 +110,58 @@ func collectAllValues(stmt any) []*Value {
 		for i := range stmt.Assignments {
 			values = append(values, &stmt.Assignments[i].Value)
 		}
+		if stmt.Predicate != nil {
+			return append(values, collectAllPredicateValues(stmt.Predicate)...)
+		}
 		return append(values, collectAllWhereValues(stmt.Where)...)
 	case *DeleteStmt:
+		if stmt.Predicate != nil {
+			return collectAllPredicateValues(stmt.Predicate)
+		}
 		return collectAllWhereValues(stmt.Where)
 	default:
 		return nil
 	}
+}
+
+func collectPredicateValues(predicate *PredicateExpr) []*Value {
+	if predicate == nil {
+		return nil
+	}
+
+	values := make([]*Value, 0)
+	switch predicate.Kind {
+	case PredicateKindComparison:
+		if predicate.Comparison != nil && predicate.Comparison.Right.Kind == ValueKindPlaceholder {
+			values = append(values, &predicate.Comparison.Right)
+		}
+	case PredicateKindAnd, PredicateKindOr:
+		values = append(values, collectPredicateValues(predicate.Left)...)
+		values = append(values, collectPredicateValues(predicate.Right)...)
+	case PredicateKindNot:
+		values = append(values, collectPredicateValues(predicate.Inner)...)
+	}
+	return values
+}
+
+func collectAllPredicateValues(predicate *PredicateExpr) []*Value {
+	if predicate == nil {
+		return nil
+	}
+
+	values := make([]*Value, 0)
+	switch predicate.Kind {
+	case PredicateKindComparison:
+		if predicate.Comparison != nil {
+			values = append(values, &predicate.Comparison.Right)
+		}
+	case PredicateKindAnd, PredicateKindOr:
+		values = append(values, collectAllPredicateValues(predicate.Left)...)
+		values = append(values, collectAllPredicateValues(predicate.Right)...)
+	case PredicateKindNot:
+		values = append(values, collectAllPredicateValues(predicate.Inner)...)
+	}
+	return values
 }
 
 func collectAllWhereValues(where *WhereClause) []*Value {
@@ -135,4 +195,33 @@ func bindArgumentValue(arg any) (Value, error) {
 
 func newBindError(msg string) error {
 	return fmt.Errorf("bind: %s", msg)
+}
+
+func syncLegacyWhereFromPredicate(stmt any) {
+	switch stmt := stmt.(type) {
+	case *SelectExpr:
+		if stmt.Predicate != nil {
+			if where, ok := flattenPredicateExpr(stmt.Predicate); ok {
+				stmt.Where = where
+			} else {
+				stmt.Where = nil
+			}
+		}
+	case *UpdateStmt:
+		if stmt.Predicate != nil {
+			if where, ok := flattenPredicateExpr(stmt.Predicate); ok {
+				stmt.Where = where
+			} else {
+				stmt.Where = nil
+			}
+		}
+	case *DeleteStmt:
+		if stmt.Predicate != nil {
+			if where, ok := flattenPredicateExpr(stmt.Predicate); ok {
+				stmt.Where = where
+			} else {
+				stmt.Where = nil
+			}
+		}
+	}
 }
