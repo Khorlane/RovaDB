@@ -15,6 +15,24 @@ func TestParseCreateTable(t *testing.T) {
 	}
 }
 
+func TestParseCreateTableViaParse(t *testing.T) {
+	stmt, err := Parse("CREATE TABLE users (id INT, name TEXT)")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	got, ok := stmt.(*CreateTableStmt)
+	if !ok {
+		t.Fatalf("Parse() stmt type = %T, want *CreateTableStmt", stmt)
+	}
+	if got.Name != "users" {
+		t.Fatalf("Parse().Name = %q, want %q", got.Name, "users")
+	}
+	if len(got.Columns) != 2 || got.Columns[0] != (ColumnDef{Name: "id", Type: ColumnTypeInt}) || got.Columns[1] != (ColumnDef{Name: "name", Type: ColumnTypeText}) {
+		t.Fatalf("Parse().Columns = %#v, want typed id/name columns", got.Columns)
+	}
+}
+
 func TestParseCreateTableTokens(t *testing.T) {
 	got, err := parseCreateTableTokens("CREATE TABLE users (id INT, name TEXT)")
 	if err != nil {

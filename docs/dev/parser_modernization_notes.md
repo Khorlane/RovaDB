@@ -75,8 +75,12 @@ At the end of a working session, update this file with:
 - `Parser Modernization Slice 2` completed in isolation
 - added a token-driven `CREATE TABLE` parser that produces the current `CreateTableStmt` AST
 - the modern `CREATE TABLE` parser is tested but is not yet wired into `Parse()`
+- `Parser Modernization Slice 3` completed
+- `Parse()` now routes `CREATE TABLE` through the token-driven parser path
+- legacy string-splitting `CREATE TABLE` parsing has been replaced in the active path
+- full repo verification still passes after the integration
 
 ## Next Recommended Step
 
-- wire the token-driven `CREATE TABLE` parser into `Parse()`
-- keep the old `CREATE TABLE` parser available briefly for comparison if helpful, then remove it once the integrated path is proven
+- decide whether to remove any no-longer-needed legacy `CREATE TABLE` parsing scaffolding
+- choose the next statement family to migrate with the lexer foundation
