@@ -162,6 +162,18 @@ func TestPlanSelectComplexWhereFallsBackToTableScan(t *testing.T) {
 	}
 }
 
+func TestPlanSelectMultiTableFromUnsupported(t *testing.T) {
+	stmt, ok := parser.ParseSelectExpr("SELECT u.id FROM users u, accounts a WHERE u.id = 1")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+
+	plan, err := PlanSelect(stmt, testPlannerTables("id"))
+	if err == nil {
+		t.Fatalf("PlanSelect() = %#v, want error", plan)
+	}
+}
+
 func TestPlanSelectIsDeterministicForIndexedEquality(t *testing.T) {
 	stmt, ok := parser.ParseSelectExpr("SELECT id FROM users WHERE id = 1")
 	if !ok {

@@ -113,6 +113,28 @@ func TestParseSelectExprSingleTableAlias(t *testing.T) {
 	}
 }
 
+func TestParseSelectExprMultiTableFrom(t *testing.T) {
+	got, ok := ParseSelectExpr("SELECT u.id, a.name FROM users u, accounts AS a WHERE u.id = 1")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	if got == nil {
+		t.Fatal("ParseSelectExpr() = nil, want value")
+	}
+	if got.TableName != "users" {
+		t.Fatalf("TableName = %q, want %q", got.TableName, "users")
+	}
+	if len(got.From) != 2 {
+		t.Fatalf("len(From) = %d, want 2", len(got.From))
+	}
+	if got.From[0] != (TableRef{Name: "users", Alias: "u"}) || got.From[1] != (TableRef{Name: "accounts", Alias: "a"}) {
+		t.Fatalf("From = %#v, want users u, accounts a", got.From)
+	}
+	if len(got.ProjectionExprs) != 2 || got.ProjectionExprs[0].Qualifier != "u" || got.ProjectionExprs[1].Qualifier != "a" {
+		t.Fatalf("ProjectionExprs = %#v, want qualified refs", got.ProjectionExprs)
+	}
+}
+
 func TestParseSelectExprCountStar(t *testing.T) {
 	tests := []struct {
 		name string

@@ -52,33 +52,11 @@ func (p *selectFromTokenParser) parse() (*SelectExpr, bool) {
 }
 
 func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, bool) {
-	tableTok, ok := p.expect(tokenIdentifier)
-	if !ok || !isIdentifier(tableTok.Lexeme) || selectList == "" {
+	fromRefs, ok := p.parseFromClause()
+	if !ok || len(fromRefs) == 0 || selectList == "" {
 		return nil, false
 	}
-	tableRef := TableRef{Name: tableTok.Lexeme}
-
-	if !p.lexer.skipWhitespaceAndEOF() {
-		nextTok, err := p.lexer.nextToken()
-		if err != nil {
-			return nil, false
-		}
-		switch nextTok.Kind {
-		case tokenKeywordAs:
-			aliasTok, ok := p.expect(tokenIdentifier)
-			if !ok || !isIdentifier(aliasTok.Lexeme) {
-				return nil, false
-			}
-			tableRef.Alias = aliasTok.Lexeme
-		case tokenIdentifier:
-			if !isIdentifier(nextTok.Lexeme) {
-				return nil, false
-			}
-			tableRef.Alias = nextTok.Lexeme
-		default:
-			p.lexer.pos = nextTok.Pos
-		}
-	}
+	primary := fromRefs[0]
 
 	var where *WhereClause
 	var predicate *PredicateExpr
@@ -150,8 +128,8 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 
 	if selectList == "*" {
 		return &SelectExpr{
-			TableName: tableRef.Name,
-			From:      []TableRef{tableRef},
+			TableName: primary.Name,
+			From:      fromRefs,
 			Where:     where,
 			Predicate: predicate,
 			OrderBy:   orderBy,
@@ -159,8 +137,8 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 	}
 	if strings.EqualFold(selectList, "COUNT(*)") {
 		return &SelectExpr{
-			TableName:   tableRef.Name,
-			From:        []TableRef{tableRef},
+			TableName:   primary.Name,
+			From:        fromRefs,
 			Where:       where,
 			Predicate:   predicate,
 			OrderBy:     orderBy,
@@ -201,8 +179,8 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 	}
 
 	return &SelectExpr{
-		TableName:        tableRef.Name,
-		From:             []TableRef{tableRef},
+		TableName:        primary.Name,
+		From:             fromRefs,
 		Columns:          columns,
 		ProjectionExprs:  projections,
 		ProjectionLabels: labels,
@@ -210,6 +188,57 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 		Predicate:        predicate,
 		OrderBy:          orderBy,
 	}, true
+}
+
+func (p *selectFromTokenParser) parseFromClause() ([]TableRef, bool) {
+	refs := make([]TableRef, 0, 1)
+	for {
+		tableTok, ok := p.expect(tokenIdentifier)
+		if !ok || !isIdentifier(tableTok.Lexeme) {
+			return nil, false
+		}
+		ref := TableRef{Name: tableTok.Lexeme}
+
+		if !p.lexer.skipWhitespaceAndEOF() {
+			nextTok, err := p.lexer.nextToken()
+			if err != nil {
+				return nil, false
+			}
+			switch nextTok.Kind {
+			case tokenKeywordAs:
+				aliasTok, ok := p.expect(tokenIdentifier)
+				if !ok || !isIdentifier(aliasTok.Lexeme) {
+					return nil, false
+				}
+				ref.Alias = aliasTok.Lexeme
+			case tokenIdentifier:
+				if !isIdentifier(nextTok.Lexeme) {
+					return nil, false
+				}
+				ref.Alias = nextTok.Lexeme
+			default:
+				p.lexer.pos = nextTok.Pos
+			}
+		}
+
+		refs = append(refs, ref)
+
+		if p.lexer.skipWhitespaceAndEOF() {
+			return refs, true
+		}
+
+		nextTok, err := p.lexer.nextToken()
+		if err != nil {
+			return nil, false
+		}
+		switch nextTok.Kind {
+		case tokenComma:
+			continue
+		default:
+			p.lexer.pos = nextTok.Pos
+			return refs, true
+		}
+	}
 }
 
 func (p *selectFromTokenParser) expect(kind tokenKind) (token, bool) {

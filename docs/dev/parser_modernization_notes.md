@@ -189,9 +189,15 @@ At the end of a working session, update this file with:
 - planner index-scan selection now accepts alias-qualified equality predicates for the current single-table `SELECT` shape
 - runtime scope is intentionally unchanged: this slice is still single-table only and does not activate joins
 - full repo verification still passes after the alias-aware single-table milestone
+- `Parser Modernization Slice 22` completed as a multi-table `FROM` structure milestone
+- the modern `SELECT` parser now accepts comma-separated table references with optional aliases and records them in `SelectExpr.From`
+- the first parsed `FROM` item still backfills `TableName` as the current compatibility field
+- parser scope is intentionally ahead of runtime scope: multi-table `SELECT` shapes now parse, but planner/executor still reject them through the normal unsupported-query path
+- this preserves a clean join-ready `FROM` structure without prematurely widening execution semantics
+- full repo verification still passes after the multi-table `FROM` structure milestone
 
 ## Next Recommended Step
 
-- next major parser step is multi-table `FROM` structure and join-aware name resolution
-- future `SELECT` growth should build from the new alias-aware `TableRef` shape instead of adding more single-table special cases
-- the next high-value parser seam is introducing multi-table `FROM` parsing while keeping runtime execution conservative until join planning/execution is ready
+- next major parser step is explicit join syntax and join-aware predicate/planning shape
+- future `SELECT` growth should build on `SelectExpr.From` instead of widening the legacy `TableName` path
+- the next high-value parser seam is introducing inner equality join syntax while continuing to keep runtime activation conservative until join planning/execution is ready

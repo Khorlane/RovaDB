@@ -18,6 +18,9 @@ func PlanSelect(stmt *parser.SelectExpr, tables ...map[string]*TableMetadata) (*
 	if stmt == nil {
 		return nil, newPlanError("unsupported query form")
 	}
+	if len(stmt.From) > 1 {
+		return nil, newPlanError("unsupported query form")
+	}
 
 	plan := &SelectPlan{
 		Stmt: stmt,
