@@ -64,6 +64,17 @@ func TestLexSQLDeepWhitespaceAndKeywordCoverage(t *testing.T) {
 				tokenEOF,
 			},
 		},
+		{
+			name:  "delete keywords",
+			input: "DeLeTe FROM users WHERE",
+			wantKinds: []tokenKind{
+				tokenKeywordDelete,
+				tokenKeywordFrom,
+				tokenIdentifier,
+				tokenKeywordWhere,
+				tokenEOF,
+			},
+		},
 	}
 
 	for _, tc := range tests {

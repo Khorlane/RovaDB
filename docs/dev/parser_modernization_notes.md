@@ -87,8 +87,13 @@ At the end of a working session, update this file with:
 - `Parse()` now routes `ALTER TABLE ... ADD COLUMN` through the token-driven parser path
 - legacy string-splitting `ALTER TABLE` parsing has been replaced in the active path
 - full repo verification still passes after the integration
+- `Parser Modernization Slice 6` completed in isolation
+- extended the lexer token set to support `DELETE FROM ... [WHERE ...]`
+- added an isolated token-driven `DELETE FROM` parser
+- the modern `DELETE FROM` parser intentionally reuses the existing `WHERE` parser for now
+- full repo verification still passes after the isolated `DELETE FROM` slice
 
 ## Next Recommended Step
 
-- continue to the next simple statement family on the lexer foundation
-- likely candidates: `DELETE FROM` or `UPDATE` before moving into `INSERT` or `SELECT`
+- wire the token-driven `DELETE FROM` parser into `Parse()`
+- then continue to `UPDATE` before moving into `INSERT` or `SELECT`
