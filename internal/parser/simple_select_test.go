@@ -135,6 +135,31 @@ func TestParseSelectExprMultiTableFrom(t *testing.T) {
 	}
 }
 
+func TestParseSelectExprExplicitJoin(t *testing.T) {
+	got, ok := ParseSelectExpr("SELECT u.id, a.name FROM users u INNER JOIN accounts a ON u.id = a.id WHERE u.id = 1")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	if got == nil {
+		t.Fatal("ParseSelectExpr() = nil, want value")
+	}
+	if got.TableName != "users" {
+		t.Fatalf("TableName = %q, want %q", got.TableName, "users")
+	}
+	if len(got.From) != 1 || got.From[0] != (TableRef{Name: "users", Alias: "u"}) {
+		t.Fatalf("From = %#v, want users u", got.From)
+	}
+	if len(got.Joins) != 1 {
+		t.Fatalf("len(Joins) = %d, want 1", len(got.Joins))
+	}
+	if got.Joins[0].Right != (TableRef{Name: "accounts", Alias: "a"}) {
+		t.Fatalf("Joins[0].Right = %#v, want accounts a", got.Joins[0].Right)
+	}
+	if got.Joins[0].Predicate == nil || got.Joins[0].Predicate.Comparison == nil || got.Joins[0].Predicate.Comparison.Left != "u.id" || got.Joins[0].Predicate.Comparison.RightRef != "a.id" {
+		t.Fatalf("Joins[0].Predicate = %#v, want u.id = a.id", got.Joins[0].Predicate)
+	}
+}
+
 func TestParseSelectExprCountStar(t *testing.T) {
 	tests := []struct {
 		name string

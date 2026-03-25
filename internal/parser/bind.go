@@ -36,10 +36,14 @@ func BindPlaceholders(stmt any, args []any) error {
 func collectBindableValues(stmt any) []*Value {
 	switch stmt := stmt.(type) {
 	case *SelectExpr:
-		if stmt.Predicate != nil {
-			return collectPredicateValues(stmt.Predicate)
+		values := make([]*Value, 0)
+		for _, join := range stmt.Joins {
+			values = append(values, collectPredicateValues(join.Predicate)...)
 		}
-		return collectWhereValues(stmt.Where)
+		if stmt.Predicate != nil {
+			return append(values, collectPredicateValues(stmt.Predicate)...)
+		}
+		return append(values, collectWhereValues(stmt.Where)...)
 	case *InsertStmt:
 		values := make([]*Value, 0, len(stmt.Values))
 		for i := range stmt.Values {
@@ -95,10 +99,14 @@ func containsPlaceholder(stmt any) bool {
 func collectAllValues(stmt any) []*Value {
 	switch stmt := stmt.(type) {
 	case *SelectExpr:
-		if stmt.Predicate != nil {
-			return collectAllPredicateValues(stmt.Predicate)
+		values := make([]*Value, 0)
+		for _, join := range stmt.Joins {
+			values = append(values, collectAllPredicateValues(join.Predicate)...)
 		}
-		return collectAllWhereValues(stmt.Where)
+		if stmt.Predicate != nil {
+			return append(values, collectAllPredicateValues(stmt.Predicate)...)
+		}
+		return append(values, collectAllWhereValues(stmt.Where)...)
 	case *InsertStmt:
 		values := make([]*Value, 0, len(stmt.Values))
 		for i := range stmt.Values {

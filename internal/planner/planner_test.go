@@ -174,6 +174,18 @@ func TestPlanSelectMultiTableFromUnsupported(t *testing.T) {
 	}
 }
 
+func TestPlanSelectExplicitJoinUnsupported(t *testing.T) {
+	stmt, ok := parser.ParseSelectExpr("SELECT u.id FROM users u JOIN accounts a ON u.id = a.id")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+
+	plan, err := PlanSelect(stmt, testPlannerTables("id"))
+	if err == nil {
+		t.Fatalf("PlanSelect() = %#v, want error", plan)
+	}
+}
+
 func TestPlanSelectIsDeterministicForIndexedEquality(t *testing.T) {
 	stmt, ok := parser.ParseSelectExpr("SELECT id FROM users WHERE id = 1")
 	if !ok {

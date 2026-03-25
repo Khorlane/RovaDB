@@ -17,7 +17,7 @@ func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Valu
 	if sel.TableName == "" {
 		return nil, errUnsupportedStatement
 	}
-	if len(sel.From) > 1 {
+	if len(sel.From) > 1 || len(sel.Joins) > 0 {
 		return nil, errUnsupportedStatement
 	}
 

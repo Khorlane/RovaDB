@@ -52,7 +52,7 @@ func (p *selectFromTokenParser) parse() (*SelectExpr, bool) {
 }
 
 func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, bool) {
-	fromRefs, ok := p.parseFromClause()
+	fromRefs, joins, ok := p.parseFromClause()
 	if !ok || len(fromRefs) == 0 || selectList == "" {
 		return nil, false
 	}
@@ -130,6 +130,7 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 		return &SelectExpr{
 			TableName: primary.Name,
 			From:      fromRefs,
+			Joins:     joins,
 			Where:     where,
 			Predicate: predicate,
 			OrderBy:   orderBy,
@@ -139,6 +140,7 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 		return &SelectExpr{
 			TableName:   primary.Name,
 			From:        fromRefs,
+			Joins:       joins,
 			Where:       where,
 			Predicate:   predicate,
 			OrderBy:     orderBy,
@@ -181,6 +183,7 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 	return &SelectExpr{
 		TableName:        primary.Name,
 		From:             fromRefs,
+		Joins:            joins,
 		Columns:          columns,
 		ProjectionExprs:  projections,
 		ProjectionLabels: labels,
@@ -190,53 +193,128 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 	}, true
 }
 
-func (p *selectFromTokenParser) parseFromClause() ([]TableRef, bool) {
+func (p *selectFromTokenParser) parseFromClause() ([]TableRef, []JoinClause, bool) {
 	refs := make([]TableRef, 0, 1)
+	joins := make([]JoinClause, 0, 1)
 	for {
-		tableTok, ok := p.expect(tokenIdentifier)
-		if !ok || !isIdentifier(tableTok.Lexeme) {
-			return nil, false
+		ref, ok := p.parseTableRef()
+		if !ok {
+			return nil, nil, false
 		}
-		ref := TableRef{Name: tableTok.Lexeme}
-
-		if !p.lexer.skipWhitespaceAndEOF() {
-			nextTok, err := p.lexer.nextToken()
-			if err != nil {
-				return nil, false
-			}
-			switch nextTok.Kind {
-			case tokenKeywordAs:
-				aliasTok, ok := p.expect(tokenIdentifier)
-				if !ok || !isIdentifier(aliasTok.Lexeme) {
-					return nil, false
-				}
-				ref.Alias = aliasTok.Lexeme
-			case tokenIdentifier:
-				if !isIdentifier(nextTok.Lexeme) {
-					return nil, false
-				}
-				ref.Alias = nextTok.Lexeme
-			default:
-				p.lexer.pos = nextTok.Pos
-			}
-		}
-
 		refs = append(refs, ref)
 
 		if p.lexer.skipWhitespaceAndEOF() {
-			return refs, true
+			return refs, joins, true
 		}
 
 		nextTok, err := p.lexer.nextToken()
 		if err != nil {
-			return nil, false
+			return nil, nil, false
 		}
 		switch nextTok.Kind {
 		case tokenComma:
 			continue
+		case tokenKeywordJoin, tokenKeywordInner:
+			if len(refs) != 1 || len(joins) != 0 {
+				return nil, nil, false
+			}
+			p.lexer.pos = nextTok.Pos
+			join, ok := p.parseJoinClause()
+			if !ok {
+				return nil, nil, false
+			}
+			joins = append(joins, join)
+			if p.lexer.skipWhitespaceAndEOF() {
+				return refs, joins, true
+			}
+			boundaryTok, err := p.lexer.nextToken()
+			if err != nil {
+				return nil, nil, false
+			}
+			switch boundaryTok.Kind {
+			case tokenKeywordWhere, tokenKeywordOrder:
+				p.lexer.pos = boundaryTok.Pos
+				return refs, joins, true
+			default:
+				return nil, nil, false
+			}
 		default:
 			p.lexer.pos = nextTok.Pos
-			return refs, true
+			return refs, joins, true
+		}
+	}
+}
+
+func (p *selectFromTokenParser) parseTableRef() (TableRef, bool) {
+	tableTok, ok := p.expect(tokenIdentifier)
+	if !ok || !isIdentifier(tableTok.Lexeme) {
+		return TableRef{}, false
+	}
+	ref := TableRef{Name: tableTok.Lexeme}
+
+	if !p.lexer.skipWhitespaceAndEOF() {
+		nextTok, err := p.lexer.nextToken()
+		if err != nil {
+			return TableRef{}, false
+		}
+		switch nextTok.Kind {
+		case tokenKeywordAs:
+			aliasTok, ok := p.expect(tokenIdentifier)
+			if !ok || !isIdentifier(aliasTok.Lexeme) {
+				return TableRef{}, false
+			}
+			ref.Alias = aliasTok.Lexeme
+		case tokenIdentifier:
+			if !isIdentifier(nextTok.Lexeme) {
+				return TableRef{}, false
+			}
+			ref.Alias = nextTok.Lexeme
+		default:
+			p.lexer.pos = nextTok.Pos
+		}
+	}
+
+	return ref, true
+}
+
+func (p *selectFromTokenParser) parseJoinClause() (JoinClause, bool) {
+	tok, err := p.lexer.nextToken()
+	if err != nil {
+		return JoinClause{}, false
+	}
+	switch tok.Kind {
+	case tokenKeywordInner:
+		if _, ok := p.expect(tokenKeywordJoin); !ok {
+			return JoinClause{}, false
+		}
+	case tokenKeywordJoin:
+	default:
+		return JoinClause{}, false
+	}
+
+	right, ok := p.parseTableRef()
+	if !ok {
+		return JoinClause{}, false
+	}
+	if _, ok := p.expect(tokenKeywordOn); !ok {
+		return JoinClause{}, false
+	}
+
+	onStart := p.lexer.pos
+	for {
+		tok, err := p.lexer.nextToken()
+		if err != nil {
+			return JoinClause{}, false
+		}
+		switch tok.Kind {
+		case tokenEOF, tokenKeywordWhere, tokenKeywordOrder:
+			onPart := strings.TrimSpace(p.lexer.input[onStart:tok.Pos])
+			predicate, ok := parsePredicateExpr(onPart)
+			if !ok {
+				return JoinClause{}, false
+			}
+			p.lexer.pos = tok.Pos
+			return JoinClause{Right: right, Predicate: predicate}, true
 		}
 	}
 }

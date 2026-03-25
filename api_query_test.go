@@ -158,6 +158,29 @@ func TestQueryAPIMultiTableFromStillUnsupported(t *testing.T) {
 	}
 }
 
+func TestQueryAPIExplicitJoinStillUnsupported(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create users) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE accounts (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create accounts) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT u.id FROM users u JOIN accounts a ON u.id = a.id")
+	if err != nil {
+		t.Fatalf("Query() error = %v, want nil top-level error", err)
+	}
+	if rows == nil || rows.err == nil {
+		t.Fatalf("rows = %#v, want deferred unsupported-query error", rows)
+	}
+}
+
 func TestQueryAPIPlaceholderArgsWhereClause(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

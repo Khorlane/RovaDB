@@ -195,9 +195,17 @@ At the end of a working session, update this file with:
 - parser scope is intentionally ahead of runtime scope: multi-table `SELECT` shapes now parse, but planner/executor still reject them through the normal unsupported-query path
 - this preserves a clean join-ready `FROM` structure without prematurely widening execution semantics
 - full repo verification still passes after the multi-table `FROM` structure milestone
+- `Parser Modernization Slice 23` completed as an explicit join-syntax milestone
+- the lexer now recognizes `INNER`, `JOIN`, and `ON`
+- `SELECT` now carries explicit `JOIN ... ON ...` clauses in the parsed AST
+- the modern `SELECT` parser accepts both `JOIN` and `INNER JOIN` for the current inner-join shape
+- join predicates are parsed through the same predicate-expression machinery as `WHERE`
+- binder traversal now includes join predicates so placeholder/value walking stays structurally complete
+- parser scope remains intentionally ahead of runtime scope: explicit join syntax now parses, but planner/executor still reject joined selects through the normal unsupported-query path
+- full repo verification still passes after the explicit join-syntax milestone
 
 ## Next Recommended Step
 
-- next major parser step is explicit join syntax and join-aware predicate/planning shape
-- future `SELECT` growth should build on `SelectExpr.From` instead of widening the legacy `TableName` path
-- the next high-value parser seam is introducing inner equality join syntax while continuing to keep runtime activation conservative until join planning/execution is ready
+- next major parser step is join-aware planning and execution for the initial two-table inner equality shape
+- future `SELECT` growth should keep building on the parsed `FROM` + `JOIN` structure instead of widening the legacy `TableName` path
+- the next high-value seam is turning the parsed join structure into a conservative two-table nested-loop execution path

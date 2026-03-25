@@ -81,11 +81,18 @@ type TableRef struct {
 	Alias string
 }
 
+// JoinClause is an explicit JOIN ... ON ... clause attached to SELECT.
+type JoinClause struct {
+	Right     TableRef
+	Predicate *PredicateExpr
+}
+
 // SelectExpr is the minimal parsed form for SELECT <expr>.
 type SelectExpr struct {
 	Expr             *Expr
 	TableName        string
 	From             []TableRef
+	Joins            []JoinClause
 	Columns          []string
 	ProjectionExprs  []*ValueExpr
 	ProjectionLabels []string
