@@ -290,3 +290,21 @@ func TestExecuteInsertRealRejectsNonRealScalars(t *testing.T) {
 		})
 	}
 }
+
+func TestExecuteInsertValueExprFunction(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: []parser.ColumnDef{{Name: "name", Type: parser.ColumnTypeText}}},
+	}
+
+	affected, err := Execute(&parser.InsertStmt{
+		TableName:  "users",
+		ValueExprs: []*parser.ValueExpr{{Kind: parser.ValueExprKindFunctionCall, FuncName: "LOWER", Arg: &parser.ValueExpr{Kind: parser.ValueExprKindLiteral, Value: parser.StringValue("STEVE")}}},
+		Values:     []parser.Value{{}},
+	}, tables)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if affected != 1 || len(tables["users"].Rows) != 1 || tables["users"].Rows[0][0] != parser.StringValue("steve") {
+		t.Fatalf("rows = %#v, want [[steve]]", tables["users"].Rows)
+	}
+}

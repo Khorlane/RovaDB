@@ -219,9 +219,20 @@ At the end of a working session, update this file with:
 - mixed aggregate and non-aggregate projection queries remain intentionally unsupported without grouping semantics
 - planner/index behavior remains conservative; this milestone activates aggregate execution without broadening index-planning rules
 - full repo verification still passes after the aggregate-execution milestone
+- `Parser Modernization Slice 26` completed as a write-expression milestone
+- `INSERT ... VALUES (...)` now carries shared `ValueExpr` nodes in addition to the legacy flattened value list
+- `UPDATE ... SET ...` assignments now carry shared `ValueExpr` nodes when the assignment is richer than a plain literal
+- parser tokenization for write statements now scans `value-expr` slices directly from the lexer stream instead of assuming every write value is a single literal token
+- executor now evaluates spec-aligned scalar value expressions for write statements, including parenthesized expressions and the current scalar-function subset
+- `UPDATE` assignments now support row-aware expressions such as `UPPER(name)` and `ABS(score)` within the current single-row update model
+- `INSERT` value expressions remain intentionally row-free: scalar functions over literals/placeholders are supported, but column-reference and aggregate expressions are rejected at execution time
+- placeholder binding now walks write-statement expression trees, including placeholders nested inside scalar-function arguments
+- legacy literal fields are still backfilled where possible so compatibility scaffolding remains intact while the expression path becomes active
+- full repo verification still passes after the write-expression milestone
 
 ## Next Recommended Step
 
 - future `SELECT` growth should keep using the resolver-based join path for richer expressions and additional join-adjacent features
-- the next high-value seam is deeper scalar/date-time expression growth on top of the shared value-expression path
-- a likely next milestone is introducing a small date/time scalar-function surface before revisiting grouped aggregates
+- stay within the current language spec surface unless the spec is updated first
+- the next high-value seam is broadening the current non-date-time expression surface in a spec-aligned way, such as arithmetic expression support on the shared value-expression path
+- another good candidate is continued cleanup of legacy compatibility fields once the active expression path is well covered by tests

@@ -10,17 +10,22 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 		return 0, errTableDoesNotExist
 	}
 
+	values, err := evalInsertValues(stmt)
+	if err != nil {
+		return 0, err
+	}
+
 	if len(stmt.Columns) == 0 {
-		if len(stmt.Values) != len(table.Columns) {
+		if len(values) != len(table.Columns) {
 			return 0, errWrongValueCount
 		}
-		for i, value := range stmt.Values {
+		for i, value := range values {
 			if !valueMatchesColumnType(value, table.Columns[i].Type) {
 				return 0, errTypeMismatch
 			}
 		}
 
-		row := append([]parser.Value(nil), stmt.Values...)
+		row := append([]parser.Value(nil), values...)
 		table.Rows = append(table.Rows, row)
 		if err := rebuildIndexesForTable(table); err != nil {
 			return 0, err
@@ -28,7 +33,7 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 		return 1, nil
 	}
 
-	if len(stmt.Columns) != len(table.Columns) || len(stmt.Values) != len(table.Columns) {
+	if len(stmt.Columns) != len(table.Columns) || len(values) != len(table.Columns) {
 		return 0, errWrongValueCount
 	}
 
@@ -48,11 +53,11 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 		if _, ok := seen[idx]; ok {
 			return 0, errWrongValueCount
 		}
-		if !valueMatchesColumnType(stmt.Values[i], table.Columns[idx].Type) {
+		if !valueMatchesColumnType(values[i], table.Columns[idx].Type) {
 			return 0, errTypeMismatch
 		}
 		seen[idx] = struct{}{}
-		row[idx] = stmt.Values[i]
+		row[idx] = values[i]
 	}
 	if len(seen) != len(table.Columns) {
 		return 0, errWrongValueCount
@@ -63,6 +68,63 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 		return 0, err
 	}
 	return 1, nil
+}
+
+func evalInsertValues(stmt *parser.InsertStmt) ([]parser.Value, error) {
+	if stmt == nil {
+		return nil, errUnsupportedStatement
+	}
+	if len(stmt.ValueExprs) == 0 {
+		return append([]parser.Value(nil), stmt.Values...), nil
+	}
+	values := make([]parser.Value, 0, len(stmt.ValueExprs))
+	for _, expr := range stmt.ValueExprs {
+		if err := validateInsertValueExpr(expr); err != nil {
+			return nil, err
+		}
+		value, err := evalInsertValueExpr(expr)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, nil
+}
+
+func validateInsertValueExpr(expr *parser.ValueExpr) error {
+	if expr == nil {
+		return errUnsupportedStatement
+	}
+	switch expr.Kind {
+	case parser.ValueExprKindLiteral:
+		return nil
+	case parser.ValueExprKindParen:
+		return validateInsertValueExpr(expr.Inner)
+	case parser.ValueExprKindFunctionCall:
+		return validateInsertValueExpr(expr.Arg)
+	default:
+		return errUnsupportedStatement
+	}
+}
+
+func evalInsertValueExpr(expr *parser.ValueExpr) (parser.Value, error) {
+	if expr == nil {
+		return parser.Value{}, errUnsupportedStatement
+	}
+	switch expr.Kind {
+	case parser.ValueExprKindLiteral:
+		return expr.Value, nil
+	case parser.ValueExprKindParen:
+		return evalInsertValueExpr(expr.Inner)
+	case parser.ValueExprKindFunctionCall:
+		arg, err := evalInsertValueExpr(expr.Arg)
+		if err != nil {
+			return parser.Value{}, err
+		}
+		return evalScalarFunction(expr.FuncName, arg)
+	default:
+		return parser.Value{}, errUnsupportedStatement
+	}
 }
 
 func valueMatchesColumnType(value parser.Value, typeName string) bool {

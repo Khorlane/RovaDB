@@ -45,6 +45,13 @@ func collectBindableValues(stmt any) []*Value {
 		}
 		return append(values, collectWhereValues(stmt.Where)...)
 	case *InsertStmt:
+		if len(stmt.ValueExprs) > 0 {
+			values := make([]*Value, 0, len(stmt.ValueExprs))
+			for i := range stmt.ValueExprs {
+				values = append(values, collectValueExprPlaceholders(stmt.ValueExprs[i])...)
+			}
+			return values
+		}
 		values := make([]*Value, 0, len(stmt.Values))
 		for i := range stmt.Values {
 			if stmt.Values[i].Kind == ValueKindPlaceholder {
@@ -55,7 +62,9 @@ func collectBindableValues(stmt any) []*Value {
 	case *UpdateStmt:
 		values := make([]*Value, 0, len(stmt.Assignments))
 		for i := range stmt.Assignments {
-			if stmt.Assignments[i].Value.Kind == ValueKindPlaceholder {
+			if stmt.Assignments[i].Expr != nil {
+				values = append(values, collectValueExprPlaceholders(stmt.Assignments[i].Expr)...)
+			} else if stmt.Assignments[i].Value.Kind == ValueKindPlaceholder {
 				values = append(values, &stmt.Assignments[i].Value)
 			}
 		}
@@ -108,6 +117,13 @@ func collectAllValues(stmt any) []*Value {
 		}
 		return append(values, collectAllWhereValues(stmt.Where)...)
 	case *InsertStmt:
+		if len(stmt.ValueExprs) > 0 {
+			values := make([]*Value, 0, len(stmt.ValueExprs))
+			for i := range stmt.ValueExprs {
+				values = append(values, collectAllValueExprValues(stmt.ValueExprs[i])...)
+			}
+			return values
+		}
 		values := make([]*Value, 0, len(stmt.Values))
 		for i := range stmt.Values {
 			values = append(values, &stmt.Values[i])
@@ -116,7 +132,11 @@ func collectAllValues(stmt any) []*Value {
 	case *UpdateStmt:
 		values := make([]*Value, 0, len(stmt.Assignments))
 		for i := range stmt.Assignments {
-			values = append(values, &stmt.Assignments[i].Value)
+			if stmt.Assignments[i].Expr != nil {
+				values = append(values, collectAllValueExprValues(stmt.Assignments[i].Expr)...)
+			} else {
+				values = append(values, &stmt.Assignments[i].Value)
+			}
 		}
 		if stmt.Predicate != nil {
 			return append(values, collectAllPredicateValues(stmt.Predicate)...)
@@ -220,6 +240,11 @@ func collectValueExprPlaceholders(expr *ValueExpr) []*Value {
 		}
 	case ValueExprKindFunctionCall:
 		values = append(values, collectValueExprPlaceholders(expr.Arg)...)
+	case ValueExprKindAggregateCall:
+		if expr.StarArg {
+			return values
+		}
+		values = append(values, collectValueExprPlaceholders(expr.Arg)...)
 	case ValueExprKindParen:
 		values = append(values, collectValueExprPlaceholders(expr.Inner)...)
 	}
@@ -236,6 +261,11 @@ func collectAllValueExprValues(expr *ValueExpr) []*Value {
 	case ValueExprKindLiteral:
 		values = append(values, &expr.Value)
 	case ValueExprKindFunctionCall:
+		values = append(values, collectAllValueExprValues(expr.Arg)...)
+	case ValueExprKindAggregateCall:
+		if expr.StarArg {
+			return values
+		}
 		values = append(values, collectAllValueExprValues(expr.Arg)...)
 	case ValueExprKindParen:
 		values = append(values, collectAllValueExprValues(expr.Inner)...)

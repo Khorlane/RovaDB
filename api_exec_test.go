@@ -346,3 +346,29 @@ func TestExecAPIPlaceholderArgsRejectsExtraArgsWhenNoPlaceholders(t *testing.T) 
 		t.Fatal("Exec(no placeholders with extra args) error = nil, want error")
 	}
 }
+
+func TestExecAPIValueExprInsertAndUpdate(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, LOWER(?))", "STEVE"); err != nil {
+		t.Fatalf("Exec(insert with value expr) error = %v", err)
+	}
+	if _, err := db.Exec("UPDATE users SET name = UPPER(name) WHERE id = ?", 1); err != nil {
+		t.Fatalf("Exec(update with value expr) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT name FROM users WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != "STEVE" {
+		t.Fatalf("rows.data = %#v, want [[\"STEVE\"]]", rows.data)
+	}
+}

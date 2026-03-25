@@ -402,3 +402,27 @@ func TestExecuteUpdateRealRejectsNonRealScalars(t *testing.T) {
 		})
 	}
 }
+
+func TestExecuteUpdateAssignmentExprFunction(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {
+			Name:    "users",
+			Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}},
+			Rows:    [][]parser.Value{{parser.Int64Value(1), parser.StringValue("alice")}},
+		},
+	}
+
+	affected, err := executeUpdate(&parser.UpdateStmt{
+		TableName: "users",
+		Assignments: []parser.UpdateAssignment{
+			{Column: "name", Expr: &parser.ValueExpr{Kind: parser.ValueExprKindFunctionCall, FuncName: "UPPER", Arg: &parser.ValueExpr{Kind: parser.ValueExprKindColumnRef, Column: "name"}}},
+		},
+		Where: where(parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(1)}),
+	}, tables)
+	if err != nil {
+		t.Fatalf("executeUpdate() error = %v", err)
+	}
+	if affected != 1 || tables["users"].Rows[0][1] != parser.StringValue("ALICE") {
+		t.Fatalf("rows = %#v, want ALICE", tables["users"].Rows)
+	}
+}

@@ -172,6 +172,15 @@ func TestParseUpdateTokens(t *testing.T) {
 			},
 			where: &WhereClause{Items: []ConditionChainItem{{Condition: Condition{Left: "name", Operator: "=", Right: StringValue("alice")}}}},
 		},
+		{
+			name:      "update assignment function expression",
+			input:     "UPDATE users SET name = UPPER(name) WHERE id = 1",
+			tableName: "users",
+			assignments: []UpdateAssignment{
+				{Column: "name"},
+			},
+			where: &WhereClause{Items: []ConditionChainItem{{Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(1)}}}},
+		},
 	}
 
 	for _, tc := range tests {
@@ -200,6 +209,12 @@ func TestParseUpdateTokens(t *testing.T) {
 				t.Fatalf("parseUpdateTokens().Assignments len = %d, want %d", len(got.Assignments), len(tc.assignments))
 			}
 			for i := range tc.assignments {
+				if tc.name == "update assignment function expression" {
+					if got.Assignments[i].Column != "name" || got.Assignments[i].Expr == nil || got.Assignments[i].Expr.Kind != ValueExprKindFunctionCall || got.Assignments[i].Expr.FuncName != "UPPER" {
+						t.Fatalf("parseUpdateTokens().Assignments[%d] = %#v, want UPPER(name) expr", i, got.Assignments[i])
+					}
+					continue
+				}
 				if got.Assignments[i] != tc.assignments[i] {
 					t.Fatalf("parseUpdateTokens().Assignments[%d] = %#v, want %#v", i, got.Assignments[i], tc.assignments[i])
 				}

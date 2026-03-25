@@ -104,17 +104,24 @@ func (p *updateTokenParser) parseAssignmentsTokens() ([]UpdateAssignment, error)
 		if _, err := p.expect(tokenEq); err != nil {
 			return nil, newParseError("unsupported query form")
 		}
-		valueTok, err := p.lexer.nextToken()
+		expr, err := parseValueExprFromLexer(&p.lexer, tokenComma, tokenKeywordWhere, tokenEOF)
 		if err != nil {
 			return nil, newParseError("unsupported query form")
 		}
-		value, ok := parseLiteralToken(valueTok)
-		if !ok {
-			return nil, newParseError("unsupported query form")
+		value := Value{}
+		var assignmentExpr *ValueExpr
+		if simpleValue, _, ok := flattenSimpleValueExpr(expr); ok {
+			value = simpleValue
+			if expr.Kind != ValueExprKindLiteral {
+				assignmentExpr = expr
+			}
+		} else {
+			assignmentExpr = expr
 		}
 		assignments = append(assignments, UpdateAssignment{
 			Column: columnTok.Lexeme,
 			Value:  value,
+			Expr:   assignmentExpr,
 		})
 		seen[columnTok.Lexeme] = struct{}{}
 

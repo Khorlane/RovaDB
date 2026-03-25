@@ -10,6 +10,7 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 
 	assignments := make([]struct {
 		index int
+		expr  *parser.ValueExpr
 		value parser.Value
 	}, 0, len(stmt.Assignments))
 	for _, assignment := range stmt.Assignments {
@@ -17,13 +18,19 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 		if err != nil {
 			return 0, err
 		}
-		if !valueMatchesColumnType(assignment.Value, table.Columns[idx].Type) {
-			return 0, errTypeMismatch
+		expr := assignment.Expr
+		if expr != nil {
+			if err := validateValueExprColumns(expr, table); err != nil {
+				return 0, err
+			}
+		} else {
+			expr = &parser.ValueExpr{Kind: parser.ValueExprKindLiteral, Value: assignment.Value}
 		}
 		assignments = append(assignments, struct {
 			index int
+			expr  *parser.ValueExpr
 			value parser.Value
-		}{index: idx, value: assignment.Value})
+		}{index: idx, expr: expr, value: assignment.Value})
 	}
 	if err := validatePredicateOrWhereColumns(stmt.Predicate, stmt.Where, table); err != nil {
 		return 0, err
@@ -39,7 +46,14 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 			continue
 		}
 		for _, assignment := range assignments {
-			row[assignment.index] = assignment.value
+			value, err := evalValueExpr(row, table, assignment.expr)
+			if err != nil {
+				return 0, err
+			}
+			if !valueMatchesColumnType(value, table.Columns[assignment.index].Type) {
+				return 0, errTypeMismatch
+			}
+			row[assignment.index] = value
 		}
 		affected++
 	}

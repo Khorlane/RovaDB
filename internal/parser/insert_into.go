@@ -7,9 +7,10 @@ import (
 
 // InsertStmt is the tiny parsed form for INSERT INTO ... VALUES (...).
 type InsertStmt struct {
-	TableName string
-	Columns   []string
-	Values    []Value
+	TableName  string
+	Columns    []string
+	Values     []Value
+	ValueExprs []*ValueExpr
 }
 
 func parseInsert(input string) (*InsertStmt, error) {

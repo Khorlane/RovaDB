@@ -149,6 +149,12 @@ func TestParseInsertTokens(t *testing.T) {
 			cols:   nil,
 			values: []Value{PlaceholderValue()},
 		},
+		{
+			name:   "function expression",
+			input:  "INSERT INTO users VALUES (LOWER('STEVE'))",
+			cols:   nil,
+			values: []Value{{}},
+		},
 	}
 
 	for _, tc := range tests {
@@ -174,6 +180,11 @@ func TestParseInsertTokens(t *testing.T) {
 			for i := range tc.values {
 				if got.Values[i] != tc.values[i] {
 					t.Fatalf("parseInsertTokens().Values[%d] = %#v, want %#v", i, got.Values[i], tc.values[i])
+				}
+			}
+			if tc.name == "function expression" {
+				if len(got.ValueExprs) != 1 || got.ValueExprs[0] == nil || got.ValueExprs[0].Kind != ValueExprKindFunctionCall || got.ValueExprs[0].FuncName != "LOWER" {
+					t.Fatalf("parseInsertTokens().ValueExprs = %#v, want LOWER(...) expression", got.ValueExprs)
 				}
 			}
 		})

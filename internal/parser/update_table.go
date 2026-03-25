@@ -6,6 +6,7 @@ import "strings"
 type UpdateAssignment struct {
 	Column string
 	Value  Value
+	Expr   *ValueExpr
 }
 
 // UpdateStmt is the tiny parsed form for UPDATE ... SET ... [WHERE ...].

@@ -43,7 +43,7 @@ func (p *insertTokenParser) parse() (*InsertStmt, error) {
 	if _, err := p.expect(tokenLParen); err != nil {
 		return nil, newParseError("unsupported query form")
 	}
-	values, err := p.parseValuesList()
+	values, valueExprs, err := p.parseValuesList()
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func (p *insertTokenParser) parse() (*InsertStmt, error) {
 		return nil, newParseError("unsupported query form")
 	}
 
-	return &InsertStmt{TableName: tableTok.Lexeme, Columns: columns, Values: values}, nil
+	return &InsertStmt{TableName: tableTok.Lexeme, Columns: columns, Values: values, ValueExprs: valueExprs}, nil
 }
 
 func (p *insertTokenParser) expect(kind tokenKind) (token, error) {
@@ -110,29 +110,31 @@ func (p *insertTokenParser) parseColumnList() ([]string, error) {
 	return columns, nil
 }
 
-func (p *insertTokenParser) parseValuesList() ([]Value, error) {
+func (p *insertTokenParser) parseValuesList() ([]Value, []*ValueExpr, error) {
 	values := make([]Value, 0, 2)
+	valueExprs := make([]*ValueExpr, 0, 2)
 	for {
-		tok, err := p.lexer.nextToken()
+		expr, err := parseValueExprFromLexer(&p.lexer, tokenComma, tokenRParen)
 		if err != nil {
-			return nil, newParseError("unsupported query form")
+			return nil, nil, newParseError("unsupported query form")
 		}
-		value, ok := parseLiteralToken(tok)
-		if !ok {
-			return nil, newParseError("unsupported query form")
+		value := Value{}
+		if simpleValue, _, ok := flattenSimpleValueExpr(expr); ok {
+			value = simpleValue
 		}
 		values = append(values, value)
+		valueExprs = append(valueExprs, expr)
 
 		next := p.peekAfterWhitespace()
 		if next.Kind != tokenComma {
 			break
 		}
 		if _, err := p.expect(tokenComma); err != nil {
-			return nil, newParseError("unsupported query form")
+			return nil, nil, newParseError("unsupported query form")
 		}
 	}
 	if len(values) == 0 {
-		return nil, newParseError("unsupported query form")
+		return nil, nil, newParseError("unsupported query form")
 	}
-	return values, nil
+	return values, valueExprs, nil
 }
