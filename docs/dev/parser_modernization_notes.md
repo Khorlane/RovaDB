@@ -72,8 +72,11 @@ At the end of a working session, update this file with:
 - lexer scope is currently limited to the token set needed for `CREATE TABLE`
 - main parser entry path is unchanged
 - deep lexer tests are implemented behind the `lexerdeep` build tag
+- `Parser Modernization Slice 2` completed in isolation
+- added a token-driven `CREATE TABLE` parser that produces the current `CreateTableStmt` AST
+- the modern `CREATE TABLE` parser is tested but is not yet wired into `Parse()`
 
 ## Next Recommended Step
 
-- add an isolated `CREATE TABLE` parser that consumes lexer tokens and produces the current `CreateTableStmt` AST
-- test that parser in isolation before wiring it into `Parse()`
+- wire the token-driven `CREATE TABLE` parser into `Parse()`
+- keep the old `CREATE TABLE` parser available briefly for comparison if helpful, then remove it once the integrated path is proven

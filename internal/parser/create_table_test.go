@@ -15,6 +15,19 @@ func TestParseCreateTable(t *testing.T) {
 	}
 }
 
+func TestParseCreateTableTokens(t *testing.T) {
+	got, err := parseCreateTableTokens("CREATE TABLE users (id INT, name TEXT)")
+	if err != nil {
+		t.Fatalf("parseCreateTableTokens() error = %v", err)
+	}
+	if got.Name != "users" {
+		t.Fatalf("parseCreateTableTokens().Name = %q, want %q", got.Name, "users")
+	}
+	if len(got.Columns) != 2 || got.Columns[0] != (ColumnDef{Name: "id", Type: ColumnTypeInt}) || got.Columns[1] != (ColumnDef{Name: "name", Type: ColumnTypeText}) {
+		t.Fatalf("parseCreateTableTokens().Columns = %#v, want typed id/name columns", got.Columns)
+	}
+}
+
 func TestParseCreateTableBool(t *testing.T) {
 	got, err := parseCreateTable("CREATE TABLE t (flag BOOL)")
 	if err != nil {
@@ -81,6 +94,27 @@ func TestParseCreateTableReal(t *testing.T) {
 	}
 }
 
+func TestParseCreateTableTokensMixedRealSchema(t *testing.T) {
+	got, err := parseCreateTableTokens("CREATE TABLE t (a INT, b REAL, c TEXT, d BOOL)")
+	if err != nil {
+		t.Fatalf("parseCreateTableTokens() error = %v", err)
+	}
+	want := []ColumnDef{
+		{Name: "a", Type: ColumnTypeInt},
+		{Name: "b", Type: ColumnTypeReal},
+		{Name: "c", Type: ColumnTypeText},
+		{Name: "d", Type: ColumnTypeBool},
+	}
+	if len(got.Columns) != len(want) {
+		t.Fatalf("len(parseCreateTableTokens().Columns) = %d, want %d", len(got.Columns), len(want))
+	}
+	for i := range want {
+		if got.Columns[i] != want[i] {
+			t.Fatalf("parseCreateTableTokens().Columns[%d] = %#v, want %#v", i, got.Columns[i], want[i])
+		}
+	}
+}
+
 func TestParseCreateTableMixedRealSchema(t *testing.T) {
 	got, err := parseCreateTable("CREATE TABLE t (a INT, b REAL, c TEXT, d BOOL)")
 	if err != nil {
@@ -99,6 +133,30 @@ func TestParseCreateTableMixedRealSchema(t *testing.T) {
 		if got.Columns[i] != want[i] {
 			t.Fatalf("parseCreateTable().Columns[%d] = %#v, want %#v", i, got.Columns[i], want[i])
 		}
+	}
+}
+
+func TestParseCreateTableTokensInvalid(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "missing create", input: "TABLE users (id INT, name TEXT)"},
+		{name: "missing parens", input: "CREATE TABLE users id INT, name TEXT"},
+		{name: "unsupported type boolean", input: "CREATE TABLE users (id BOOLEAN, name TEXT)"},
+		{name: "duplicate column", input: "CREATE TABLE users (id INT, id TEXT)"},
+		{name: "empty column list", input: "CREATE TABLE users ()"},
+		{name: "trailing comma", input: "CREATE TABLE users (id INT,)"},
+		{name: "extra trailing tokens", input: "CREATE TABLE users (id INT) extra"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseCreateTableTokens(tc.input)
+			if err == nil {
+				t.Fatalf("parseCreateTableTokens() = %#v, want error", got)
+			}
+		})
 	}
 }
 
