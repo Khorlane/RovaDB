@@ -76,6 +76,9 @@ func simpleEqualityPredicateFromPredicate(predicate *parser.PredicateExpr) (stri
 	if predicate.Comparison.Operator != "=" {
 		return "", parser.Value{}, false
 	}
+	if predicate.Comparison.RightRef != "" {
+		return "", parser.Value{}, false
+	}
 	return predicate.Comparison.Left, predicate.Comparison.Right, true
 }
 

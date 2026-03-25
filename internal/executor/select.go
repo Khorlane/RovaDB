@@ -268,6 +268,14 @@ func evalWhereCondition(row []parser.Value, table *Table, cond parser.Condition)
 		return false, err
 	}
 
+	if cond.RightRef != "" {
+		rightIdx, err := resolveColumnIndex(cond.RightRef, table)
+		if err != nil {
+			return false, err
+		}
+		return compareValues(cond.Operator, row[idx], row[rightIdx])
+	}
+
 	return compareValues(cond.Operator, row[idx], cond.Right)
 }
 
@@ -279,6 +287,11 @@ func validateWhereColumns(where *parser.WhereClause, table *Table) error {
 	for _, item := range where.Items {
 		if _, err := resolveColumnIndex(item.Condition.Left, table); err != nil {
 			return err
+		}
+		if item.Condition.RightRef != "" {
+			if _, err := resolveColumnIndex(item.Condition.RightRef, table); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -303,6 +316,12 @@ func validatePredicateColumns(predicate *parser.PredicateExpr, table *Table) err
 			return errUnsupportedStatement
 		}
 		_, err := resolveColumnIndex(predicate.Comparison.Left, table)
+		if err != nil {
+			return err
+		}
+		if predicate.Comparison.RightRef != "" {
+			_, err = resolveColumnIndex(predicate.Comparison.RightRef, table)
+		}
 		return err
 	case parser.PredicateKindAnd, parser.PredicateKindOr:
 		if err := validatePredicateColumns(predicate.Left, table); err != nil {

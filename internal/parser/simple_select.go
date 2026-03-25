@@ -45,6 +45,7 @@ type Condition struct {
 	Left     string
 	Operator string
 	Right    Value
+	RightRef string
 }
 
 // BooleanOp is the connector between WHERE conditions.

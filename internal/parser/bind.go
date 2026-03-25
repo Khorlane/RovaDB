@@ -132,7 +132,7 @@ func collectPredicateValues(predicate *PredicateExpr) []*Value {
 	values := make([]*Value, 0)
 	switch predicate.Kind {
 	case PredicateKindComparison:
-		if predicate.Comparison != nil && predicate.Comparison.Right.Kind == ValueKindPlaceholder {
+		if predicate.Comparison != nil && predicate.Comparison.RightRef == "" && predicate.Comparison.Right.Kind == ValueKindPlaceholder {
 			values = append(values, &predicate.Comparison.Right)
 		}
 	case PredicateKindAnd, PredicateKindOr:
@@ -152,7 +152,7 @@ func collectAllPredicateValues(predicate *PredicateExpr) []*Value {
 	values := make([]*Value, 0)
 	switch predicate.Kind {
 	case PredicateKindComparison:
-		if predicate.Comparison != nil {
+		if predicate.Comparison != nil && predicate.Comparison.RightRef == "" {
 			values = append(values, &predicate.Comparison.Right)
 		}
 	case PredicateKindAnd, PredicateKindOr:

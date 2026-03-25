@@ -15,6 +15,19 @@ func TestParsePredicateExprComparison(t *testing.T) {
 	}
 }
 
+func TestParsePredicateExprColumnComparison(t *testing.T) {
+	got, ok := parsePredicateExpr("id = mirror")
+	if !ok || got == nil {
+		t.Fatal("parsePredicateExpr() failed, want success")
+	}
+	if got.Kind != PredicateKindComparison {
+		t.Fatalf("Kind = %v, want %v", got.Kind, PredicateKindComparison)
+	}
+	if got.Comparison == nil || got.Comparison.Left != "id" || got.Comparison.Operator != "=" || got.Comparison.RightRef != "mirror" {
+		t.Fatalf("Comparison = %#v, want id = mirror", got.Comparison)
+	}
+}
+
 func TestParsePredicateExprPrecedence(t *testing.T) {
 	got, ok := parsePredicateExpr("id = 1 OR id = 2 AND name = 'bob'")
 	if !ok || got == nil {
@@ -121,6 +134,17 @@ func TestFlattenPredicateExprRejectsPrecedenceSensitiveShape(t *testing.T) {
 
 func TestFlattenPredicateExprRejectsNot(t *testing.T) {
 	expr, ok := parsePredicateExpr("NOT id = 1")
+	if !ok {
+		t.Fatal("parsePredicateExpr() failed, want success")
+	}
+
+	if where, ok := flattenPredicateExpr(expr); ok {
+		t.Fatalf("flattenPredicateExpr() = %#v, want rejection", where)
+	}
+}
+
+func TestFlattenPredicateExprRejectsColumnComparison(t *testing.T) {
+	expr, ok := parsePredicateExpr("id = mirror")
 	if !ok {
 		t.Fatal("parsePredicateExpr() failed, want success")
 	}

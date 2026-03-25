@@ -754,6 +754,35 @@ func TestQuerySelectWhereSupportsNotAndGrouping(t *testing.T) {
 	assertRowsIntSequence(t, rows, 2)
 }
 
+func TestQuerySelectWhereSupportsColumnComparison(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE pairs (id INT, mirror INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO pairs VALUES (1, 1)",
+		"INSERT INTO pairs VALUES (2, 3)",
+		"INSERT INTO pairs VALUES (4, 4)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT id FROM pairs WHERE id = mirror ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsIntSequence(t, rows, 1, 4)
+}
+
 func TestQuerySelectCountStarEmptyTable(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

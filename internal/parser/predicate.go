@@ -121,18 +121,21 @@ func (p *predicateTokenParser) parseComparison() (*PredicateExpr, bool) {
 	}
 
 	rightTok := p.current()
-	value, ok := parseLiteralToken(rightTok)
-	if !ok {
-		return nil, false
-	}
-	p.pos++
-
 	cond := &Condition{
 		Left:     left.Lexeme,
 		Operator: op.Lexeme,
-		Right:    value,
 	}
-	return &PredicateExpr{Kind: PredicateKindComparison, Comparison: cond}, true
+	if value, ok := parseLiteralToken(rightTok); ok {
+		cond.Right = value
+		p.pos++
+		return &PredicateExpr{Kind: PredicateKindComparison, Comparison: cond}, true
+	}
+	if rightTok.Kind == tokenIdentifier && isIdentifier(rightTok.Lexeme) {
+		cond.RightRef = rightTok.Lexeme
+		p.pos++
+		return &PredicateExpr{Kind: PredicateKindComparison, Comparison: cond}, true
+	}
+	return nil, false
 }
 
 func (p *predicateTokenParser) current() token {
@@ -150,6 +153,9 @@ func flattenPredicateItems(expr *PredicateExpr) ([]ConditionChainItem, bool) {
 	switch expr.Kind {
 	case PredicateKindComparison:
 		if expr.Comparison == nil {
+			return nil, false
+		}
+		if expr.Comparison.RightRef != "" {
 			return nil, false
 		}
 		return []ConditionChainItem{{

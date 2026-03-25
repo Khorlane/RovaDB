@@ -519,6 +519,35 @@ func TestSelectWhereSupportsNotAndGrouping(t *testing.T) {
 	}
 }
 
+func TestSelectWhereSupportsColumnComparison(t *testing.T) {
+	tables := map[string]*Table{
+		"pairs": {Name: "pairs", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "mirror", Type: parser.ColumnTypeInt},
+		}, Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.Int64Value(1)},
+			{parser.Int64Value(2), parser.Int64Value(3)},
+			{parser.Int64Value(4), parser.Int64Value(4)},
+		}},
+	}
+
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
+		TableName: "pairs",
+		Columns:   []string{"id"},
+		Predicate: &parser.PredicateExpr{
+			Kind:       parser.PredicateKindComparison,
+			Comparison: &parser.Condition{Left: "id", Operator: "=", RightRef: "mirror"},
+		},
+		OrderBy: &parser.OrderByClause{Column: "id"},
+	}), tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 2 || rows[0][0] != parser.Int64Value(1) || rows[1][0] != parser.Int64Value(4) {
+		t.Fatalf("Select() rows = %#v, want [[1] [4]]", rows)
+	}
+}
+
 func TestSelectOrderByIntAsc(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{

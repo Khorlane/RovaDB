@@ -151,9 +151,16 @@ At the end of a working session, update this file with:
 - `UPDATE ... SET ...` assignments now parse target/value pairs from tokens instead of string splitting
 - the supported value surface is intentionally unchanged; this slice modernized shared value parsing without broadening SQL support
 - full repo verification still passes after the shared value-expression modernization
+- `Parser Modernization Slice 17` completed
+- predicate comparisons now support column-to-column form in addition to column-to-literal form
+- the predicate parser records right-hand column references explicitly instead of forcing every comparison into a literal value
+- executor validation and evaluation now understand right-hand column references
+- planner index-scan selection still intentionally requires equality against a concrete literal value
+- legacy flat `WhereClause` backfill still applies only when a predicate comparison can be represented safely
+- full repo verification still passes after the comparison-operand modernization
 
 ## Next Recommended Step
 
 - next major parser step is deeper expression modernization
 - future `SELECT` and predicate growth should focus on value expressions, function calls, and comparison operands beyond the current literal-only helper path
-- the next high-value parser seam is moving comparison left/right operands beyond `identifier <op> literal`
+- the next high-value parser seam is moving predicate operands beyond plain column references and literals toward richer value expressions
