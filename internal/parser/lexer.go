@@ -12,6 +12,9 @@ const (
 	tokenIllegal tokenKind = iota
 	tokenEOF
 	tokenIdentifier
+	tokenKeywordAlter
+	tokenKeywordAdd
+	tokenKeywordColumn
 	tokenKeywordCreate
 	tokenKeywordTable
 	tokenKeywordInt
@@ -104,6 +107,12 @@ func (l *lexer) skipWhitespace() {
 
 func classifyWord(word string) tokenKind {
 	switch strings.ToUpper(word) {
+	case "ALTER":
+		return tokenKeywordAlter
+	case "ADD":
+		return tokenKeywordAdd
+	case "COLUMN":
+		return tokenKeywordColumn
 	case "CREATE":
 		return tokenKeywordCreate
 	case "TABLE":

@@ -50,6 +50,20 @@ func TestLexSQLDeepWhitespaceAndKeywordCoverage(t *testing.T) {
 				tokenEOF,
 			},
 		},
+		{
+			name:  "alter table keywords",
+			input: "AlTeR TABLE users ADD COLUMN age INT",
+			wantKinds: []tokenKind{
+				tokenKeywordAlter,
+				tokenKeywordTable,
+				tokenIdentifier,
+				tokenKeywordAdd,
+				tokenKeywordColumn,
+				tokenIdentifier,
+				tokenKeywordInt,
+				tokenEOF,
+			},
+		},
 	}
 
 	for _, tc := range tests {

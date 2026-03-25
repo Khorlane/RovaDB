@@ -79,8 +79,12 @@ At the end of a working session, update this file with:
 - `Parse()` now routes `CREATE TABLE` through the token-driven parser path
 - legacy string-splitting `CREATE TABLE` parsing has been replaced in the active path
 - full repo verification still passes after the integration
+- `Parser Modernization Slice 4` completed in isolation
+- extended the lexer token set to support `ALTER TABLE ... ADD COLUMN`
+- added an isolated token-driven `ALTER TABLE` parser that produces the current `AlterTableAddColumnStmt` AST
+- full repo verification still passes after the isolated `ALTER TABLE` slice
 
 ## Next Recommended Step
 
-- decide whether to remove any no-longer-needed legacy `CREATE TABLE` parsing scaffolding
-- choose the next statement family to migrate with the lexer foundation
+- wire the token-driven `ALTER TABLE` parser into `Parse()`
+- then continue to the next simple statement family on the lexer foundation
