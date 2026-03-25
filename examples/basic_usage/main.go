@@ -16,14 +16,18 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL, score REAL)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL)"); err != nil {
 		log.Fatal(err)
 	}
-	for _, sql := range []string{
-		"INSERT INTO users VALUES (1, 'Alice', TRUE, 3.14)",
-		"INSERT INTO users VALUES (2, 'Bob', FALSE, 1.25)",
+	for _, user := range []struct {
+		id     int
+		name   string
+		active bool
+	}{
+		{id: 1, name: "Alice", active: true},
+		{id: 2, name: "Bob", active: false},
 	} {
-		if _, err := db.Exec(sql); err != nil {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", user.id, user.name, user.active); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -41,11 +45,10 @@ func main() {
 	defer db.Close()
 
 	printUserStatusByID(db, 2)
-	printUserScoreByID(db, 1)
 }
 
 func printActiveUsers(db *rovadb.DB, label string) {
-	rows, err := db.Query("SELECT id, name FROM users WHERE active = TRUE ORDER BY id")
+	rows, err := db.Query("SELECT id, name FROM users WHERE active = ? ORDER BY id", true)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -67,7 +70,7 @@ func printActiveUsers(db *rovadb.DB, label string) {
 }
 
 func printUserStatusByID(db *rovadb.DB, id int) {
-	row := db.QueryRow(fmt.Sprintf("SELECT name, active FROM users WHERE id = %d", id))
+	row := db.QueryRow("SELECT name, active FROM users WHERE id = ?", id)
 
 	var name string
 	var active bool
@@ -75,14 +78,4 @@ func printUserStatusByID(db *rovadb.DB, id int) {
 		log.Fatal(err)
 	}
 	fmt.Printf("after reopen: id=%d name=%s active=%v\n", id, name, active)
-}
-
-func printUserScoreByID(db *rovadb.DB, id int) {
-	row := db.QueryRow(fmt.Sprintf("SELECT score FROM users WHERE id = %d", id))
-
-	var score float64
-	if err := row.Scan(&score); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("after reopen: id=%d score=%.2f\n", id, score)
 }

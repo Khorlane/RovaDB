@@ -239,3 +239,71 @@ func TestStage9APIRealExampleFlow(t *testing.T) {
 		t.Fatalf("QueryRow(score).Scan() got %v, want 3.14", score)
 	}
 }
+
+func TestStage9APIPositionalArgsExampleFlow(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, user := range []struct {
+		id     int
+		name   string
+		active bool
+	}{
+		{id: 1, name: "Alice", active: true},
+		{id: 2, name: "Bob", active: false},
+	} {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", user.id, user.name, user.active); err != nil {
+			t.Fatalf("Exec(insert) error = %v", err)
+		}
+	}
+
+	rows, err := db.Query("SELECT id, name FROM users WHERE active = ? ORDER BY id", true)
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if got := rows.Columns(); len(got) != 2 || got[0] != "id" || got[1] != "name" {
+		t.Fatalf("Columns() = %#v, want [id name]", got)
+	}
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+	var id int
+	var name string
+	if err := rows.Scan(&id, &name); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if id != 1 || name != "Alice" {
+		t.Fatalf("row = (%d, %q), want (1, %q)", id, name, "Alice")
+	}
+	if rows.Next() {
+		t.Fatal("Next() second = true, want false")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil", err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("Close() = %v, want nil", err)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	var active bool
+	if err := db.QueryRow("SELECT name, active FROM users WHERE id = ?", 2).Scan(&name, &active); err != nil {
+		t.Fatalf("QueryRow().Scan() error = %v", err)
+	}
+	if name != "Bob" || active {
+		t.Fatalf("QueryRow().Scan() = (%q, %v), want (%q, false)", name, active, "Bob")
+	}
+}

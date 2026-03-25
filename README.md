@@ -115,6 +115,28 @@ Only the following SQL forms are supported today.
 - REAL-to-REAL `WHERE` comparisons support `=`, `!=`, `<`, `<=`, `>`, and `>=`
 - mixed `INT` / `REAL`, `TEXT` / `REAL`, and `BOOL` / `REAL` comparisons remain strict type mismatches
 
+## Positional Arguments
+
+The public API supports one-shot positional argument binding on:
+
+- `Exec(query string, args ...any)`
+- `Query(query string, args ...any)`
+- `QueryRow(query string, args ...any)`
+
+Use `?` placeholders only. Binding is positional, left-to-right, and the arg count must match exactly. Placeholders are allowed only in value positions, and binding happens after parse but before planning and execution.
+
+This is not a prepared statement system. Each call parses, binds, plans, and executes once.
+
+Supported Go argument types are:
+
+- `int`
+- `string`
+- `bool`
+- `float64`
+- `nil`
+
+Unsupported argument types fail with an error.
+
 ## Canonical Example
 
 ```go
@@ -124,19 +146,23 @@ if err != nil {
 }
 defer db.Close()
 
-if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL, score REAL)"); err != nil {
+if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL)"); err != nil {
 	log.Fatal(err)
 }
-for _, sql := range []string{
-	"INSERT INTO users VALUES (1, 'Alice', TRUE, 3.14)",
-	"INSERT INTO users VALUES (2, 'Bob', FALSE, 1.25)",
+for _, user := range []struct {
+	id     int
+	name   string
+	active bool
+}{
+	{id: 1, name: "Alice", active: true},
+	{id: 2, name: "Bob", active: false},
 } {
-	if _, err := db.Exec(sql); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", user.id, user.name, user.active); err != nil {
 		log.Fatal(err)
 	}
 }
 
-rows, err := db.Query("SELECT id, name FROM users WHERE active = TRUE ORDER BY id")
+rows, err := db.Query("SELECT id, name FROM users WHERE active = ? ORDER BY id", true)
 if err != nil {
 	log.Fatal(err)
 }
@@ -155,18 +181,12 @@ if err := rows.Err(); err != nil {
 	log.Fatal(err)
 }
 
-var active any
-row := db.QueryRow("SELECT active FROM users WHERE id = 2")
-if err := row.Scan(&active); err != nil {
+var name string
+var active bool
+if err := db.QueryRow("SELECT name, active FROM users WHERE id = ?", 2).Scan(&name, &active); err != nil {
 	log.Fatal(err)
 }
-fmt.Println(active)
-
-var score float64
-if err := db.QueryRow("SELECT score FROM users WHERE id = 1").Scan(&score); err != nil {
-	log.Fatal(err)
-}
-fmt.Println(score)
+fmt.Println(name, active)
 ```
 
 See [examples/basic_usage/main.go](/c:/Projects/RovaDB/examples/basic_usage/main.go) for a complete open -> write -> close -> reopen -> query flow.
