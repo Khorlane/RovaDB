@@ -123,7 +123,11 @@ func (db *DB) Close() error {
 }
 
 // Exec executes a non-SELECT statement and returns a write result.
-func (db *DB) Exec(query string) (Result, error) {
+func (db *DB) Exec(query string, args ...any) (Result, error) {
+	return db.exec(query, args...)
+}
+
+func (db *DB) exec(query string, args ...any) (Result, error) {
 	if db == nil {
 		return Result{}, ErrInvalidArgument
 	}
@@ -139,6 +143,7 @@ func (db *DB) Exec(query string) (Result, error) {
 	if err := db.validateTxnState(); err != nil {
 		return Result{}, err
 	}
+	_ = args
 
 	stmt, err := parser.Parse(query)
 	if err != nil {
@@ -283,7 +288,11 @@ func (db *DB) Exec(query string) (Result, error) {
 }
 
 // Query executes a SELECT statement and returns a fully materialized row set.
-func (db *DB) Query(query string) (*Rows, error) {
+func (db *DB) Query(query string, args ...any) (*Rows, error) {
+	return db.query(query, args...)
+}
+
+func (db *DB) query(query string, args ...any) (*Rows, error) {
 	if db == nil {
 		return nil, ErrInvalidArgument
 	}
@@ -296,6 +305,7 @@ func (db *DB) Query(query string) (*Rows, error) {
 	if err := db.validateTxnState(); err != nil {
 		return &Rows{err: err, idx: -1}, nil
 	}
+	_ = args
 
 	stmt, err := parser.Parse(query)
 	if err != nil {
@@ -336,8 +346,8 @@ func (db *DB) Query(query string) (*Rows, error) {
 }
 
 // QueryRow executes Query and wraps the resulting row set for deferred handling.
-func (db *DB) QueryRow(query string) *Row {
-	rows, err := db.Query(query)
+func (db *DB) QueryRow(query string, args ...any) *Row {
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		rows = &Rows{
 			idx: -1,

@@ -30,6 +30,25 @@ func TestQueryAPILiteralSelectReturnsRows(t *testing.T) {
 	}
 }
 
+func TestQueryAPINoArgsStillWorksWithVariadicSignature(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT 1")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil {
+		t.Fatal("Query() rows = nil, want value")
+	}
+	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 1 {
+		t.Fatalf("rows.data = %#v, want [[1]]", rows.data)
+	}
+}
+
 func TestQueryAPISelectFromReturnsMaterializedRows(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
