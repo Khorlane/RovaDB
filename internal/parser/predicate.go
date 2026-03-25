@@ -103,11 +103,11 @@ func (p *predicateTokenParser) parseUnary() (*PredicateExpr, bool) {
 }
 
 func (p *predicateTokenParser) parseComparison() (*PredicateExpr, bool) {
-	left := p.current()
-	if left.Kind != tokenIdentifier || !isIdentifier(left.Lexeme) {
+	leftExpr, consumed, ok := parseValueExprTokenStream(p.tokens[p.pos:])
+	if !ok {
 		return nil, false
 	}
-	p.pos++
+	p.pos += consumed
 
 	op := p.current()
 	if !isWhereOperator(op.Lexeme) {
@@ -120,22 +120,28 @@ func (p *predicateTokenParser) parseComparison() (*PredicateExpr, bool) {
 		return nil, false
 	}
 
-	rightTok := p.current()
+	rightExpr, consumed, ok := parseValueExprTokenStream(p.tokens[p.pos:])
+	if !ok {
+		return nil, false
+	}
 	cond := &Condition{
-		Left:     left.Lexeme,
-		Operator: op.Lexeme,
+		LeftExpr:  leftExpr,
+		Operator:  op.Lexeme,
+		RightExpr: rightExpr,
 	}
-	if value, ok := parseLiteralToken(rightTok); ok {
-		cond.Right = value
-		p.pos++
-		return &PredicateExpr{Kind: PredicateKindComparison, Comparison: cond}, true
+	p.pos += consumed
+
+	if _, column, ok := flattenSimpleValueExpr(leftExpr); ok && column != "" {
+		cond.Left = column
 	}
-	if rightTok.Kind == tokenIdentifier && isIdentifier(rightTok.Lexeme) {
-		cond.RightRef = rightTok.Lexeme
-		p.pos++
-		return &PredicateExpr{Kind: PredicateKindComparison, Comparison: cond}, true
+	if value, column, ok := flattenSimpleValueExpr(rightExpr); ok {
+		if column != "" {
+			cond.RightRef = column
+		} else {
+			cond.Right = value
+		}
 	}
-	return nil, false
+	return &PredicateExpr{Kind: PredicateKindComparison, Comparison: cond}, true
 }
 
 func (p *predicateTokenParser) current() token {
@@ -155,11 +161,20 @@ func flattenPredicateItems(expr *PredicateExpr) ([]ConditionChainItem, bool) {
 		if expr.Comparison == nil {
 			return nil, false
 		}
-		if expr.Comparison.RightRef != "" {
+		leftValue, leftColumn, ok := flattenSimpleValueExpr(expr.Comparison.LeftExpr)
+		if !ok || leftColumn == "" || leftValue.Kind != ValueKindInvalid {
+			return nil, false
+		}
+		rightValue, rightColumn, ok := flattenSimpleValueExpr(expr.Comparison.RightExpr)
+		if !ok || rightColumn != "" {
 			return nil, false
 		}
 		return []ConditionChainItem{{
-			Condition: *expr.Comparison,
+			Condition: Condition{
+				Left:     leftColumn,
+				Operator: expr.Comparison.Operator,
+				Right:    rightValue,
+			},
 		}}, true
 	case PredicateKindAnd:
 		return flattenBinaryPredicate(expr, BooleanOpAnd)

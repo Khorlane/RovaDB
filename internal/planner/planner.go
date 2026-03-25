@@ -76,10 +76,38 @@ func simpleEqualityPredicateFromPredicate(predicate *parser.PredicateExpr) (stri
 	if predicate.Comparison.Operator != "=" {
 		return "", parser.Value{}, false
 	}
+	if predicate.Comparison.LeftExpr != nil && predicate.Comparison.RightExpr != nil {
+		leftValue, leftColumn, ok := parserOperandShape(predicate.Comparison.LeftExpr)
+		if !ok || leftColumn == "" || leftValue.Kind != parser.ValueKindInvalid {
+			return "", parser.Value{}, false
+		}
+		rightValue, rightColumn, ok := parserOperandShape(predicate.Comparison.RightExpr)
+		if !ok || rightColumn != "" {
+			return "", parser.Value{}, false
+		}
+		return leftColumn, rightValue, true
+	}
 	if predicate.Comparison.RightRef != "" {
 		return "", parser.Value{}, false
 	}
 	return predicate.Comparison.Left, predicate.Comparison.Right, true
+}
+
+func parserOperandShape(expr *parser.ValueExpr) (parser.Value, string, bool) {
+	if expr == nil {
+		return parser.Value{}, "", false
+	}
+
+	switch expr.Kind {
+	case parser.ValueExprKindLiteral:
+		return expr.Value, "", true
+	case parser.ValueExprKindColumnRef:
+		return parser.Value{}, expr.Column, true
+	case parser.ValueExprKindParen:
+		return parserOperandShape(expr.Inner)
+	default:
+		return parser.Value{}, "", false
+	}
 }
 
 func simpleEqualityPredicateFromWhere(where *parser.WhereClause) (string, parser.Value, bool) {

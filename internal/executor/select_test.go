@@ -548,6 +548,43 @@ func TestSelectWhereSupportsColumnComparison(t *testing.T) {
 	}
 }
 
+func TestSelectWhereSupportsFunctionOperands(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("ALICE")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.Int64Value(3), parser.StringValue("Cara")},
+		}},
+	}
+
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
+		TableName: "users",
+		Columns:   []string{"id"},
+		Predicate: &parser.PredicateExpr{
+			Kind: parser.PredicateKindComparison,
+			Comparison: &parser.Condition{
+				LeftExpr: &parser.ValueExpr{
+					Kind:     parser.ValueExprKindFunctionCall,
+					FuncName: "LOWER",
+					Arg:      &parser.ValueExpr{Kind: parser.ValueExprKindColumnRef, Column: "name"},
+				},
+				Operator: "=",
+				RightExpr: &parser.ValueExpr{
+					Kind:  parser.ValueExprKindLiteral,
+					Value: parser.StringValue("bob"),
+				},
+			},
+		},
+		OrderBy: &parser.OrderByClause{Column: "id"},
+	}), tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 1 || rows[0][0] != parser.Int64Value(2) {
+		t.Fatalf("Select() rows = %#v, want [[2]]", rows)
+	}
+}
+
 func TestSelectOrderByIntAsc(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{

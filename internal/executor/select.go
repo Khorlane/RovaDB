@@ -263,6 +263,18 @@ func evalPredicate(row []parser.Value, table *Table, predicate *parser.Predicate
 }
 
 func evalWhereCondition(row []parser.Value, table *Table, cond parser.Condition) (bool, error) {
+	if cond.LeftExpr != nil && cond.RightExpr != nil {
+		left, err := evalValueExpr(row, table, cond.LeftExpr)
+		if err != nil {
+			return false, err
+		}
+		right, err := evalValueExpr(row, table, cond.RightExpr)
+		if err != nil {
+			return false, err
+		}
+		return compareValues(cond.Operator, left, right)
+	}
+
 	idx, err := resolveColumnIndex(cond.Left, table)
 	if err != nil {
 		return false, err
@@ -285,6 +297,15 @@ func validateWhereColumns(where *parser.WhereClause, table *Table) error {
 	}
 
 	for _, item := range where.Items {
+		if item.Condition.LeftExpr != nil && item.Condition.RightExpr != nil {
+			if err := validateValueExprColumns(item.Condition.LeftExpr, table); err != nil {
+				return err
+			}
+			if err := validateValueExprColumns(item.Condition.RightExpr, table); err != nil {
+				return err
+			}
+			continue
+		}
 		if _, err := resolveColumnIndex(item.Condition.Left, table); err != nil {
 			return err
 		}
@@ -315,6 +336,12 @@ func validatePredicateColumns(predicate *parser.PredicateExpr, table *Table) err
 		if predicate.Comparison == nil {
 			return errUnsupportedStatement
 		}
+		if predicate.Comparison.LeftExpr != nil && predicate.Comparison.RightExpr != nil {
+			if err := validateValueExprColumns(predicate.Comparison.LeftExpr, table); err != nil {
+				return err
+			}
+			return validateValueExprColumns(predicate.Comparison.RightExpr, table)
+		}
 		_, err := resolveColumnIndex(predicate.Comparison.Left, table)
 		if err != nil {
 			return err
@@ -330,6 +357,53 @@ func validatePredicateColumns(predicate *parser.PredicateExpr, table *Table) err
 		return validatePredicateColumns(predicate.Right, table)
 	case parser.PredicateKindNot:
 		return validatePredicateColumns(predicate.Inner, table)
+	default:
+		return errUnsupportedStatement
+	}
+}
+
+func evalValueExpr(row []parser.Value, table *Table, expr *parser.ValueExpr) (parser.Value, error) {
+	if expr == nil {
+		return parser.Value{}, errUnsupportedStatement
+	}
+
+	switch expr.Kind {
+	case parser.ValueExprKindLiteral:
+		return expr.Value, nil
+	case parser.ValueExprKindColumnRef:
+		idx, err := resolveColumnIndex(expr.Column, table)
+		if err != nil {
+			return parser.Value{}, err
+		}
+		return row[idx], nil
+	case parser.ValueExprKindParen:
+		return evalValueExpr(row, table, expr.Inner)
+	case parser.ValueExprKindFunctionCall:
+		arg, err := evalValueExpr(row, table, expr.Arg)
+		if err != nil {
+			return parser.Value{}, err
+		}
+		return evalScalarFunction(expr.FuncName, arg)
+	default:
+		return parser.Value{}, errUnsupportedStatement
+	}
+}
+
+func validateValueExprColumns(expr *parser.ValueExpr, table *Table) error {
+	if expr == nil {
+		return nil
+	}
+
+	switch expr.Kind {
+	case parser.ValueExprKindLiteral:
+		return nil
+	case parser.ValueExprKindColumnRef:
+		_, err := resolveColumnIndex(expr.Column, table)
+		return err
+	case parser.ValueExprKindParen:
+		return validateValueExprColumns(expr.Inner, table)
+	case parser.ValueExprKindFunctionCall:
+		return validateValueExprColumns(expr.Arg, table)
 	default:
 		return errUnsupportedStatement
 	}

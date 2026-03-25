@@ -42,10 +42,12 @@ type Expr struct {
 
 // Condition is one parsed WHERE <column> <op> <literal> clause.
 type Condition struct {
-	Left     string
-	Operator string
-	Right    Value
-	RightRef string
+	Left      string
+	LeftExpr  *ValueExpr
+	Operator  string
+	Right     Value
+	RightRef  string
+	RightExpr *ValueExpr
 }
 
 // BooleanOp is the connector between WHERE conditions.

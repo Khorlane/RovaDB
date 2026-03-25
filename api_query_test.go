@@ -259,6 +259,34 @@ func TestQueryAPIPlaceholderArgsRespectBooleanPrecedence(t *testing.T) {
 	}
 }
 
+func TestQueryAPIPlaceholderArgsWithinFunctionOperand(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'ALICE')",
+		"INSERT INTO users VALUES (2, 'bob')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT id FROM users WHERE LOWER(name) = LOWER(?)", "BOB")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 || rows.data[0][0] != 2 {
+		t.Fatalf("rows.data = %#v, want [[2]]", rows.data)
+	}
+}
+
 func TestQueryAPIPlaceholderArgsCountMismatchTooFew(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

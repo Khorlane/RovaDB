@@ -158,9 +158,18 @@ At the end of a working session, update this file with:
 - planner index-scan selection still intentionally requires equality against a concrete literal value
 - legacy flat `WhereClause` backfill still applies only when a predicate comparison can be represented safely
 - full repo verification still passes after the comparison-operand modernization
+- `Parser Modernization Slice 18` completed as a batched operand-expression milestone
+- added a small value-expression AST for predicate operands
+- predicate comparisons now carry explicit left and right operand expressions while still backfilling the legacy flat condition shape when possible
+- predicate operands now support plain column references, literal values, parenthesized value expressions, and a small scalar-function subset
+- runtime predicate evaluation now resolves operand expressions before comparison
+- initial scalar-function operand support includes `LOWER`, `UPPER`, `LENGTH`, and `ABS`
+- placeholder binding now walks predicate operand expressions, including placeholders nested inside function arguments
+- planner index-scan selection remains conservative and still only uses plain column-equality-to-literal predicates
+- full repo verification still passes after the operand-expression milestone
 
 ## Next Recommended Step
 
 - next major parser step is deeper expression modernization
-- future `SELECT` and predicate growth should focus on value expressions, function calls, and comparison operands beyond the current literal-only helper path
-- the next high-value parser seam is moving predicate operands beyond plain column references and literals toward richer value expressions
+- future `SELECT` and predicate growth should focus on richer projection expressions, qualified references, and join-ready operand shapes
+- the next high-value parser seam is moving from predicate-only operand expressions toward shared value-expression parsing across more SQL contexts

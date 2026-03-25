@@ -1,6 +1,8 @@
 package executor
 
 import (
+	"strings"
+
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
@@ -161,5 +163,42 @@ func compareSortableValues(left, right parser.Value) (int, error) {
 		}
 	default:
 		return 0, errTypeMismatch
+	}
+}
+
+func evalScalarFunction(name string, arg parser.Value) (parser.Value, error) {
+	switch strings.ToUpper(name) {
+	case "LOWER":
+		if arg.Kind != parser.ValueKindString {
+			return parser.Value{}, errTypeMismatch
+		}
+		return parser.StringValue(strings.ToLower(arg.Str)), nil
+	case "UPPER":
+		if arg.Kind != parser.ValueKindString {
+			return parser.Value{}, errTypeMismatch
+		}
+		return parser.StringValue(strings.ToUpper(arg.Str)), nil
+	case "LENGTH":
+		if arg.Kind != parser.ValueKindString {
+			return parser.Value{}, errTypeMismatch
+		}
+		return parser.Int64Value(int64(len(arg.Str))), nil
+	case "ABS":
+		switch arg.Kind {
+		case parser.ValueKindInt64:
+			if arg.I64 < 0 {
+				return parser.Int64Value(-arg.I64), nil
+			}
+			return arg, nil
+		case parser.ValueKindReal:
+			if arg.F64 < 0 {
+				return parser.RealValue(-arg.F64), nil
+			}
+			return arg, nil
+		default:
+			return parser.Value{}, errTypeMismatch
+		}
+	default:
+		return parser.Value{}, errInvalidExpression
 	}
 }

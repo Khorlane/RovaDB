@@ -132,8 +132,9 @@ func collectPredicateValues(predicate *PredicateExpr) []*Value {
 	values := make([]*Value, 0)
 	switch predicate.Kind {
 	case PredicateKindComparison:
-		if predicate.Comparison != nil && predicate.Comparison.RightRef == "" && predicate.Comparison.Right.Kind == ValueKindPlaceholder {
-			values = append(values, &predicate.Comparison.Right)
+		if predicate.Comparison != nil {
+			values = append(values, collectValueExprPlaceholders(predicate.Comparison.LeftExpr)...)
+			values = append(values, collectValueExprPlaceholders(predicate.Comparison.RightExpr)...)
 		}
 	case PredicateKindAnd, PredicateKindOr:
 		values = append(values, collectPredicateValues(predicate.Left)...)
@@ -152,8 +153,9 @@ func collectAllPredicateValues(predicate *PredicateExpr) []*Value {
 	values := make([]*Value, 0)
 	switch predicate.Kind {
 	case PredicateKindComparison:
-		if predicate.Comparison != nil && predicate.Comparison.RightRef == "" {
-			values = append(values, &predicate.Comparison.Right)
+		if predicate.Comparison != nil {
+			values = append(values, collectAllValueExprValues(predicate.Comparison.LeftExpr)...)
+			values = append(values, collectAllValueExprValues(predicate.Comparison.RightExpr)...)
 		}
 	case PredicateKindAnd, PredicateKindOr:
 		values = append(values, collectAllPredicateValues(predicate.Left)...)
@@ -195,6 +197,42 @@ func bindArgumentValue(arg any) (Value, error) {
 
 func newBindError(msg string) error {
 	return fmt.Errorf("bind: %s", msg)
+}
+
+func collectValueExprPlaceholders(expr *ValueExpr) []*Value {
+	if expr == nil {
+		return nil
+	}
+
+	values := make([]*Value, 0)
+	switch expr.Kind {
+	case ValueExprKindLiteral:
+		if expr.Value.Kind == ValueKindPlaceholder {
+			values = append(values, &expr.Value)
+		}
+	case ValueExprKindFunctionCall:
+		values = append(values, collectValueExprPlaceholders(expr.Arg)...)
+	case ValueExprKindParen:
+		values = append(values, collectValueExprPlaceholders(expr.Inner)...)
+	}
+	return values
+}
+
+func collectAllValueExprValues(expr *ValueExpr) []*Value {
+	if expr == nil {
+		return nil
+	}
+
+	values := make([]*Value, 0)
+	switch expr.Kind {
+	case ValueExprKindLiteral:
+		values = append(values, &expr.Value)
+	case ValueExprKindFunctionCall:
+		values = append(values, collectAllValueExprValues(expr.Arg)...)
+	case ValueExprKindParen:
+		values = append(values, collectAllValueExprValues(expr.Inner)...)
+	}
+	return values
 }
 
 func syncLegacyWhereFromPredicate(stmt any) {
