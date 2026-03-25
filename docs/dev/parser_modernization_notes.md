@@ -182,9 +182,16 @@ At the end of a working session, update this file with:
 - plain unqualified references continue to work unchanged
 - aliases and multi-table resolution are still deferred; this slice only establishes the join-ready qualified-reference structure
 - full repo verification still passes after the qualified-reference milestone
+- `Parser Modernization Slice 21` completed as an alias-aware single-table `FROM` milestone
+- `SELECT` now carries a small `TableRef` shape in addition to the legacy `TableName` compatibility field
+- the modern `SELECT` parser accepts optional single-table aliases in both `FROM users u` and `FROM users AS u` forms
+- single-table executor validation, projection evaluation, predicate evaluation, and `ORDER BY` resolution now accept qualifiers that match either the base table name or the parsed alias
+- planner index-scan selection now accepts alias-qualified equality predicates for the current single-table `SELECT` shape
+- runtime scope is intentionally unchanged: this slice is still single-table only and does not activate joins
+- full repo verification still passes after the alias-aware single-table milestone
 
 ## Next Recommended Step
 
-- next major parser step is deeper expression modernization
-- future `SELECT` and predicate growth should focus on alias-aware resolution and multi-table `FROM` / join structure
-- the next high-value parser seam is moving from single-table qualified references to alias-aware table references and join syntax
+- next major parser step is multi-table `FROM` structure and join-aware name resolution
+- future `SELECT` growth should build from the new alias-aware `TableRef` shape instead of adding more single-table special cases
+- the next high-value parser seam is introducing multi-table `FROM` parsing while keeping runtime execution conservative until join planning/execution is ready

@@ -257,6 +257,33 @@ func TestLexSQLQualifiedIdentifierTokens(t *testing.T) {
 	}
 }
 
+func TestLexSQLAliasTokens(t *testing.T) {
+	tokens, err := lexSQL("SELECT u.id FROM users AS u")
+	if err != nil {
+		t.Fatalf("lexSQL() error = %v", err)
+	}
+
+	wantKinds := []tokenKind{
+		tokenKeywordSelect,
+		tokenIdentifier,
+		tokenDot,
+		tokenIdentifier,
+		tokenKeywordFrom,
+		tokenIdentifier,
+		tokenKeywordAs,
+		tokenIdentifier,
+		tokenEOF,
+	}
+	if len(tokens) != len(wantKinds) {
+		t.Fatalf("len(tokens) = %d, want %d (%#v)", len(tokens), len(wantKinds), tokens)
+	}
+	for i, want := range wantKinds {
+		if tokens[i].Kind != want {
+			t.Fatalf("tokens[%d].Kind = %v, want %v", i, tokens[i].Kind, want)
+		}
+	}
+}
+
 func TestLexSQLPreservesIdentifierLexemes(t *testing.T) {
 	tokens, err := lexSQL("create table User_Profile (_id INT)")
 	if err != nil {

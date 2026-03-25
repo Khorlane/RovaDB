@@ -67,13 +67,14 @@ func simpleEqualityPredicate(stmt *parser.SelectExpr) (string, parser.Value, boo
 	if stmt == nil {
 		return "", parser.Value{}, false
 	}
+	tableRef := stmt.PrimaryTableRef()
 	if stmt.Predicate != nil {
-		return simpleEqualityPredicateFromPredicate(stmt.Predicate, stmt.TableName)
+		return simpleEqualityPredicateFromPredicate(stmt.Predicate, tableRef)
 	}
-	return simpleEqualityPredicateFromWhere(stmt.Where, stmt.TableName)
+	return simpleEqualityPredicateFromWhere(stmt.Where, tableRef)
 }
 
-func simpleEqualityPredicateFromPredicate(predicate *parser.PredicateExpr, tableName string) (string, parser.Value, bool) {
+func simpleEqualityPredicateFromPredicate(predicate *parser.PredicateExpr, tableRef *parser.TableRef) (string, parser.Value, bool) {
 	if predicate == nil || predicate.Kind != parser.PredicateKindComparison || predicate.Comparison == nil {
 		return "", parser.Value{}, false
 	}
@@ -89,7 +90,7 @@ func simpleEqualityPredicateFromPredicate(predicate *parser.PredicateExpr, table
 		if !ok || rightColumn != "" {
 			return "", parser.Value{}, false
 		}
-		normalized, ok := normalizePlannerColumnName(leftColumn, tableName)
+		normalized, ok := normalizePlannerColumnName(leftColumn, tableRef)
 		if !ok {
 			return "", parser.Value{}, false
 		}
@@ -98,7 +99,7 @@ func simpleEqualityPredicateFromPredicate(predicate *parser.PredicateExpr, table
 	if predicate.Comparison.RightRef != "" {
 		return "", parser.Value{}, false
 	}
-	normalized, ok := normalizePlannerColumnName(predicate.Comparison.Left, tableName)
+	normalized, ok := normalizePlannerColumnName(predicate.Comparison.Left, tableRef)
 	if !ok {
 		return "", parser.Value{}, false
 	}
@@ -125,7 +126,7 @@ func parserOperandShape(expr *parser.ValueExpr) (parser.Value, string, bool) {
 	}
 }
 
-func normalizePlannerColumnName(name string, tableName string) (string, bool) {
+func normalizePlannerColumnName(name string, tableRef *parser.TableRef) (string, bool) {
 	if !strings.Contains(name, ".") {
 		return name, true
 	}
@@ -133,13 +134,16 @@ func normalizePlannerColumnName(name string, tableName string) (string, bool) {
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", false
 	}
-	if tableName != "" && parts[0] != tableName {
+	if tableRef == nil {
+		return "", false
+	}
+	if parts[0] != tableRef.Name && (tableRef.Alias == "" || parts[0] != tableRef.Alias) {
 		return "", false
 	}
 	return parts[1], true
 }
 
-func simpleEqualityPredicateFromWhere(where *parser.WhereClause, tableName string) (string, parser.Value, bool) {
+func simpleEqualityPredicateFromWhere(where *parser.WhereClause, tableRef *parser.TableRef) (string, parser.Value, bool) {
 	if where == nil || len(where.Items) != 1 {
 		return "", parser.Value{}, false
 	}
@@ -149,7 +153,7 @@ func simpleEqualityPredicateFromWhere(where *parser.WhereClause, tableName strin
 		return "", parser.Value{}, false
 	}
 
-	normalized, ok := normalizePlannerColumnName(item.Condition.Left, tableName)
+	normalized, ok := normalizePlannerColumnName(item.Condition.Left, tableRef)
 	if !ok {
 		return "", parser.Value{}, false
 	}

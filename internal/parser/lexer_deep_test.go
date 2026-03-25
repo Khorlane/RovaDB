@@ -111,6 +111,21 @@ func TestLexSQLDeepWhitespaceAndKeywordCoverage(t *testing.T) {
 			},
 		},
 		{
+			name:  "select alias keywords",
+			input: "SELECT u.id FROM users AS u",
+			wantKinds: []tokenKind{
+				tokenKeywordSelect,
+				tokenIdentifier,
+				tokenDot,
+				tokenIdentifier,
+				tokenKeywordFrom,
+				tokenIdentifier,
+				tokenKeywordAs,
+				tokenIdentifier,
+				tokenEOF,
+			},
+		},
+		{
 			name:  "predicate tokens",
 			input: "WHERE NOT (id <= -2 OR active = TRUE)",
 			wantKinds: []tokenKind{

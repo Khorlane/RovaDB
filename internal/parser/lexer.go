@@ -15,6 +15,7 @@ const (
 	tokenKeywordAlter
 	tokenKeywordAdd
 	tokenKeywordAnd
+	tokenKeywordAs
 	tokenKeywordColumn
 	tokenKeywordCreate
 	tokenKeywordDelete
@@ -193,6 +194,8 @@ func classifyWord(word string) tokenKind {
 		return tokenKeywordAdd
 	case "AND":
 		return tokenKeywordAnd
+	case "AS":
+		return tokenKeywordAs
 	case "COLUMN":
 		return tokenKeywordColumn
 	case "CREATE":

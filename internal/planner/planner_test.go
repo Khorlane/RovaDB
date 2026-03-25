@@ -103,6 +103,24 @@ func TestPlanSelectQualifiedEqualityWithIndexUsesIndexScan(t *testing.T) {
 	}
 }
 
+func TestPlanSelectAliasQualifiedEqualityWithIndexUsesIndexScan(t *testing.T) {
+	stmt, ok := parser.ParseSelectExpr("SELECT u.id FROM users AS u WHERE u.id = 1")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+
+	plan, err := PlanSelect(stmt, testPlannerTables("id"))
+	if err != nil {
+		t.Fatalf("PlanSelect() error = %v", err)
+	}
+	if plan.ScanType != ScanTypeIndex {
+		t.Fatalf("PlanSelect().ScanType = %q, want %q", plan.ScanType, ScanTypeIndex)
+	}
+	if plan.IndexScan == nil || plan.IndexScan.TableName != "users" || plan.IndexScan.ColumnName != "id" || plan.IndexScan.Value != parser.Int64Value(1) {
+		t.Fatalf("PlanSelect().IndexScan = %#v, want users.id = 1", plan.IndexScan)
+	}
+}
+
 func TestPlanSelectEqualityWithoutIndexFallsBackToTableScan(t *testing.T) {
 	stmt, ok := parser.ParseSelectExpr("SELECT id FROM users WHERE id = 1")
 	if !ok {

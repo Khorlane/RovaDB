@@ -88,6 +88,31 @@ func TestParseSelectExprQualifiedProjectionColumn(t *testing.T) {
 	}
 }
 
+func TestParseSelectExprSingleTableAlias(t *testing.T) {
+	got, ok := ParseSelectExpr("SELECT u.id FROM users AS u WHERE u.id = 1 ORDER BY u.id DESC")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	if got == nil {
+		t.Fatal("ParseSelectExpr() = nil, want value")
+	}
+	if got.TableName != "users" {
+		t.Fatalf("TableName = %q, want %q", got.TableName, "users")
+	}
+	if len(got.From) != 1 || got.From[0].Name != "users" || got.From[0].Alias != "u" {
+		t.Fatalf("From = %#v, want users AS u", got.From)
+	}
+	if len(got.ProjectionExprs) != 1 || got.ProjectionExprs[0].Qualifier != "u" || got.ProjectionExprs[0].Column != "id" {
+		t.Fatalf("ProjectionExprs = %#v, want u.id", got.ProjectionExprs)
+	}
+	if got.Predicate == nil || got.Predicate.Comparison == nil || got.Predicate.Comparison.Left != "u.id" {
+		t.Fatalf("Predicate = %#v, want alias-qualified comparison", got.Predicate)
+	}
+	if got.OrderBy == nil || got.OrderBy.Column != "u.id" || !got.OrderBy.Desc {
+		t.Fatalf("OrderBy = %#v, want u.id DESC", got.OrderBy)
+	}
+}
+
 func TestParseSelectExprCountStar(t *testing.T) {
 	tests := []struct {
 		name string

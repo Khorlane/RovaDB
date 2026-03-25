@@ -869,6 +869,39 @@ func TestSelectQualifiedProjectionAndPredicate(t *testing.T) {
 	}
 }
 
+func TestSelectAliasQualifiedProjectionPredicateAndOrderBy(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.Int64Value(1), parser.StringValue("alice")},
+		}},
+	}
+
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
+		TableName: "users",
+		From:      []parser.TableRef{{Name: "users", Alias: "u"}},
+		ProjectionExprs: []*parser.ValueExpr{
+			{Kind: parser.ValueExprKindColumnRef, Qualifier: "u", Column: "id"},
+		},
+		ProjectionLabels: []string{"u.id"},
+		Predicate: &parser.PredicateExpr{
+			Kind: parser.PredicateKindComparison,
+			Comparison: &parser.Condition{
+				LeftExpr:  &parser.ValueExpr{Kind: parser.ValueExprKindColumnRef, Qualifier: "u", Column: "name"},
+				Operator:  "!=",
+				RightExpr: &parser.ValueExpr{Kind: parser.ValueExprKindLiteral, Value: parser.StringValue("bob")},
+			},
+		},
+		OrderBy: &parser.OrderByClause{Column: "u.id"},
+	}), tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 1 || rows[0][0] != parser.Int64Value(1) {
+		t.Fatalf("Select() rows = %#v, want [[1]]", rows)
+	}
+}
+
 func TestValidateSelectPlanLiteralAllowsNilTableScan(t *testing.T) {
 	plan, err := planner.PlanSelect(&parser.SelectExpr{
 		Expr: &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: 1},

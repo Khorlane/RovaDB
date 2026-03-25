@@ -75,10 +75,17 @@ type OrderByClause struct {
 	Desc   bool
 }
 
+// TableRef is a FROM-clause table reference.
+type TableRef struct {
+	Name  string
+	Alias string
+}
+
 // SelectExpr is the minimal parsed form for SELECT <expr>.
 type SelectExpr struct {
 	Expr             *Expr
 	TableName        string
+	From             []TableRef
 	Columns          []string
 	ProjectionExprs  []*ValueExpr
 	ProjectionLabels []string
@@ -104,6 +111,19 @@ func ParseSelectExpr(sql string) (*SelectExpr, bool) {
 	return nil, false
 }
 
+func (s *SelectExpr) PrimaryTableRef() *TableRef {
+	if s == nil {
+		return nil
+	}
+	if len(s.From) > 0 {
+		return &s.From[0]
+	}
+	if s.TableName == "" {
+		return nil
+	}
+	return &TableRef{Name: s.TableName}
+}
+
 func parseOrderByClause(input string) (*OrderByClause, bool) {
 	tokens, err := lexSQL(input)
 	if err != nil {
@@ -116,21 +136,24 @@ func parseOrderByClause(input string) (*OrderByClause, bool) {
 		return nil, false
 	}
 
-	orderBy := &OrderByClause{Column: tokens[0].Lexeme}
-	switch len(tokens) {
-	case 2:
-		if tokens[1].Kind != tokenEOF {
-			return nil, false
-		}
+	column := tokens[0].Lexeme
+	pos := 1
+	if len(tokens) > 3 && tokens[1].Kind == tokenDot && tokens[2].Kind == tokenIdentifier && isIdentifier(tokens[2].Lexeme) {
+		column = column + "." + tokens[2].Lexeme
+		pos = 3
+	}
+
+	orderBy := &OrderByClause{Column: column}
+	switch {
+	case pos >= len(tokens):
+		return nil, false
+	case tokens[pos].Kind == tokenEOF:
 		return orderBy, true
-	case 3:
-		if tokens[2].Kind != tokenEOF {
-			return nil, false
-		}
+	case pos+1 < len(tokens) && tokens[pos+1].Kind == tokenEOF:
 		switch {
-		case strings.EqualFold(tokens[1].Lexeme, "ASC"):
+		case strings.EqualFold(tokens[pos].Lexeme, "ASC"):
 			return orderBy, true
-		case strings.EqualFold(tokens[1].Lexeme, "DESC"):
+		case strings.EqualFold(tokens[pos].Lexeme, "DESC"):
 			orderBy.Desc = true
 			return orderBy, true
 		default:
