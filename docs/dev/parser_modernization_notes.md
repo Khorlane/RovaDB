@@ -210,9 +210,18 @@ At the end of a working session, update this file with:
 - public query materialization now reports projected column names correctly for joined selects
 - comma-style multi-table `FROM` remains unsupported at runtime; the active join runtime is intentionally limited to the explicit two-table inner-equality path
 - full repo verification still passes after the first join-runtime milestone
+- `Parser Modernization Slice 25` completed as an aggregate-execution milestone
+- shared value expressions now distinguish scalar function calls from aggregate calls in the parser AST
+- `SELECT` projection parsing now accepts `COUNT(expr)`, `MIN(expr)`, `MAX(expr)`, `AVG(expr)`, and `SUM(expr)` in addition to the existing `COUNT(*)` form
+- executor now runs aggregate-only projection queries for both single-table selects and the active two-table inner-join path
+- `COUNT(expr)` counts non-`NULL` evaluated values, while `MIN`, `MAX`, `AVG`, and `SUM` skip `NULL` inputs and return `NULL` when no non-`NULL` rows contribute
+- aggregate evaluation currently supports text for `MIN`/`MAX` and numeric inputs for `AVG`/`SUM`
+- mixed aggregate and non-aggregate projection queries remain intentionally unsupported without grouping semantics
+- planner/index behavior remains conservative; this milestone activates aggregate execution without broadening index-planning rules
+- full repo verification still passes after the aggregate-execution milestone
 
 ## Next Recommended Step
 
-- next major parser step is aggregate-function execution beyond `COUNT(*)`
 - future `SELECT` growth should keep using the resolver-based join path for richer expressions and additional join-adjacent features
-- the next high-value seam is turning the currently parsed aggregate surface into real execution semantics for `MIN`, `MAX`, `AVG`, and `SUM`
+- the next high-value seam is deeper scalar/date-time expression growth on top of the shared value-expression path
+- a likely next milestone is introducing a small date/time scalar-function surface before revisiting grouped aggregates

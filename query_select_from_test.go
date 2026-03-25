@@ -1016,18 +1016,55 @@ func TestQuerySelectCountColumnUnsupported(t *testing.T) {
 	}
 	defer db.Close()
 
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, NULL)",
+		"INSERT INTO users VALUES (3, 'cara')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
 	rows, err := db.Query("SELECT COUNT(id) FROM users")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
 	defer rows.Close()
 
-	if rows.Next() {
-		t.Fatal("Next() = true, want false")
+	assertRowsIntSequence(t, rows, 3)
+}
+
+func TestQuerySelectCountExprSkipsNulls(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
 	}
-	if rows.Err() == nil || rows.Err().Error() != "parse: unsupported query form" {
-		t.Fatalf("Err() = %v, want %q", rows.Err(), "parse: unsupported query form")
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
 	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, NULL)",
+		"INSERT INTO users VALUES (3, 'cara')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT COUNT(name) FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsIntSequence(t, rows, 2)
 }
 
 func TestQuerySelectCountMixedProjectionUnsupported(t *testing.T) {
@@ -1036,6 +1073,13 @@ func TestQuerySelectCountMixedProjectionUnsupported(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
 
 	rows, err := db.Query("SELECT COUNT(*), name FROM users")
 	if err != nil {
@@ -1046,8 +1090,8 @@ func TestQuerySelectCountMixedProjectionUnsupported(t *testing.T) {
 	if rows.Next() {
 		t.Fatal("Next() = true, want false")
 	}
-	if rows.Err() == nil || rows.Err().Error() != "parse: unsupported query form" {
-		t.Fatalf("Err() = %v, want %q", rows.Err(), "parse: unsupported query form")
+	if rows.Err() == nil || rows.Err().Error() != "execution: unsupported query form" {
+		t.Fatalf("Err() = %v, want %q", rows.Err(), "execution: unsupported query form")
 	}
 }
 

@@ -97,6 +97,9 @@ func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]p
 		}
 		baseRows = append(baseRows, row)
 	}
+	if hasAggregateProjection(sel) {
+		return executeAggregateSelectRows(sel, table, baseRows)
+	}
 	if err := sortSelectRows(baseRows, sel, table, sel.OrderBy); err != nil {
 		return nil, err
 	}
@@ -111,6 +114,62 @@ func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]p
 	}
 
 	return rows, nil
+}
+
+func hasAggregateProjection(sel *parser.SelectExpr) bool {
+	if sel == nil {
+		return false
+	}
+	if sel.IsCountStar {
+		return true
+	}
+	for _, expr := range sel.ProjectionExprs {
+		if isAggregateExpr(expr) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateAggregateProjectionShape(sel *parser.SelectExpr) error {
+	if sel == nil {
+		return nil
+	}
+	if sel.OrderBy != nil {
+		return errUnsupportedStatement
+	}
+	if sel.IsCountStar {
+		return nil
+	}
+	if len(sel.ProjectionExprs) == 0 {
+		return errUnsupportedStatement
+	}
+	for _, expr := range sel.ProjectionExprs {
+		if !isAggregateExpr(expr) {
+			return errUnsupportedStatement
+		}
+	}
+	return nil
+}
+
+func executeAggregateSelectRows(sel *parser.SelectExpr, table *Table, rows [][]parser.Value) ([][]parser.Value, error) {
+	if err := validateAggregateProjectionShape(sel); err != nil {
+		return nil, err
+	}
+	if sel.IsCountStar {
+		return [][]parser.Value{{parser.Int64Value(int64(len(rows)))}}, nil
+	}
+	out := make([]parser.Value, 0, len(sel.ProjectionExprs))
+	for _, expr := range sel.ProjectionExprs {
+		value, err := evalAggregateExprRows(expr, rows, func(row []parser.Value, expr *parser.ValueExpr) (parser.Value, error) {
+			return evalSelectValueExpr(row, sel, table, expr)
+		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, value)
+	}
+	return [][]parser.Value{out}, nil
 }
 
 func validateSelectPlan(plan *planner.SelectPlan) error {
@@ -775,6 +834,14 @@ func validateSelectValueExprColumns(sel *parser.SelectExpr, expr *parser.ValueEx
 	case parser.ValueExprKindParen:
 		return validateSelectValueExprColumns(sel, expr.Inner, table)
 	case parser.ValueExprKindFunctionCall:
+		return validateSelectValueExprColumns(sel, expr.Arg, table)
+	case parser.ValueExprKindAggregateCall:
+		if expr.StarArg {
+			if strings.EqualFold(expr.FuncName, "COUNT") {
+				return nil
+			}
+			return errUnsupportedStatement
+		}
 		return validateSelectValueExprColumns(sel, expr.Arg, table)
 	default:
 		return errUnsupportedStatement

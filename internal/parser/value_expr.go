@@ -9,6 +9,7 @@ const (
 	ValueExprKindLiteral
 	ValueExprKindColumnRef
 	ValueExprKindFunctionCall
+	ValueExprKindAggregateCall
 	ValueExprKindParen
 )
 
@@ -19,6 +20,7 @@ type ValueExpr struct {
 	Column    string
 	FuncName  string
 	Arg       *ValueExpr
+	StarArg   bool
 	Inner     *ValueExpr
 }
 
@@ -79,13 +81,25 @@ func (p *valueExprTokenParser) parse() (*ValueExpr, bool) {
 				return nil, false
 			}
 			p.pos++
+			if p.current().Kind == tokenStar {
+				p.pos++
+				if p.current().Kind != tokenRParen {
+					return nil, false
+				}
+				p.pos++
+				return &ValueExpr{
+					Kind:     aggregateOrScalarKind(tok.Lexeme),
+					FuncName: strings.ToUpper(tok.Lexeme),
+					StarArg:  true,
+				}, true
+			}
 			arg, ok := p.parse()
 			if !ok || p.current().Kind != tokenRParen {
 				return nil, false
 			}
 			p.pos++
 			return &ValueExpr{
-				Kind:     ValueExprKindFunctionCall,
+				Kind:     aggregateOrScalarKind(tok.Lexeme),
 				FuncName: strings.ToUpper(tok.Lexeme),
 				Arg:      arg,
 			}, true
@@ -136,5 +150,21 @@ func flattenSimpleValueExpr(expr *ValueExpr) (Value, string, bool) {
 		return flattenSimpleValueExpr(expr.Inner)
 	default:
 		return Value{}, "", false
+	}
+}
+
+func aggregateOrScalarKind(name string) ValueExprKind {
+	if isAggregateFunctionName(name) {
+		return ValueExprKindAggregateCall
+	}
+	return ValueExprKindFunctionCall
+}
+
+func isAggregateFunctionName(name string) bool {
+	switch strings.ToUpper(name) {
+	case "COUNT", "MIN", "MAX", "AVG", "SUM":
+		return true
+	default:
+		return false
 	}
 }

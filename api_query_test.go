@@ -410,6 +410,41 @@ func TestQueryAPICountStarWithPlaceholderWhereClause(t *testing.T) {
 	}
 }
 
+func TestQueryAPIAggregateFunctionsReturnSingleRow(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE metrics (id INT, name TEXT, score REAL)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO metrics VALUES (1, 'beta', 1.5)",
+		"INSERT INTO metrics VALUES (2, 'alpha', 2.5)",
+		"INSERT INTO metrics VALUES (3, 'gamma', 3.0)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT COUNT(name), AVG(score), SUM(score), MIN(name), MAX(score) FROM metrics")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || rows.err != nil {
+		t.Fatalf("rows = %#v, want aggregate rowset", rows)
+	}
+	if len(rows.data) != 1 || len(rows.data[0]) != 5 {
+		t.Fatalf("rows.data = %#v, want one aggregate row", rows.data)
+	}
+	if rows.data[0][0] != 3 || rows.data[0][1] != (1.5+2.5+3.0)/3.0 || rows.data[0][2] != 7.0 || rows.data[0][3] != "alpha" || rows.data[0][4] != 3.0 {
+		t.Fatalf("rows.data = %#v, want [[3 2.333... 7 alpha 3.0]]", rows.data)
+	}
+}
+
 func TestQueryAPIRejectsPlaceholderOutsideValuePositionThroughPublicPath(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

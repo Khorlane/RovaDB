@@ -147,9 +147,6 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 			IsCountStar: true,
 		}, true
 	}
-	if strings.HasPrefix(strings.ToUpper(selectList), "COUNT(") {
-		return nil, false
-	}
 
 	rawColumns := strings.Split(selectList, ",")
 	labels := make([]string, 0, len(rawColumns))

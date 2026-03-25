@@ -77,6 +77,9 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 		}
 		return [][]parser.Value{{parser.Int64Value(int64(len(joinedRows)))}}, nil
 	}
+	if hasAggregateProjection(plan.Stmt) {
+		return executeJoinAggregateSelectRows(plan.Stmt, joinedRows, resolver)
+	}
 
 	if err := sortJoinRows(joinedRows, plan.Stmt, resolver); err != nil {
 		return nil, err
@@ -91,6 +94,26 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 		rows = append(rows, out)
 	}
 	return rows, nil
+}
+
+func executeJoinAggregateSelectRows(sel *parser.SelectExpr, rows [][]parser.Value, resolver *joinSelectResolver) ([][]parser.Value, error) {
+	if err := validateAggregateProjectionShape(sel); err != nil {
+		return nil, err
+	}
+	if sel.IsCountStar {
+		return [][]parser.Value{{parser.Int64Value(int64(len(rows)))}}, nil
+	}
+	out := make([]parser.Value, 0, len(sel.ProjectionExprs))
+	for _, expr := range sel.ProjectionExprs {
+		value, err := evalAggregateExprRows(expr, rows, func(row []parser.Value, expr *parser.ValueExpr) (parser.Value, error) {
+			return evalJoinValueExpr(row, expr, resolver)
+		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, value)
+	}
+	return [][]parser.Value{out}, nil
 }
 
 func ProjectedColumnNamesForPlan(plan *planner.SelectPlan, tables map[string]*Table) ([]string, error) {
@@ -327,6 +350,14 @@ func validateJoinValueExprColumns(expr *parser.ValueExpr, resolver *joinSelectRe
 	case parser.ValueExprKindParen:
 		return validateJoinValueExprColumns(expr.Inner, resolver)
 	case parser.ValueExprKindFunctionCall:
+		return validateJoinValueExprColumns(expr.Arg, resolver)
+	case parser.ValueExprKindAggregateCall:
+		if expr.StarArg {
+			if strings.EqualFold(expr.FuncName, "COUNT") {
+				return nil
+			}
+			return errUnsupportedStatement
+		}
 		return validateJoinValueExprColumns(expr.Arg, resolver)
 	default:
 		return errUnsupportedStatement

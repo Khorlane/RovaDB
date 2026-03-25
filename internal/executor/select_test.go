@@ -779,6 +779,102 @@ func TestSelectCountStarOrderByUnsupported(t *testing.T) {
 	}
 }
 
+func TestSelectAggregateFunctionsSingleTable(t *testing.T) {
+	tables := map[string]*Table{
+		"metrics": {Name: "metrics", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "name", Type: parser.ColumnTypeText},
+			{Name: "score", Type: parser.ColumnTypeReal},
+		}, Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("beta"), parser.RealValue(1.5)},
+			{parser.Int64Value(2), parser.StringValue("alpha"), parser.RealValue(2.5)},
+			{parser.Int64Value(3), parser.StringValue("gamma"), parser.RealValue(3.0)},
+		}},
+	}
+
+	stmt, ok := parser.ParseSelectExpr("SELECT COUNT(name), AVG(score), SUM(score), MIN(name), MAX(score) FROM metrics")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	plan, err := planner.PlanSelect(stmt)
+	if err != nil {
+		t.Fatalf("PlanSelect() error = %v", err)
+	}
+	rows, err := Select(plan, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 1 || len(rows[0]) != 5 {
+		t.Fatalf("rows = %#v, want one aggregate row", rows)
+	}
+	if rows[0][0] != parser.Int64Value(3) || rows[0][1] != parser.RealValue((1.5+2.5+3.0)/3.0) || rows[0][2] != parser.RealValue(7.0) || rows[0][3] != parser.StringValue("alpha") || rows[0][4] != parser.RealValue(3.0) {
+		t.Fatalf("rows[0] = %#v, want [3 2.333... 7 alpha 3.0]", rows[0])
+	}
+}
+
+func TestSelectAggregateFunctionsJoin(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "dept_id", Type: parser.ColumnTypeInt},
+		}, Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.Int64Value(10)},
+			{parser.Int64Value(2), parser.Int64Value(20)},
+			{parser.Int64Value(3), parser.Int64Value(10)},
+		}},
+		"departments": {Name: "departments", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "name", Type: parser.ColumnTypeText},
+		}, Rows: [][]parser.Value{
+			{parser.Int64Value(10), parser.StringValue("eng")},
+			{parser.Int64Value(20), parser.StringValue("ops")},
+		}},
+	}
+
+	stmt, ok := parser.ParseSelectExpr("SELECT COUNT(d.name), MIN(d.name), MAX(d.name) FROM users u JOIN departments d ON u.dept_id = d.id")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	plan, err := planner.PlanSelect(stmt)
+	if err != nil {
+		t.Fatalf("PlanSelect() error = %v", err)
+	}
+	rows, err := Select(plan, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 1 || len(rows[0]) != 3 {
+		t.Fatalf("rows = %#v, want one aggregate row", rows)
+	}
+	if rows[0][0] != parser.Int64Value(3) || rows[0][1] != parser.StringValue("eng") || rows[0][2] != parser.StringValue("ops") {
+		t.Fatalf("rows[0] = %#v, want [3 eng ops]", rows[0])
+	}
+}
+
+func TestSelectAggregateProjectionRejectsMixedAggregateAndNonAggregate(t *testing.T) {
+	tables := map[string]*Table{
+		"metrics": {Name: "metrics", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "score", Type: parser.ColumnTypeReal},
+		}, Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.RealValue(1.5)},
+		}},
+	}
+
+	stmt, ok := parser.ParseSelectExpr("SELECT AVG(score), id FROM metrics")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	plan, err := planner.PlanSelect(stmt)
+	if err != nil {
+		t.Fatalf("PlanSelect() error = %v", err)
+	}
+	_, err = Select(plan, tables)
+	if err != errUnsupportedStatement {
+		t.Fatalf("Select() error = %v, want %v", err, errUnsupportedStatement)
+	}
+}
+
 func TestSelectMissingTable(t *testing.T) {
 	_, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users"}), map[string]*Table{})
 	if err != errTableDoesNotExist {

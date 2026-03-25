@@ -567,9 +567,19 @@ func TestParseSelectExprDirect(t *testing.T) {
 			ok:   true,
 			want: &parser.Expr{},
 		},
+		{
+			name: "select count column",
+			sql:  "SELECT COUNT(id) FROM users",
+			ok:   true,
+			want: &parser.Expr{},
+		},
+		{
+			name: "select count mixed projection",
+			sql:  "SELECT COUNT(*), name FROM users",
+			ok:   true,
+			want: &parser.Expr{},
+		},
 		{name: "select identifier", sql: "SELECT abc", ok: false},
-		{name: "select count column", sql: "SELECT COUNT(id) FROM users", ok: false},
-		{name: "select count mixed projection", sql: "SELECT COUNT(*), name FROM users", ok: false},
 	}
 
 	for _, tc := range tests {
@@ -620,6 +630,18 @@ func TestParseSelectExprDirect(t *testing.T) {
 			if tc.name == "select count star" {
 				if got.TableName != "users" || !got.IsCountStar || got.OrderBy != nil {
 					t.Fatalf("ParseSelectExpr() = %#v, want table users count(*)", got)
+				}
+				return
+			}
+			if tc.name == "select count column" {
+				if got.TableName != "users" || len(got.ProjectionExprs) != 1 || got.ProjectionExprs[0].Kind != parser.ValueExprKindAggregateCall || got.ProjectionExprs[0].FuncName != "COUNT" {
+					t.Fatalf("ParseSelectExpr() = %#v, want table users count(id)", got)
+				}
+				return
+			}
+			if tc.name == "select count mixed projection" {
+				if got.TableName != "users" || len(got.ProjectionExprs) != 2 || got.ProjectionExprs[0].Kind != parser.ValueExprKindAggregateCall || got.ProjectionExprs[1].Kind != parser.ValueExprKindColumnRef {
+					t.Fatalf("ParseSelectExpr() = %#v, want table users count(*) and name projection", got)
 				}
 				return
 			}

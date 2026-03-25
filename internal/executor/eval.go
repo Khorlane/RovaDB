@@ -161,6 +161,15 @@ func compareSortableValues(left, right parser.Value) (int, error) {
 		default:
 			return 0, nil
 		}
+	case parser.ValueKindReal:
+		switch {
+		case left.F64 < right.F64:
+			return -1, nil
+		case left.F64 > right.F64:
+			return 1, nil
+		default:
+			return 0, nil
+		}
 	default:
 		return 0, errTypeMismatch
 	}
@@ -201,4 +210,8 @@ func evalScalarFunction(name string, arg parser.Value) (parser.Value, error) {
 	default:
 		return parser.Value{}, errInvalidExpression
 	}
+}
+
+func isAggregateExpr(expr *parser.ValueExpr) bool {
+	return expr != nil && expr.Kind == parser.ValueExprKindAggregateCall
 }

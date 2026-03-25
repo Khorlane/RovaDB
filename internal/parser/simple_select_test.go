@@ -185,6 +185,21 @@ func TestParseSelectExprCountStar(t *testing.T) {
 	}
 }
 
+func TestParseSelectExprAggregateFunctions(t *testing.T) {
+	got, ok := ParseSelectExpr("SELECT COUNT(name), AVG(score), SUM(score), MIN(name), MAX(score) FROM users")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	if got == nil || len(got.ProjectionExprs) != 5 {
+		t.Fatalf("ParseSelectExpr() = %#v, want five aggregate projections", got)
+	}
+	for i, name := range []string{"COUNT", "AVG", "SUM", "MIN", "MAX"} {
+		if got.ProjectionExprs[i].Kind != ValueExprKindAggregateCall || got.ProjectionExprs[i].FuncName != name {
+			t.Fatalf("ProjectionExprs[%d] = %#v, want aggregate %q", i, got.ProjectionExprs[i], name)
+		}
+	}
+}
+
 func TestParseSelectFromTokensCountStar(t *testing.T) {
 	got, ok := parseSelectFromTokens("SELECT COUNT(*) FROM users WHERE id > 1")
 	if !ok {
@@ -213,10 +228,8 @@ func TestParseSelectExprSelectStarUsesNilColumns(t *testing.T) {
 
 func TestParseSelectExprInvalidCountStar(t *testing.T) {
 	for _, sql := range []string{
-		"SELECT COUNT(id) FROM users",
-		"SELECT COUNT(*), name FROM users",
 		"SELECT COUNT(*) name FROM users",
-		"SELECT COUNT( * ) FROM users",
+		"SELECT COUNT() FROM users",
 	} {
 		if got, ok := ParseSelectExpr(sql); ok {
 			t.Fatalf("ParseSelectExpr(%q) = %#v, want parse failure", sql, got)
