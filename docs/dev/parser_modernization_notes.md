@@ -92,8 +92,12 @@ At the end of a working session, update this file with:
 - added an isolated token-driven `DELETE FROM` parser
 - the modern `DELETE FROM` parser intentionally reuses the existing `WHERE` parser for now
 - full repo verification still passes after the isolated `DELETE FROM` slice
+- `Parser Modernization Slice 7` completed
+- `Parse()` now routes `DELETE FROM` through the token-driven parser path
+- the active `DELETE FROM` path still intentionally reuses the existing `WHERE` parser
+- full repo verification still passes after the integration
 
 ## Next Recommended Step
 
-- wire the token-driven `DELETE FROM` parser into `Parse()`
-- then continue to `UPDATE` before moving into `INSERT` or `SELECT`
+- continue to `UPDATE` before moving into `INSERT` or `SELECT`
+- keep reusing the existing `WHERE` parser until expression modernization is ready

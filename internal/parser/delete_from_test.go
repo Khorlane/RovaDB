@@ -69,6 +69,28 @@ func TestParseDelete(t *testing.T) {
 	}
 }
 
+func TestParseDeleteViaParse(t *testing.T) {
+	stmt, err := Parse("DELETE FROM users WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	got, ok := stmt.(*DeleteStmt)
+	if !ok {
+		t.Fatalf("Parse() stmt type = %T, want *DeleteStmt", stmt)
+	}
+	if got.TableName != "users" {
+		t.Fatalf("Parse().TableName = %q, want %q", got.TableName, "users")
+	}
+	wantWhere := &WhereClause{Items: []ConditionChainItem{{Condition: Condition{Left: "id", Operator: "=", Right: Int64Value(1)}}}}
+	if got.Where == nil {
+		t.Fatal("Parse().Where = nil, want non-nil")
+	}
+	if len(got.Where.Items) != len(wantWhere.Items) || got.Where.Items[0] != wantWhere.Items[0] {
+		t.Fatalf("Parse().Where = %#v, want %#v", got.Where, wantWhere)
+	}
+}
+
 func TestParseDeleteTokens(t *testing.T) {
 	tests := []struct {
 		name      string
