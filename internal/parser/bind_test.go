@@ -75,3 +75,51 @@ func TestBindPlaceholdersSelectWhereOrdering(t *testing.T) {
 		t.Fatalf("second bound value = %#v, want %#v", sel.Where.Items[1].Condition.Right, StringValue("steve"))
 	}
 }
+
+func TestBindArgumentValueSupportedTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		arg  any
+		want Value
+	}{
+		{name: "int", arg: 1, want: Int64Value(1)},
+		{name: "string", arg: "steve", want: StringValue("steve")},
+		{name: "bool true", arg: true, want: BoolValue(true)},
+		{name: "bool false", arg: false, want: BoolValue(false)},
+		{name: "float64", arg: 3.14, want: RealValue(3.14)},
+		{name: "nil", arg: nil, want: NullValue()},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := bindArgumentValue(tc.arg)
+			if err != nil {
+				t.Fatalf("bindArgumentValue() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("bindArgumentValue() = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBindArgumentValueUnsupportedTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		arg  any
+	}{
+		{name: "int64", arg: int64(1)},
+		{name: "float32", arg: float32(3.14)},
+		{name: "struct", arg: struct{}{}},
+		{name: "slice", arg: []string{"x"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := bindArgumentValue(tc.arg)
+			if err == nil || !strings.Contains(err.Error(), "unsupported placeholder argument type") {
+				t.Fatalf("bindArgumentValue() error = %v, want unsupported placeholder argument type", err)
+			}
+		})
+	}
+}

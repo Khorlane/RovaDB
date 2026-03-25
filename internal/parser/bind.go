@@ -122,20 +122,10 @@ func bindArgumentValue(arg any) (Value, error) {
 		return NullValue(), nil
 	case int:
 		return Int64Value(int64(v)), nil
-	case int8:
-		return Int64Value(int64(v)), nil
-	case int16:
-		return Int64Value(int64(v)), nil
-	case int32:
-		return Int64Value(int64(v)), nil
-	case int64:
-		return Int64Value(v), nil
 	case string:
 		return StringValue(v), nil
 	case bool:
 		return BoolValue(v), nil
-	case float32:
-		return RealValue(float64(v)), nil
 	case float64:
 		return RealValue(v), nil
 	default:

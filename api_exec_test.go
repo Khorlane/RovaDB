@@ -157,3 +157,29 @@ func TestExecAPIPlaceholderArgsInsert(t *testing.T) {
 		t.Fatalf("rows.data = %#v, want [[1 \"alice\"]]", rows.data)
 	}
 }
+
+func TestExecAPIPlaceholderArgsInsertReal(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE metrics (id INT, score REAL)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO metrics VALUES (?, ?)", 1, 3.14); err != nil {
+		t.Fatalf("Exec(insert with placeholders) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT score FROM metrics WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 {
+		t.Fatalf("rows = %#v, want one row with one column", rows)
+	}
+	if rows.data[0][0] != 3.14 {
+		t.Fatalf("rows.data = %#v, want [[3.14]]", rows.data)
+	}
+}

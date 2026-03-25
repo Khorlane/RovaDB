@@ -160,3 +160,32 @@ func TestQueryAPIPlaceholderArgsWhereClause(t *testing.T) {
 		t.Fatalf("rows.data = %#v, want [[\"alice\"]]", rows.data)
 	}
 }
+
+func TestQueryAPIPlaceholderArgsBoolWhereClause(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, active BOOL, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, TRUE, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert 1) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (2, FALSE, 'bob')"); err != nil {
+		t.Fatalf("Exec(insert 2) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT name FROM users WHERE active = ?", true)
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 {
+		t.Fatalf("rows = %#v, want one row with one column", rows)
+	}
+	if rows.data[0][0] != "alice" {
+		t.Fatalf("rows.data = %#v, want [[\"alice\"]]", rows.data)
+	}
+}
