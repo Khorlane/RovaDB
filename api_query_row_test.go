@@ -329,3 +329,16 @@ func TestQueryRowPlaceholderArgsReflectsUpdatedRow(t *testing.T) {
 		t.Fatalf("name = %q, want %q", name, "sam")
 	}
 }
+
+func TestQueryRowPlaceholderArgsCountMismatchIsDeferred(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	row := db.QueryRow("SELECT 1 WHERE 1 = ?")
+	if row == nil || row.rows == nil || row.rows.err == nil {
+		t.Fatalf("row = %#v, want deferred bind error", row)
+	}
+}

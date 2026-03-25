@@ -76,6 +76,37 @@ func TestBindPlaceholdersSelectWhereOrdering(t *testing.T) {
 	}
 }
 
+func TestBindPlaceholdersUpdateOrdering(t *testing.T) {
+	stmt, err := Parse("UPDATE users SET name = ?, active = ? WHERE id = ?")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if err := BindPlaceholders(stmt, []any{"sam", true, 1}); err != nil {
+		t.Fatalf("BindPlaceholders() error = %v", err)
+	}
+
+	update, ok := stmt.(*UpdateStmt)
+	if !ok {
+		t.Fatalf("stmt type = %T, want *UpdateStmt", stmt)
+	}
+	if len(update.Assignments) != 2 {
+		t.Fatalf("len(update.Assignments) = %d, want 2", len(update.Assignments))
+	}
+	if update.Assignments[0].Value != StringValue("sam") {
+		t.Fatalf("first assignment value = %#v, want %#v", update.Assignments[0].Value, StringValue("sam"))
+	}
+	if update.Assignments[1].Value != BoolValue(true) {
+		t.Fatalf("second assignment value = %#v, want %#v", update.Assignments[1].Value, BoolValue(true))
+	}
+	if update.Where == nil || len(update.Where.Items) != 1 {
+		t.Fatalf("update.Where = %#v, want one condition", update.Where)
+	}
+	if update.Where.Items[0].Condition.Right != Int64Value(1) {
+		t.Fatalf("where value = %#v, want %#v", update.Where.Items[0].Condition.Right, Int64Value(1))
+	}
+}
+
 func TestBindArgumentValueSupportedTypes(t *testing.T) {
 	tests := []struct {
 		name string

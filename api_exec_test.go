@@ -256,3 +256,93 @@ func TestExecAPIPlaceholderArgsDelete(t *testing.T) {
 		t.Fatalf("rows.data = %#v, want [[2 \"sam\"]]", rows.data)
 	}
 }
+
+func TestExecAPIPlaceholderArgsCountMismatchInsertHasNoSideEffects(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", 1); err == nil {
+		t.Fatal("Exec(insert with too few args) error = nil, want error")
+	}
+
+	rows, err := db.Query("SELECT COUNT(*) FROM users")
+	if err != nil {
+		t.Fatalf("Query(count) error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 0 {
+		t.Fatalf("rows.data = %#v, want [[0]]", rows.data)
+	}
+}
+
+func TestExecAPIPlaceholderArgsCountMismatchUpdateHasNoSideEffects(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'steve')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	if _, err := db.Exec("UPDATE users SET name = ? WHERE id = ?", "sam"); err == nil {
+		t.Fatal("Exec(update with too few args) error = nil, want error")
+	}
+
+	rows, err := db.Query("SELECT name FROM users WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != "steve" {
+		t.Fatalf("rows.data = %#v, want [[\"steve\"]]", rows.data)
+	}
+}
+
+func TestExecAPIPlaceholderArgsCountMismatchDeleteHasNoSideEffects(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'steve')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	if _, err := db.Exec("DELETE FROM users WHERE id = ?"); err == nil {
+		t.Fatal("Exec(delete with too few args) error = nil, want error")
+	}
+
+	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Query(count) error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 1 {
+		t.Fatalf("rows.data = %#v, want [[1]]", rows.data)
+	}
+}
+
+func TestExecAPIPlaceholderArgsRejectsExtraArgsWhenNoPlaceholders(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT)", 1); err == nil {
+		t.Fatal("Exec(no placeholders with extra args) error = nil, want error")
+	}
+}

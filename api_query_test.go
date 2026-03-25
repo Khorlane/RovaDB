@@ -226,3 +226,108 @@ func TestQueryAPILiteralAndBoundQueriesMatch(t *testing.T) {
 		t.Fatalf("literalRows.data = %#v, boundRows.data = %#v, want equal", literalRows.data, boundRows.data)
 	}
 }
+
+func TestQueryAPIPlaceholderArgsWhereChainLeftToRightSemanticsUnaffected(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'alice')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT id FROM users WHERE id = ? OR id = ? AND name = ? ORDER BY id", 1, 2, "bob")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 {
+		t.Fatalf("rows.data = %#v, want one row", rows.data)
+	}
+	if rows.data[0][0] != 2 {
+		t.Fatalf("rows.data = %#v, want [[2]]", rows.data)
+	}
+}
+
+func TestQueryAPIPlaceholderArgsCountMismatchTooFew(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT 1 WHERE 1 = ?")
+	if err != nil {
+		t.Fatalf("Query() error = %v, want nil top-level error", err)
+	}
+	if rows == nil || rows.err == nil {
+		t.Fatalf("rows = %#v, want deferred bind error", rows)
+	}
+}
+
+func TestQueryAPIPlaceholderArgsCountMismatchTooMany(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT name FROM users", 1)
+	if err != nil {
+		t.Fatalf("Query() error = %v, want nil top-level error", err)
+	}
+	if rows == nil || rows.err == nil {
+		t.Fatalf("rows = %#v, want deferred bind error", rows)
+	}
+}
+
+func TestQueryAPICountStarWithPlaceholderWhereClause(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, active BOOL)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, TRUE)",
+		"INSERT INTO users VALUES (2, FALSE)",
+		"INSERT INTO users VALUES (3, TRUE)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE active = ?", true)
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 2 {
+		t.Fatalf("rows.data = %#v, want [[2]]", rows.data)
+	}
+}
+
+func TestQueryAPIRejectsPlaceholderOutsideValuePositionThroughPublicPath(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE t (? INT)"); err == nil {
+		t.Fatal("Exec(CREATE TABLE t (? INT)) error = nil, want parse error")
+	}
+}

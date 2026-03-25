@@ -219,6 +219,38 @@ func TestLifecycleIndexedQueryAfterReopenRemainsCorrect(t *testing.T) {
 	assertQueryIntRows(t, db, "SELECT id FROM users WHERE name = 'alice' ORDER BY id", 1, 3)
 }
 
+func TestLifecycleBoundWritesCloseReopenRemainCorrect(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", 1, "alice", true); err != nil {
+		t.Fatalf("Exec(insert 1) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", 2, "bob", false); err != nil {
+		t.Fatalf("Exec(insert 2) error = %v", err)
+	}
+	if _, err := db.Exec("UPDATE users SET name = ?, active = ? WHERE id = ?", "bobby", true, 2); err != nil {
+		t.Fatalf("Exec(update) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	assertSelectRowsWithNames(t, db, "SELECT id, name FROM users WHERE active = TRUE ORDER BY id", [][2]any{
+		{int(1), "alice"},
+		{int(2), "bobby"},
+	})
+}
+
 func assertSelectRowsWithNames(t *testing.T, db *DB, sql string, want [][2]any) {
 	t.Helper()
 
