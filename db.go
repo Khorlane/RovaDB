@@ -149,6 +149,9 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if err := parser.BindPlaceholders(stmt, args); err != nil {
+		return Result{}, err
+	}
 	switch stmt := stmt.(type) {
 	case *parser.SelectExpr:
 		return Result{}, ErrExecDisallowsSelect
@@ -317,6 +320,9 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 	sel, ok := stmt.(*parser.SelectExpr)
 	if !ok {
 		return nil, ErrQueryRequiresSelect
+	}
+	if err := parser.BindPlaceholders(sel, args); err != nil {
+		return &Rows{err: err, idx: -1}, nil
 	}
 
 	if sel.TableName != "" {

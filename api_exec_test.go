@@ -131,3 +131,29 @@ func TestExecAPIWriteFlowStillValidatesViaQuery(t *testing.T) {
 		t.Fatalf("rows.data = %#v, want [[2 \"bobby\"]]", rows.data)
 	}
 }
+
+func TestExecAPIPlaceholderArgsInsert(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (?, 'alice')", 1); err != nil {
+		t.Fatalf("Exec(insert with placeholder) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT id, name FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 2 {
+		t.Fatalf("rows = %#v, want one materialized row", rows)
+	}
+	if rows.data[0][0] != 1 || rows.data[0][1] != "alice" {
+		t.Fatalf("rows.data = %#v, want [[1 \"alice\"]]", rows.data)
+	}
+}

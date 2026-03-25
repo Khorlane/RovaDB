@@ -278,3 +278,27 @@ func TestRowScanNilReceiver(t *testing.T) {
 		t.Fatalf("Scan() error = %v, want ErrNoRows", err)
 	}
 }
+
+func TestQueryRowPlaceholderArgsWhereClause(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	row := db.QueryRow("SELECT name FROM users WHERE id = ?", 1)
+	var name string
+	if err := row.Scan(&name); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if name != "alice" {
+		t.Fatalf("name = %q, want %q", name, "alice")
+	}
+}

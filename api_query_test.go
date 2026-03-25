@@ -134,3 +134,29 @@ func TestQueryAPINonSelectRejected(t *testing.T) {
 		})
 	}
 }
+
+func TestQueryAPIPlaceholderArgsWhereClause(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT name FROM users WHERE id = ?", 1)
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 {
+		t.Fatalf("rows = %#v, want one row with one column", rows)
+	}
+	if rows.data[0][0] != "alice" {
+		t.Fatalf("rows.data = %#v, want [[\"alice\"]]", rows.data)
+	}
+}
