@@ -134,9 +134,13 @@ At the end of a working session, update this file with:
 - simple flat chains still populate the legacy `WhereClause` when they can be represented safely
 - grouped and `NOT` predicates now parse and execute with their intended semantics
 - test expectations have been updated from legacy left-to-right boolean evaluation to `NOT` > `AND` > `OR` precedence
+- `Parser Modernization Slice 14` completed
+- `ORDER BY` clause parsing now uses tokenized parsing instead of `strings.Fields`
+- `SELECT` clause-tail parsing now detects `WHERE` and `ORDER BY` through the lexer instead of string prefix/search logic
+- the active `SELECT` path no longer depends on raw substring keyword scanning for clause dispatch
+- full repo verification still passes after the `ORDER BY` and clause-tail modernization
 
 ## Next Recommended Step
 
-- commit the predicate/runtime milestone as the next parser modernization slice
 - next major parser step is deeper expression modernization
-- future `SELECT` growth should focus on replacing the legacy `ORDER BY` and expression helpers with richer token-driven parsing
+- future `SELECT` growth should focus on replacing the legacy expression helpers with richer token-driven parsing

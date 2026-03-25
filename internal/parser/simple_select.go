@@ -100,22 +100,37 @@ func ParseSelectExpr(sql string) (*SelectExpr, bool) {
 }
 
 func parseOrderByClause(input string) (*OrderByClause, bool) {
-	tokens := strings.Fields(strings.TrimSpace(input))
-	if len(tokens) < 1 || len(tokens) > 2 || !isIdentifier(tokens[0]) {
+	tokens, err := lexSQL(input)
+	if err != nil {
+		return nil, false
+	}
+	if len(tokens) < 2 {
+		return nil, false
+	}
+	if tokens[0].Kind != tokenIdentifier || !isIdentifier(tokens[0].Lexeme) {
 		return nil, false
 	}
 
-	orderBy := &OrderByClause{Column: tokens[0]}
-	if len(tokens) == 1 {
+	orderBy := &OrderByClause{Column: tokens[0].Lexeme}
+	switch len(tokens) {
+	case 2:
+		if tokens[1].Kind != tokenEOF {
+			return nil, false
+		}
 		return orderBy, true
-	}
-
-	switch {
-	case strings.EqualFold(tokens[1], "ASC"):
-		return orderBy, true
-	case strings.EqualFold(tokens[1], "DESC"):
-		orderBy.Desc = true
-		return orderBy, true
+	case 3:
+		if tokens[2].Kind != tokenEOF {
+			return nil, false
+		}
+		switch {
+		case strings.EqualFold(tokens[1].Lexeme, "ASC"):
+			return orderBy, true
+		case strings.EqualFold(tokens[1].Lexeme, "DESC"):
+			orderBy.Desc = true
+			return orderBy, true
+		default:
+			return nil, false
+		}
 	default:
 		return nil, false
 	}

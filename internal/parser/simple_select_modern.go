@@ -52,45 +52,70 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 		return nil, false
 	}
 
-	p.lexer.skipWhitespace()
-	remainder := strings.TrimSpace(p.lexer.input[p.lexer.pos:])
-
 	var where *WhereClause
 	var predicate *PredicateExpr
 	var orderBy *OrderByClause
 
-	if remainder != "" {
-		upperRemainder := strings.ToUpper(remainder)
-		if strings.HasPrefix(upperRemainder, "WHERE ") {
-			wherePart := strings.TrimSpace(remainder[len("WHERE "):])
-			orderByPart := ""
-			if orderByIndex := strings.Index(strings.ToUpper(wherePart), " ORDER BY "); orderByIndex >= 0 {
-				orderByPart = strings.TrimSpace(wherePart[orderByIndex+len(" ORDER BY "):])
-				wherePart = strings.TrimSpace(wherePart[:orderByIndex])
+	if !p.lexer.skipWhitespaceAndEOF() {
+		nextTok, err := p.lexer.nextToken()
+		if err != nil {
+			return nil, false
+		}
+		switch nextTok.Kind {
+		case tokenKeywordWhere:
+			whereStart := p.lexer.pos
+			orderStart := -1
+			for {
+				tok, err := p.lexer.nextToken()
+				if err != nil {
+					return nil, false
+				}
+				if tok.Kind == tokenEOF {
+					wherePart := strings.TrimSpace(p.lexer.input[whereStart:p.lexer.pos])
+					parsedWhere, parsedPredicate, ok := parseWhereBridge(wherePart)
+					if !ok {
+						return nil, false
+					}
+					where = parsedWhere
+					predicate = parsedPredicate
+					break
+				}
+				if tok.Kind == tokenKeywordOrder {
+					byTok, ok := p.expect(tokenKeywordBy)
+					if !ok {
+						return nil, false
+					}
+					wherePart := strings.TrimSpace(p.lexer.input[whereStart:tok.Pos])
+					parsedWhere, parsedPredicate, ok := parseWhereBridge(wherePart)
+					if !ok {
+						return nil, false
+					}
+					where = parsedWhere
+					predicate = parsedPredicate
+					orderStart = byTok.Pos + len(byTok.Lexeme)
+					break
+				}
 			}
-
-			parsedWhere, parsedPredicate, ok := parseWhereBridge(wherePart)
-			if !ok {
-				return nil, false
-			}
-			where = parsedWhere
-			predicate = parsedPredicate
-
-			if orderByPart != "" {
-				parsedOrderBy, ok := parseOrderByClause(orderByPart)
+			if orderStart >= 0 {
+				orderPart := strings.TrimSpace(p.lexer.input[orderStart:])
+				parsedOrderBy, ok := parseOrderByClause(orderPart)
 				if !ok {
 					return nil, false
 				}
 				orderBy = parsedOrderBy
 			}
-		} else if strings.HasPrefix(upperRemainder, "ORDER BY ") {
-			orderByPart := strings.TrimSpace(remainder[len("ORDER BY "):])
-			parsedOrderBy, ok := parseOrderByClause(orderByPart)
+		case tokenKeywordOrder:
+			byTok, ok := p.expect(tokenKeywordBy)
+			if !ok {
+				return nil, false
+			}
+			orderPart := strings.TrimSpace(p.lexer.input[byTok.Pos+len(byTok.Lexeme):])
+			parsedOrderBy, ok := parseOrderByClause(orderPart)
 			if !ok {
 				return nil, false
 			}
 			orderBy = parsedOrderBy
-		} else {
+		default:
 			return nil, false
 		}
 	}
@@ -147,6 +172,11 @@ func (p *selectFromTokenParser) expect(kind tokenKind) (token, bool) {
 		return token{}, false
 	}
 	return tok, true
+}
+
+func (l *lexer) skipWhitespaceAndEOF() bool {
+	l.skipWhitespace()
+	return l.pos >= len(l.input)
 }
 
 func (p *selectLiteralTokenParser) parse() (*SelectExpr, bool) {
