@@ -1,7 +1,5 @@
 package parser
 
-import "strings"
-
 type insertTokenParser struct {
 	lexer lexer
 }
@@ -24,54 +22,36 @@ func (p *insertTokenParser) parse() (*InsertStmt, error) {
 		return nil, newParseError("unsupported query form")
 	}
 
-	remainder := strings.TrimSpace(p.lexer.input[p.lexer.pos:])
-	if remainder == "" {
-		return nil, newParseError("unsupported query form")
-	}
-
 	columns := []string(nil)
-	afterTable := remainder
-	if strings.HasPrefix(afterTable, "(") {
-		closeIdx := strings.Index(afterTable, ")")
-		if closeIdx < 0 {
+	if p.peekAfterWhitespace().Kind == tokenLParen {
+		if _, err := p.expect(tokenLParen); err != nil {
 			return nil, newParseError("unsupported query form")
 		}
-
-		parsedColumns, ok := parseInsertColumns(afterTable[1:closeIdx])
-		if !ok {
-			return nil, newParseError("unsupported query form")
+		parsedColumns, err := p.parseColumnList()
+		if err != nil {
+			return nil, err
 		}
 		columns = parsedColumns
-		afterTable = strings.TrimSpace(afterTable[closeIdx+1:])
-	}
-
-	if !strings.HasPrefix(strings.ToUpper(afterTable), "VALUES ") {
-		return nil, newParseError("unsupported query form")
-	}
-
-	valuesPart := strings.TrimSpace(afterTable[len("VALUES"):])
-	if !strings.HasPrefix(valuesPart, "(") || !strings.HasSuffix(valuesPart, ")") {
-		return nil, newParseError("unsupported query form")
-	}
-
-	inner := strings.TrimSpace(valuesPart[1 : len(valuesPart)-1])
-	if inner == "" {
-		return nil, newParseError("unsupported query form")
-	}
-
-	rawValues := strings.Split(inner, ",")
-	values := make([]Value, 0, len(rawValues))
-	for _, raw := range rawValues {
-		token := strings.TrimSpace(raw)
-		if token == "" {
+		if _, err := p.expect(tokenRParen); err != nil {
 			return nil, newParseError("unsupported query form")
 		}
+	}
 
-		value, ok := parseLiteralValue(token)
-		if !ok {
-			return nil, newParseError("unsupported query form")
-		}
-		values = append(values, value)
+	if _, err := p.expect(tokenKeywordValues); err != nil {
+		return nil, newParseError("unsupported query form")
+	}
+	if _, err := p.expect(tokenLParen); err != nil {
+		return nil, newParseError("unsupported query form")
+	}
+	values, err := p.parseValuesList()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tokenRParen); err != nil {
+		return nil, newParseError("unsupported query form")
+	}
+	if _, err := p.expect(tokenEOF); err != nil {
+		return nil, newParseError("unsupported query form")
 	}
 	if len(columns) > 0 && len(columns) != len(values) {
 		return nil, newParseError("unsupported query form")
@@ -89,4 +69,70 @@ func (p *insertTokenParser) expect(kind tokenKind) (token, error) {
 		return token{}, newParseError("unsupported query form")
 	}
 	return tok, nil
+}
+
+func (p *insertTokenParser) peekAfterWhitespace() token {
+	saved := p.lexer.pos
+	p.lexer.skipWhitespace()
+	tok, err := p.lexer.nextToken()
+	p.lexer.pos = saved
+	if err != nil {
+		return token{Kind: tokenIllegal}
+	}
+	return tok
+}
+
+func (p *insertTokenParser) parseColumnList() ([]string, error) {
+	columns := make([]string, 0, 2)
+	seen := map[string]struct{}{}
+	for {
+		tok, err := p.expect(tokenIdentifier)
+		if err != nil || !isIdentifier(tok.Lexeme) {
+			return nil, newParseError("unsupported query form")
+		}
+		if _, ok := seen[tok.Lexeme]; ok {
+			return nil, newParseError("unsupported query form")
+		}
+		seen[tok.Lexeme] = struct{}{}
+		columns = append(columns, tok.Lexeme)
+
+		next := p.peekAfterWhitespace()
+		if next.Kind != tokenComma {
+			break
+		}
+		if _, err := p.expect(tokenComma); err != nil {
+			return nil, newParseError("unsupported query form")
+		}
+	}
+	if len(columns) == 0 {
+		return nil, newParseError("unsupported query form")
+	}
+	return columns, nil
+}
+
+func (p *insertTokenParser) parseValuesList() ([]Value, error) {
+	values := make([]Value, 0, 2)
+	for {
+		tok, err := p.lexer.nextToken()
+		if err != nil {
+			return nil, newParseError("unsupported query form")
+		}
+		value, ok := parseLiteralToken(tok)
+		if !ok {
+			return nil, newParseError("unsupported query form")
+		}
+		values = append(values, value)
+
+		next := p.peekAfterWhitespace()
+		if next.Kind != tokenComma {
+			break
+		}
+		if _, err := p.expect(tokenComma); err != nil {
+			return nil, newParseError("unsupported query form")
+		}
+	}
+	if len(values) == 0 {
+		return nil, newParseError("unsupported query form")
+	}
+	return values, nil
 }

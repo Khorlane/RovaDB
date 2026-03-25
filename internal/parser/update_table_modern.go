@@ -25,18 +25,17 @@ func (p *updateTokenParser) parse() (*UpdateStmt, error) {
 		return nil, newParseError("unsupported query form")
 	}
 
-	remainder := strings.TrimSpace(p.lexer.input[p.lexer.pos:])
-	if remainder == "" {
-		return nil, newParseError("unsupported query form")
-	}
-
 	var where *WhereClause
 	var predicate *PredicateExpr
-	assignmentsPart := remainder
-	upperRemainder := strings.ToUpper(remainder)
-	if whereIndex := strings.Index(upperRemainder, " WHERE "); whereIndex >= 0 {
-		assignmentsPart = strings.TrimSpace(remainder[:whereIndex])
-		whereClause := strings.TrimSpace(remainder[whereIndex+len(" WHERE "):])
+	assignments, err := p.parseAssignmentsTokens()
+	if err != nil {
+		return nil, newParseError("unsupported query form")
+	}
+	if p.peekAfterWhitespace().Kind == tokenKeywordWhere {
+		if _, err := p.expect(tokenKeywordWhere); err != nil {
+			return nil, newParseError("invalid where clause")
+		}
+		whereClause := p.remainingTrimmed()
 		if whereClause == "" {
 			return nil, newParseError("invalid where clause")
 		}
@@ -46,11 +45,14 @@ func (p *updateTokenParser) parse() (*UpdateStmt, error) {
 		}
 		where = parsedWhere
 		predicate = parsedPredicate
-	}
-
-	assignments, ok := parseAssignments(assignmentsPart)
-	if !ok {
-		return nil, newParseError("unsupported query form")
+		p.lexer.pos = len(p.lexer.input)
+		if _, err := p.expect(tokenEOF); err != nil {
+			return nil, newParseError("invalid where clause")
+		}
+	} else {
+		if _, err := p.expect(tokenEOF); err != nil {
+			return nil, newParseError("unsupported query form")
+		}
 	}
 
 	return &UpdateStmt{
@@ -70,4 +72,62 @@ func (p *updateTokenParser) expect(kind tokenKind) (token, error) {
 		return token{}, newParseError("unsupported query form")
 	}
 	return tok, nil
+}
+
+func (p *updateTokenParser) peekAfterWhitespace() token {
+	saved := p.lexer.pos
+	p.lexer.skipWhitespace()
+	tok, err := p.lexer.nextToken()
+	p.lexer.pos = saved
+	if err != nil {
+		return token{Kind: tokenIllegal}
+	}
+	return tok
+}
+
+func (p *updateTokenParser) remainingTrimmed() string {
+	p.lexer.skipWhitespace()
+	return strings.TrimSpace(p.lexer.input[p.lexer.pos:])
+}
+
+func (p *updateTokenParser) parseAssignmentsTokens() ([]UpdateAssignment, error) {
+	assignments := make([]UpdateAssignment, 0, 2)
+	seen := map[string]struct{}{}
+	for {
+		columnTok, err := p.expect(tokenIdentifier)
+		if err != nil || !isIdentifier(columnTok.Lexeme) {
+			return nil, newParseError("unsupported query form")
+		}
+		if _, ok := seen[columnTok.Lexeme]; ok {
+			return nil, newParseError("unsupported query form")
+		}
+		if _, err := p.expect(tokenEq); err != nil {
+			return nil, newParseError("unsupported query form")
+		}
+		valueTok, err := p.lexer.nextToken()
+		if err != nil {
+			return nil, newParseError("unsupported query form")
+		}
+		value, ok := parseLiteralToken(valueTok)
+		if !ok {
+			return nil, newParseError("unsupported query form")
+		}
+		assignments = append(assignments, UpdateAssignment{
+			Column: columnTok.Lexeme,
+			Value:  value,
+		})
+		seen[columnTok.Lexeme] = struct{}{}
+
+		next := p.peekAfterWhitespace()
+		if next.Kind != tokenComma {
+			break
+		}
+		if _, err := p.expect(tokenComma); err != nil {
+			return nil, newParseError("unsupported query form")
+		}
+	}
+	if len(assignments) == 0 {
+		return nil, newParseError("unsupported query form")
+	}
+	return assignments, nil
 }

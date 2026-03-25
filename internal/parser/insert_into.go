@@ -48,6 +48,39 @@ func parseLiteralValue(token string) (Value, bool) {
 	return Value{}, false
 }
 
+func parseLiteralToken(tok token) (Value, bool) {
+	switch tok.Kind {
+	case tokenPlaceholder:
+		return PlaceholderValue(), true
+	case tokenNumber:
+		if value, err := strconv.ParseInt(tok.Lexeme, 10, 64); err == nil {
+			return Int64Value(value), true
+		}
+		if value, ok := parseRealLiteral(tok.Lexeme); ok {
+			return RealValue(value), true
+		}
+		return Value{}, false
+	case tokenString:
+		if isSingleQuotedStringLiteral(tok.Lexeme) {
+			return StringValue(tok.Lexeme[1 : len(tok.Lexeme)-1]), true
+		}
+		return Value{}, false
+	case tokenIdentifier:
+		switch {
+		case strings.EqualFold(tok.Lexeme, "NULL"):
+			return NullValue(), true
+		case strings.EqualFold(tok.Lexeme, "TRUE"):
+			return BoolValue(true), true
+		case strings.EqualFold(tok.Lexeme, "FALSE"):
+			return BoolValue(false), true
+		default:
+			return Value{}, false
+		}
+	default:
+		return Value{}, false
+	}
+}
+
 func parseInsertColumns(input string) ([]string, bool) {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {

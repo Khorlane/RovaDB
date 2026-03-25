@@ -144,8 +144,16 @@ At the end of a working session, update this file with:
 - arithmetic `+` and `-` are now tokenized explicitly for the current literal-expression subset
 - the supported literal-expression surface is intentionally unchanged; this slice modernized the implementation without broadening SQL support
 - full repo verification still passes after the literal-expression modernization
+- `Parser Modernization Slice 16` completed
+- added a shared token-based literal value helper for placeholders, numbers, strings, booleans, and `NULL`
+- predicate comparisons now bind their right-hand values through the shared token helper
+- `INSERT ... VALUES (...)` now parses column lists and value lists from tokens instead of substring splitting
+- `UPDATE ... SET ...` assignments now parse target/value pairs from tokens instead of string splitting
+- the supported value surface is intentionally unchanged; this slice modernized shared value parsing without broadening SQL support
+- full repo verification still passes after the shared value-expression modernization
 
 ## Next Recommended Step
 
 - next major parser step is deeper expression modernization
 - future `SELECT` and predicate growth should focus on value expressions, function calls, and comparison operands beyond the current literal-only helper path
+- the next high-value parser seam is moving comparison left/right operands beyond `identifier <op> literal`

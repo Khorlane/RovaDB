@@ -1,7 +1,5 @@
 package parser
 
-import "strings"
-
 type PredicateKind int
 
 const (
@@ -123,19 +121,7 @@ func (p *predicateTokenParser) parseComparison() (*PredicateExpr, bool) {
 	}
 
 	rightTok := p.current()
-	switch rightTok.Kind {
-	case tokenIdentifier, tokenKeywordInt, tokenKeywordText, tokenKeywordBool, tokenKeywordReal:
-		if rightTok.Kind != tokenIdentifier {
-			return nil, false
-		}
-	case tokenNumber, tokenString, tokenPlaceholder:
-	default:
-		upper := strings.ToUpper(rightTok.Lexeme)
-		if upper != "NULL" && upper != "TRUE" && upper != "FALSE" {
-			return nil, false
-		}
-	}
-	value, ok := parseLiteralValue(rightTok.Lexeme)
+	value, ok := parseLiteralToken(rightTok)
 	if !ok {
 		return nil, false
 	}
