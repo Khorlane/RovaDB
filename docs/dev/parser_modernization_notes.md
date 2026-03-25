@@ -96,8 +96,13 @@ At the end of a working session, update this file with:
 - `Parse()` now routes `DELETE FROM` through the token-driven parser path
 - the active `DELETE FROM` path still intentionally reuses the existing `WHERE` parser
 - full repo verification still passes after the integration
+- `Parser Modernization Slice 8` completed in isolation
+- extended the lexer token set to support `UPDATE ... SET ...`
+- added an isolated token-driven `UPDATE` parser
+- the modern `UPDATE` parser intentionally reuses the existing assignment and `WHERE` parsers for now
+- full repo verification still passes after the isolated `UPDATE` slice
 
 ## Next Recommended Step
 
-- continue to `UPDATE` before moving into `INSERT` or `SELECT`
-- keep reusing the existing `WHERE` parser until expression modernization is ready
+- wire the token-driven `UPDATE` parser into `Parse()`
+- keep reusing the existing assignment and `WHERE` parsers until expression modernization is ready

@@ -85,6 +85,28 @@ func TestLexSQLDeleteTokensWithoutWhere(t *testing.T) {
 	}
 }
 
+func TestLexSQLUpdateTokens(t *testing.T) {
+	tokens, err := lexSQL("UPDATE users SET")
+	if err != nil {
+		t.Fatalf("lexSQL() error = %v", err)
+	}
+
+	wantKinds := []tokenKind{
+		tokenKeywordUpdate,
+		tokenIdentifier,
+		tokenKeywordSet,
+		tokenEOF,
+	}
+	if len(tokens) != len(wantKinds) {
+		t.Fatalf("len(tokens) = %d, want %d (%#v)", len(tokens), len(wantKinds), tokens)
+	}
+	for i, want := range wantKinds {
+		if tokens[i].Kind != want {
+			t.Fatalf("tokens[%d].Kind = %v, want %v", i, tokens[i].Kind, want)
+		}
+	}
+}
+
 func TestLexSQLPreservesIdentifierLexemes(t *testing.T) {
 	tokens, err := lexSQL("create table User_Profile (_id INT)")
 	if err != nil {
