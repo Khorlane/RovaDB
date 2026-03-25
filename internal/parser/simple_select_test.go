@@ -72,6 +72,22 @@ func TestParseSelectExprProjectionFunctions(t *testing.T) {
 	}
 }
 
+func TestParseSelectExprQualifiedProjectionColumn(t *testing.T) {
+	got, ok := ParseSelectExpr("SELECT users.id FROM users")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	if got == nil || len(got.ProjectionExprs) != 1 {
+		t.Fatalf("ParseSelectExpr() = %#v, want one projection", got)
+	}
+	if len(got.Columns) != 1 || got.Columns[0] != "id" {
+		t.Fatalf("Columns = %#v, want [id]", got.Columns)
+	}
+	if got.ProjectionExprs[0].Kind != ValueExprKindColumnRef || got.ProjectionExprs[0].Qualifier != "users" || got.ProjectionExprs[0].Column != "id" {
+		t.Fatalf("ProjectionExprs[0] = %#v, want users.id", got.ProjectionExprs[0])
+	}
+}
+
 func TestParseSelectExprCountStar(t *testing.T) {
 	tests := []struct {
 		name string

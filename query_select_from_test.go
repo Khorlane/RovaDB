@@ -253,6 +253,35 @@ func TestQuerySelectExpressionProjection(t *testing.T) {
 	}
 }
 
+func TestQuerySelectQualifiedProjectionAndPredicate(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert 1) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (2, 'bob')"); err != nil {
+		t.Fatalf("Exec(insert 2) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT users.id FROM users WHERE users.name = 'bob'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if got := rows.Columns(); len(got) != 1 || got[0] != "users.id" {
+		t.Fatalf("Columns() = %#v, want [users.id]", got)
+	}
+	assertRowsIntSequence(t, rows, 2)
+}
+
 func TestQuerySelectMissingTable(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

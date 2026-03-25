@@ -41,6 +41,7 @@ const (
 	tokenLParen
 	tokenRParen
 	tokenComma
+	tokenDot
 	tokenStar
 	tokenPlus
 	tokenMinus
@@ -98,6 +99,9 @@ func (l *lexer) nextToken() (token, error) {
 	case ',':
 		l.pos++
 		return token{Kind: tokenComma, Lexeme: ",", Pos: start}, nil
+	case '.':
+		l.pos++
+		return token{Kind: tokenDot, Lexeme: ".", Pos: start}, nil
 	case '*':
 		l.pos++
 		return token{Kind: tokenStar, Lexeme: "*", Pos: start}, nil

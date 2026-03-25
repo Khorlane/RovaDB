@@ -1,6 +1,10 @@
 package planner
 
-import "github.com/Khorlane/RovaDB/internal/parser"
+import (
+	"strings"
+
+	"github.com/Khorlane/RovaDB/internal/parser"
+)
 
 // TableMetadata is the minimal planner-side table info used for scan choice.
 type TableMetadata struct {
@@ -64,12 +68,12 @@ func simpleEqualityPredicate(stmt *parser.SelectExpr) (string, parser.Value, boo
 		return "", parser.Value{}, false
 	}
 	if stmt.Predicate != nil {
-		return simpleEqualityPredicateFromPredicate(stmt.Predicate)
+		return simpleEqualityPredicateFromPredicate(stmt.Predicate, stmt.TableName)
 	}
-	return simpleEqualityPredicateFromWhere(stmt.Where)
+	return simpleEqualityPredicateFromWhere(stmt.Where, stmt.TableName)
 }
 
-func simpleEqualityPredicateFromPredicate(predicate *parser.PredicateExpr) (string, parser.Value, bool) {
+func simpleEqualityPredicateFromPredicate(predicate *parser.PredicateExpr, tableName string) (string, parser.Value, bool) {
 	if predicate == nil || predicate.Kind != parser.PredicateKindComparison || predicate.Comparison == nil {
 		return "", parser.Value{}, false
 	}
@@ -85,12 +89,20 @@ func simpleEqualityPredicateFromPredicate(predicate *parser.PredicateExpr) (stri
 		if !ok || rightColumn != "" {
 			return "", parser.Value{}, false
 		}
-		return leftColumn, rightValue, true
+		normalized, ok := normalizePlannerColumnName(leftColumn, tableName)
+		if !ok {
+			return "", parser.Value{}, false
+		}
+		return normalized, rightValue, true
 	}
 	if predicate.Comparison.RightRef != "" {
 		return "", parser.Value{}, false
 	}
-	return predicate.Comparison.Left, predicate.Comparison.Right, true
+	normalized, ok := normalizePlannerColumnName(predicate.Comparison.Left, tableName)
+	if !ok {
+		return "", parser.Value{}, false
+	}
+	return normalized, predicate.Comparison.Right, true
 }
 
 func parserOperandShape(expr *parser.ValueExpr) (parser.Value, string, bool) {
@@ -102,6 +114,9 @@ func parserOperandShape(expr *parser.ValueExpr) (parser.Value, string, bool) {
 	case parser.ValueExprKindLiteral:
 		return expr.Value, "", true
 	case parser.ValueExprKindColumnRef:
+		if expr.Qualifier != "" {
+			return parser.Value{}, expr.Qualifier + "." + expr.Column, true
+		}
 		return parser.Value{}, expr.Column, true
 	case parser.ValueExprKindParen:
 		return parserOperandShape(expr.Inner)
@@ -110,7 +125,21 @@ func parserOperandShape(expr *parser.ValueExpr) (parser.Value, string, bool) {
 	}
 }
 
-func simpleEqualityPredicateFromWhere(where *parser.WhereClause) (string, parser.Value, bool) {
+func normalizePlannerColumnName(name string, tableName string) (string, bool) {
+	if !strings.Contains(name, ".") {
+		return name, true
+	}
+	parts := strings.Split(name, ".")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", false
+	}
+	if tableName != "" && parts[0] != tableName {
+		return "", false
+	}
+	return parts[1], true
+}
+
+func simpleEqualityPredicateFromWhere(where *parser.WhereClause, tableName string) (string, parser.Value, bool) {
 	if where == nil || len(where.Items) != 1 {
 		return "", parser.Value{}, false
 	}
@@ -120,5 +149,9 @@ func simpleEqualityPredicateFromWhere(where *parser.WhereClause) (string, parser
 		return "", parser.Value{}, false
 	}
 
-	return item.Condition.Left, item.Condition.Right, true
+	normalized, ok := normalizePlannerColumnName(item.Condition.Left, tableName)
+	if !ok {
+		return "", parser.Value{}, false
+	}
+	return normalized, item.Condition.Right, true
 }

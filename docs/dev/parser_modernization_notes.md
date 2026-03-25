@@ -174,9 +174,17 @@ At the end of a working session, update this file with:
 - executor projection now evaluates expression items per row instead of requiring every projection to resolve to a base column index
 - `*` and `COUNT(*)` behavior remain unchanged
 - full repo verification still passes after the projection-expression milestone
+- `Parser Modernization Slice 20` completed as a batched qualified-reference milestone
+- lexer now tokenizes `.` so table-qualified references can be parsed explicitly
+- shared value expressions now support qualified column references such as `users.id`
+- single-table executor validation and evaluation accept qualified references when the qualifier matches the current table name
+- planner index-scan selection accepts qualified single-table equality predicates when the qualifier matches the statement table
+- plain unqualified references continue to work unchanged
+- aliases and multi-table resolution are still deferred; this slice only establishes the join-ready qualified-reference structure
+- full repo verification still passes after the qualified-reference milestone
 
 ## Next Recommended Step
 
 - next major parser step is deeper expression modernization
-- future `SELECT` and predicate growth should focus on richer projection expressions, qualified references, and join-ready operand shapes
-- the next high-value parser seam is qualified references and join-ready table/alias resolution across projections and predicates
+- future `SELECT` and predicate growth should focus on alias-aware resolution and multi-table `FROM` / join structure
+- the next high-value parser seam is moving from single-table qualified references to alias-aware table references and join syntax

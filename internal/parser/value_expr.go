@@ -13,12 +13,13 @@ const (
 )
 
 type ValueExpr struct {
-	Kind     ValueExprKind
-	Value    Value
-	Column   string
-	FuncName string
-	Arg      *ValueExpr
-	Inner    *ValueExpr
+	Kind      ValueExprKind
+	Value     Value
+	Qualifier string
+	Column    string
+	FuncName  string
+	Arg       *ValueExpr
+	Inner     *ValueExpr
 }
 
 type valueExprTokenParser struct {
@@ -61,7 +62,22 @@ func (p *valueExprTokenParser) parse() (*ValueExpr, bool) {
 	case tokenIdentifier:
 		tok := p.current()
 		p.pos++
+		qualifier := ""
+		column := tok.Lexeme
+		if p.current().Kind == tokenDot {
+			p.pos++
+			next := p.current()
+			if next.Kind != tokenIdentifier || !isIdentifier(next.Lexeme) {
+				return nil, false
+			}
+			qualifier = tok.Lexeme
+			column = next.Lexeme
+			p.pos++
+		}
 		if p.current().Kind == tokenLParen {
+			if qualifier != "" {
+				return nil, false
+			}
 			p.pos++
 			arg, ok := p.parse()
 			if !ok || p.current().Kind != tokenRParen {
@@ -82,7 +98,7 @@ func (p *valueExprTokenParser) parse() (*ValueExpr, bool) {
 		case strings.EqualFold(tok.Lexeme, "FALSE"):
 			return &ValueExpr{Kind: ValueExprKindLiteral, Value: BoolValue(false)}, true
 		default:
-			return &ValueExpr{Kind: ValueExprKindColumnRef, Column: tok.Lexeme}, true
+			return &ValueExpr{Kind: ValueExprKindColumnRef, Qualifier: qualifier, Column: column}, true
 		}
 	case tokenNumber, tokenString, tokenPlaceholder:
 		value, ok := parseLiteralToken(p.current())
@@ -112,6 +128,9 @@ func flattenSimpleValueExpr(expr *ValueExpr) (Value, string, bool) {
 	case ValueExprKindLiteral:
 		return expr.Value, "", true
 	case ValueExprKindColumnRef:
+		if expr.Qualifier != "" {
+			return Value{}, expr.Qualifier + "." + expr.Column, true
+		}
 		return Value{}, expr.Column, true
 	case ValueExprKindParen:
 		return flattenSimpleValueExpr(expr.Inner)

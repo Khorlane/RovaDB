@@ -2,6 +2,7 @@ package executor
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/planner"
@@ -234,13 +235,31 @@ func resolveSelectColumns(sel *parser.SelectExpr, table *Table) ([]int, error) {
 }
 
 func resolveColumnIndex(name string, table *Table) (int, error) {
+	baseName, err := normalizeQualifiedColumnName(name, table)
+	if err != nil {
+		return -1, err
+	}
 	for i, column := range table.Columns {
-		if column.Name == name {
+		if column.Name == baseName {
 			return i, nil
 		}
 	}
 
 	return -1, errColumnDoesNotExist
+}
+
+func normalizeQualifiedColumnName(name string, table *Table) (string, error) {
+	if !strings.Contains(name, ".") {
+		return name, nil
+	}
+	parts := strings.Split(name, ".")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", errColumnDoesNotExist
+	}
+	if table == nil || parts[0] != table.Name {
+		return "", errColumnDoesNotExist
+	}
+	return parts[1], nil
 }
 
 func evalWhere(row []parser.Value, table *Table, where *parser.WhereClause) (bool, error) {
@@ -430,7 +449,11 @@ func evalValueExpr(row []parser.Value, table *Table, expr *parser.ValueExpr) (pa
 	case parser.ValueExprKindLiteral:
 		return expr.Value, nil
 	case parser.ValueExprKindColumnRef:
-		idx, err := resolveColumnIndex(expr.Column, table)
+		name := expr.Column
+		if expr.Qualifier != "" {
+			name = expr.Qualifier + "." + expr.Column
+		}
+		idx, err := resolveColumnIndex(name, table)
 		if err != nil {
 			return parser.Value{}, err
 		}
@@ -457,7 +480,11 @@ func validateValueExprColumns(expr *parser.ValueExpr, table *Table) error {
 	case parser.ValueExprKindLiteral:
 		return nil
 	case parser.ValueExprKindColumnRef:
-		_, err := resolveColumnIndex(expr.Column, table)
+		name := expr.Column
+		if expr.Qualifier != "" {
+			name = expr.Qualifier + "." + expr.Column
+		}
+		_, err := resolveColumnIndex(name, table)
 		return err
 	case parser.ValueExprKindParen:
 		return validateValueExprColumns(expr.Inner, table)
