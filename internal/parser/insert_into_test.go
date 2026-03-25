@@ -94,6 +94,30 @@ func TestParseInsert(t *testing.T) {
 	}
 }
 
+func TestParseInsertViaParse(t *testing.T) {
+	stmt, err := Parse("INSERT INTO users VALUES (1, 'steve')")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	got, ok := stmt.(*InsertStmt)
+	if !ok {
+		t.Fatalf("Parse() stmt type = %T, want *InsertStmt", stmt)
+	}
+	if got.TableName != "users" {
+		t.Fatalf("Parse().TableName = %q, want %q", got.TableName, "users")
+	}
+	wantValues := []Value{Int64Value(1), StringValue("steve")}
+	if len(got.Values) != len(wantValues) {
+		t.Fatalf("Parse().Values len = %d, want %d", len(got.Values), len(wantValues))
+	}
+	for i := range wantValues {
+		if got.Values[i] != wantValues[i] {
+			t.Fatalf("Parse().Values[%d] = %#v, want %#v", i, got.Values[i], wantValues[i])
+		}
+	}
+}
+
 func TestParseInsertTokens(t *testing.T) {
 	tests := []struct {
 		name   string

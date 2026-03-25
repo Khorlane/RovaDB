@@ -13,73 +13,7 @@ type InsertStmt struct {
 }
 
 func parseInsert(input string) (*InsertStmt, error) {
-	const prefix = "INSERT INTO"
-
-	trimmed := strings.TrimSpace(input)
-	if !strings.HasPrefix(strings.ToUpper(trimmed), prefix+" ") {
-		return nil, errUnsupportedStatement
-	}
-
-	rest := strings.TrimSpace(trimmed[len(prefix):])
-	split := strings.IndexAny(rest, " \t\r\n")
-	if split <= 0 {
-		return nil, newParseError("unsupported query form")
-	}
-
-	tableName := strings.TrimSpace(rest[:split])
-	afterTable := strings.TrimSpace(rest[split:])
-	if !isIdentifier(tableName) {
-		return nil, newParseError("unsupported query form")
-	}
-
-	columns := []string(nil)
-	if strings.HasPrefix(afterTable, "(") {
-		closeIdx := strings.Index(afterTable, ")")
-		if closeIdx < 0 {
-			return nil, newParseError("unsupported query form")
-		}
-
-		parsedColumns, ok := parseInsertColumns(afterTable[1:closeIdx])
-		if !ok {
-			return nil, newParseError("unsupported query form")
-		}
-		columns = parsedColumns
-		afterTable = strings.TrimSpace(afterTable[closeIdx+1:])
-	}
-
-	if !strings.HasPrefix(strings.ToUpper(afterTable), "VALUES ") {
-		return nil, newParseError("unsupported query form")
-	}
-
-	valuesPart := strings.TrimSpace(afterTable[len("VALUES"):])
-	if !strings.HasPrefix(valuesPart, "(") || !strings.HasSuffix(valuesPart, ")") {
-		return nil, newParseError("unsupported query form")
-	}
-
-	inner := strings.TrimSpace(valuesPart[1 : len(valuesPart)-1])
-	if inner == "" {
-		return nil, newParseError("unsupported query form")
-	}
-
-	rawValues := strings.Split(inner, ",")
-	values := make([]Value, 0, len(rawValues))
-	for _, raw := range rawValues {
-		token := strings.TrimSpace(raw)
-		if token == "" {
-			return nil, newParseError("unsupported query form")
-		}
-
-		value, ok := parseLiteralValue(token)
-		if !ok {
-			return nil, newParseError("unsupported query form")
-		}
-		values = append(values, value)
-	}
-	if len(columns) > 0 && len(columns) != len(values) {
-		return nil, newParseError("unsupported query form")
-	}
-
-	return &InsertStmt{TableName: tableName, Columns: columns, Values: values}, nil
+	return parseInsertTokens(input)
 }
 
 func parseLiteralValue(token string) (Value, bool) {

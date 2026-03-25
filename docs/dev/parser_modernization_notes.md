@@ -110,8 +110,12 @@ At the end of a working session, update this file with:
 - added an isolated token-driven `INSERT` parser
 - the modern `INSERT` parser intentionally reuses the existing column-list and literal-value helpers for now
 - full repo verification still passes after the isolated `INSERT` slice
+- `Parser Modernization Slice 11` completed
+- `Parse()` now routes `INSERT` through the token-driven parser path
+- the active `INSERT` path still intentionally reuses the existing column-list and literal-value helpers
+- full repo verification still passes after the integration
 
 ## Next Recommended Step
 
-- wire the token-driven `INSERT` parser into `Parse()`
-- keep `SELECT` for later, after the simpler statement families are fully integrated
+- prepare for `SELECT` modernization as the next major parser step
+- expect `SELECT` to be the first statement family that likely needs deeper parser structure work
