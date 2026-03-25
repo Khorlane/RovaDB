@@ -114,8 +114,14 @@ At the end of a working session, update this file with:
 - `Parse()` now routes `INSERT` through the token-driven parser path
 - the active `INSERT` path still intentionally reuses the existing column-list and literal-value helpers
 - full repo verification still passes after the integration
+- `Parser Modernization Slice 12` completed as a batched `SELECT` update
+- extended the lexer token set to support the basic `SELECT` clause shell
+- `SELECT ... FROM ... [WHERE ...] [ORDER BY ...]` now routes through a modern token-driven parser shell
+- literal and simple arithmetic `SELECT` forms now route through a modern token-driven `SELECT` shell
+- the active `SELECT` path still intentionally reuses the existing `WHERE`, `ORDER BY`, and expression helpers
+- full repo verification still passes after the `SELECT` batch
 
 ## Next Recommended Step
 
-- prepare for `SELECT` modernization as the next major parser step
-- expect `SELECT` to be the first statement family that likely needs deeper parser structure work
+- the next major parser step is deeper expression modernization
+- future `SELECT` growth should focus on replacing the legacy `WHERE`, `ORDER BY`, and expression helpers with richer token-driven parsing

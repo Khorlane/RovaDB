@@ -96,6 +96,20 @@ func TestLexSQLDeepWhitespaceAndKeywordCoverage(t *testing.T) {
 				tokenEOF,
 			},
 		},
+		{
+			name:  "select keywords and star",
+			input: "SeLeCt * FROM users ORDER BY id",
+			wantKinds: []tokenKind{
+				tokenKeywordSelect,
+				tokenStar,
+				tokenKeywordFrom,
+				tokenIdentifier,
+				tokenKeywordOrder,
+				tokenKeywordBy,
+				tokenIdentifier,
+				tokenEOF,
+			},
+		},
 	}
 
 	for _, tc := range tests {

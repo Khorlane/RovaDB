@@ -20,6 +20,9 @@ const (
 	tokenKeywordFrom
 	tokenKeywordInsert
 	tokenKeywordInto
+	tokenKeywordBy
+	tokenKeywordOrder
+	tokenKeywordSelect
 	tokenKeywordTable
 	tokenKeywordSet
 	tokenKeywordUpdate
@@ -32,6 +35,7 @@ const (
 	tokenLParen
 	tokenRParen
 	tokenComma
+	tokenStar
 )
 
 type token struct {
@@ -80,6 +84,9 @@ func (l *lexer) nextToken() (token, error) {
 	case ',':
 		l.pos++
 		return token{Kind: tokenComma, Lexeme: ",", Pos: start}, nil
+	case '*':
+		l.pos++
+		return token{Kind: tokenStar, Lexeme: "*", Pos: start}, nil
 	}
 
 	r := rune(ch)
@@ -125,12 +132,18 @@ func classifyWord(word string) tokenKind {
 		return tokenKeywordCreate
 	case "DELETE":
 		return tokenKeywordDelete
+	case "BY":
+		return tokenKeywordBy
 	case "FROM":
 		return tokenKeywordFrom
 	case "INSERT":
 		return tokenKeywordInsert
 	case "INTO":
 		return tokenKeywordInto
+	case "ORDER":
+		return tokenKeywordOrder
+	case "SELECT":
+		return tokenKeywordSelect
 	case "SET":
 		return tokenKeywordSet
 	case "TABLE":

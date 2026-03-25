@@ -87,111 +87,15 @@ func ParseSelectExpr(sql string) (*SelectExpr, bool) {
 	trimmed := strings.TrimSpace(sql)
 	upper := strings.ToUpper(trimmed)
 	if strings.HasPrefix(upper, "SELECT ") {
-		if selectFrom, ok := parseSelectFrom(trimmed, upper); ok {
+		if selectFrom, ok := parseSelectFromTokens(trimmed); ok {
 			return selectFrom, true
 		}
-	}
-
-	tokens := strings.Fields(trimmed)
-	if len(tokens) != 2 && len(tokens) != 4 {
-		return nil, false
-	}
-	if !strings.EqualFold(tokens[0], "SELECT") {
-		return nil, false
-	}
-	if expr, ok := parseParenExpr(strings.Join(tokens[1:], " ")); ok {
-		return &SelectExpr{Expr: expr}, true
-	}
-
-	if len(tokens) == 2 {
-		expr, ok := parseExpr(tokens[1])
-		if !ok {
-			return nil, false
+		if exprSel, ok := parseSelectLiteralTokens(trimmed); ok {
+			return exprSel, true
 		}
-
-		return &SelectExpr{Expr: expr}, true
 	}
 
-	return parseSpacedIntBinaryExpr(tokens[1], tokens[2], tokens[3])
-}
-
-func parseSelectFrom(sql, upper string) (*SelectExpr, bool) {
-	fromIndex := strings.Index(upper, " FROM ")
-	if fromIndex < 0 {
-		return nil, false
-	}
-
-	selectList := strings.TrimSpace(sql[len("SELECT "):fromIndex])
-	fromPart := strings.TrimSpace(sql[fromIndex+len(" FROM "):])
-	upperFromPart := strings.ToUpper(fromPart)
-	orderByPart := ""
-	if orderByIndex := strings.Index(upperFromPart, " ORDER BY "); orderByIndex >= 0 {
-		orderByPart = strings.TrimSpace(fromPart[orderByIndex+len(" ORDER BY "):])
-		fromPart = strings.TrimSpace(fromPart[:orderByIndex])
-	}
-	whereUpper := strings.ToUpper(fromPart)
-	tableName := fromPart
-	var where *WhereClause
-	if whereIndex := strings.Index(whereUpper, " WHERE "); whereIndex >= 0 {
-		tableName = strings.TrimSpace(fromPart[:whereIndex])
-		whereClause := strings.TrimSpace(fromPart[whereIndex+len(" WHERE "):])
-		parsedWhere, ok := parseWhereClause(whereClause)
-		if !ok {
-			return nil, false
-		}
-		where = parsedWhere
-	}
-	var orderBy *OrderByClause
-	if orderByPart != "" {
-		parsedOrderBy, ok := parseOrderByClause(orderByPart)
-		if !ok {
-			return nil, false
-		}
-		orderBy = parsedOrderBy
-	}
-
-	if selectList == "" || !isIdentifier(tableName) {
-		return nil, false
-	}
-
-	if selectList == "*" {
-		return &SelectExpr{
-			TableName: tableName,
-			Where:     where,
-			OrderBy:   orderBy,
-		}, true
-	}
-	if strings.EqualFold(selectList, "COUNT(*)") {
-		return &SelectExpr{
-			TableName:   tableName,
-			Where:       where,
-			OrderBy:     orderBy,
-			IsCountStar: true,
-		}, true
-	}
-	if strings.HasPrefix(strings.ToUpper(selectList), "COUNT(") {
-		return nil, false
-	}
-
-	rawColumns := strings.Split(selectList, ",")
-	columns := make([]string, 0, len(rawColumns))
-	for _, raw := range rawColumns {
-		column := strings.TrimSpace(raw)
-		if column == "*" || !isIdentifier(column) {
-			return nil, false
-		}
-		columns = append(columns, column)
-	}
-	if len(columns) == 0 {
-		return nil, false
-	}
-
-	return &SelectExpr{
-		TableName: tableName,
-		Columns:   columns,
-		Where:     where,
-		OrderBy:   orderBy,
-	}, true
+	return nil, false
 }
 
 func parseOrderByClause(input string) (*OrderByClause, bool) {

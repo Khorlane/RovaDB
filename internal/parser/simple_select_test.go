@@ -18,6 +18,22 @@ func TestParseSelectExprProjectionColumns(t *testing.T) {
 	}
 }
 
+func TestParseSelectFromTokensProjectionColumns(t *testing.T) {
+	got, ok := parseSelectFromTokens("SELECT id, name FROM users")
+	if !ok {
+		t.Fatal("parseSelectFromTokens() ok = false, want true")
+	}
+	if got == nil {
+		t.Fatal("parseSelectFromTokens() = nil, want value")
+	}
+	if got.TableName != "users" {
+		t.Fatalf("TableName = %q, want %q", got.TableName, "users")
+	}
+	if len(got.Columns) != 2 || got.Columns[0] != "id" || got.Columns[1] != "name" {
+		t.Fatalf("Columns = %#v, want [id name]", got.Columns)
+	}
+}
+
 func TestParseSelectExprSingleProjectionColumn(t *testing.T) {
 	got, ok := ParseSelectExpr("SELECT id FROM users")
 	if !ok {
@@ -53,6 +69,19 @@ func TestParseSelectExprCountStar(t *testing.T) {
 				t.Fatalf("ParseSelectExpr() = %#v, want COUNT(*) select from users", got)
 			}
 		})
+	}
+}
+
+func TestParseSelectFromTokensCountStar(t *testing.T) {
+	got, ok := parseSelectFromTokens("SELECT COUNT(*) FROM users WHERE id > 1")
+	if !ok {
+		t.Fatal("parseSelectFromTokens() ok = false, want true")
+	}
+	if got == nil {
+		t.Fatal("parseSelectFromTokens() = nil, want value")
+	}
+	if !got.IsCountStar || got.TableName != "users" {
+		t.Fatalf("parseSelectFromTokens() = %#v, want COUNT(*) select from users", got)
 	}
 }
 
@@ -222,6 +251,48 @@ func TestParseSelectExprOrderBy(t *testing.T) {
 			}
 			if got.OrderBy.Column != tc.column || got.OrderBy.Desc != tc.desc {
 				t.Fatalf("OrderBy = %#v, want column=%q desc=%v", got.OrderBy, tc.column, tc.desc)
+			}
+		})
+	}
+}
+
+func TestParseSelectFromTokensOrderBy(t *testing.T) {
+	got, ok := parseSelectFromTokens("SELECT name FROM users WHERE id > 1 ORDER BY name DESC")
+	if !ok {
+		t.Fatal("parseSelectFromTokens() ok = false, want true")
+	}
+	if got == nil || got.OrderBy == nil {
+		t.Fatalf("parseSelectFromTokens() = %#v, want ORDER BY clause", got)
+	}
+	if got.OrderBy.Column != "name" || !got.OrderBy.Desc {
+		t.Fatalf("OrderBy = %#v, want column=%q desc=%v", got.OrderBy, "name", true)
+	}
+}
+
+func TestParseSelectLiteralTokens(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		kind ExprKind
+	}{
+		{name: "int", sql: "SELECT 1", kind: ExprKindInt64Literal},
+		{name: "real", sql: "SELECT 3.14", kind: ExprKindRealLiteral},
+		{name: "string", sql: "SELECT 'hi'", kind: ExprKindStringLiteral},
+		{name: "bool", sql: "SELECT TRUE", kind: ExprKindBoolLiteral},
+		{name: "binary", sql: "SELECT 1 + 2", kind: ExprKindInt64Binary},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseSelectLiteralTokens(tc.sql)
+			if !ok {
+				t.Fatal("parseSelectLiteralTokens() ok = false, want true")
+			}
+			if got == nil || got.Expr == nil {
+				t.Fatalf("parseSelectLiteralTokens() = %#v, want Expr", got)
+			}
+			if got.Expr.Kind != tc.kind {
+				t.Fatalf("Expr.Kind = %v, want %v", got.Expr.Kind, tc.kind)
 			}
 		})
 	}
