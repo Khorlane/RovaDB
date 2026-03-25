@@ -819,6 +819,25 @@ func TestProjectedColumnNamesCountStar(t *testing.T) {
 	}
 }
 
+func TestProjectedColumnNamesExpressionProjection(t *testing.T) {
+	table := &Table{Name: "users", Columns: typedCols()}
+
+	got, err := ProjectedColumnNames(planSelect(t, &parser.SelectExpr{
+		TableName: "users",
+		ProjectionExprs: []*parser.ValueExpr{
+			{Kind: parser.ValueExprKindFunctionCall, FuncName: "LOWER", Arg: &parser.ValueExpr{Kind: parser.ValueExprKindColumnRef, Column: "name"}},
+			{Kind: parser.ValueExprKindColumnRef, Column: "id"},
+		},
+		ProjectionLabels: []string{"LOWER(name)", "id"},
+	}), table)
+	if err != nil {
+		t.Fatalf("ProjectedColumnNames() error = %v", err)
+	}
+	if len(got) != 2 || got[0] != "LOWER(name)" || got[1] != "id" {
+		t.Fatalf("ProjectedColumnNames() = %#v, want [LOWER(name) id]", got)
+	}
+}
+
 func TestValidateSelectPlanLiteralAllowsNilTableScan(t *testing.T) {
 	plan, err := planner.PlanSelect(&parser.SelectExpr{
 		Expr: &parser.Expr{Kind: parser.ExprKindInt64Literal, I64: 1},

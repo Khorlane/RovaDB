@@ -16,6 +16,9 @@ func TestParseSelectExprProjectionColumns(t *testing.T) {
 	if len(got.Columns) != 2 || got.Columns[0] != "id" || got.Columns[1] != "name" {
 		t.Fatalf("Columns = %#v, want [id name]", got.Columns)
 	}
+	if len(got.ProjectionExprs) != 2 || got.ProjectionExprs[0].Kind != ValueExprKindColumnRef || got.ProjectionExprs[1].Kind != ValueExprKindColumnRef {
+		t.Fatalf("ProjectionExprs = %#v, want column refs", got.ProjectionExprs)
+	}
 }
 
 func TestParseSelectFromTokensProjectionColumns(t *testing.T) {
@@ -44,6 +47,28 @@ func TestParseSelectExprSingleProjectionColumn(t *testing.T) {
 	}
 	if len(got.Columns) != 1 || got.Columns[0] != "id" {
 		t.Fatalf("Columns = %#v, want [id]", got.Columns)
+	}
+}
+
+func TestParseSelectExprProjectionFunctions(t *testing.T) {
+	got, ok := ParseSelectExpr("SELECT LOWER(name), LENGTH(name) FROM users")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	if got == nil {
+		t.Fatal("ParseSelectExpr() = nil, want value")
+	}
+	if got.TableName != "users" {
+		t.Fatalf("TableName = %q, want %q", got.TableName, "users")
+	}
+	if got.Columns != nil {
+		t.Fatalf("Columns = %#v, want nil for expression projection", got.Columns)
+	}
+	if len(got.ProjectionExprs) != 2 || got.ProjectionExprs[0].Kind != ValueExprKindFunctionCall || got.ProjectionExprs[1].Kind != ValueExprKindFunctionCall {
+		t.Fatalf("ProjectionExprs = %#v, want function calls", got.ProjectionExprs)
+	}
+	if len(got.ProjectionLabels) != 2 || got.ProjectionLabels[0] != "LOWER(name)" || got.ProjectionLabels[1] != "LENGTH(name)" {
+		t.Fatalf("ProjectionLabels = %#v, want original select items", got.ProjectionLabels)
 	}
 }
 

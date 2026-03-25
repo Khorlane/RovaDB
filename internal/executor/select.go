@@ -54,11 +54,10 @@ func executeIndexSelect(plan *planner.SelectPlan, table *Table) ([][]parser.Valu
 }
 
 func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
-	indexes, err := resolveSelectColumns(sel, table)
-	if err != nil {
+	if err := validatePredicateOrWhereColumns(sel.Predicate, sel.Where, table); err != nil {
 		return nil, err
 	}
-	if err := validatePredicateOrWhereColumns(sel.Predicate, sel.Where, table); err != nil {
+	if err := validateProjectionExprs(sel, table); err != nil {
 		return nil, err
 	}
 	if sel.IsCountStar {
@@ -94,9 +93,9 @@ func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]p
 
 	rows := make([][]parser.Value, 0, len(baseRows))
 	for _, row := range baseRows {
-		out := make([]parser.Value, 0, len(indexes))
-		for _, idx := range indexes {
-			out = append(out, row[idx])
+		out, err := projectRow(sel, table, row)
+		if err != nil {
+			return nil, err
 		}
 		rows = append(rows, out)
 	}
@@ -135,6 +134,23 @@ func ProjectedColumnNames(plan *planner.SelectPlan, table *Table) ([]string, err
 	if sel.IsCountStar {
 		return []string{"count"}, nil
 	}
+	if len(sel.ProjectionExprs) > 0 {
+		if err := validateProjectionExprs(sel, table); err != nil {
+			return nil, err
+		}
+		if len(sel.ProjectionLabels) == len(sel.ProjectionExprs) {
+			return append([]string(nil), sel.ProjectionLabels...), nil
+		}
+		names := make([]string, 0, len(sel.ProjectionExprs))
+		for _, expr := range sel.ProjectionExprs {
+			if expr != nil && expr.Kind == parser.ValueExprKindColumnRef {
+				names = append(names, expr.Column)
+			} else {
+				names = append(names, "expr")
+			}
+		}
+		return names, nil
+	}
 	if len(sel.Columns) == 0 {
 		names := make([]string, 0, len(table.Columns))
 		for _, column := range table.Columns {
@@ -151,6 +167,49 @@ func ProjectedColumnNames(plan *planner.SelectPlan, table *Table) ([]string, err
 		names = append(names, name)
 	}
 	return names, nil
+}
+
+func projectRow(sel *parser.SelectExpr, table *Table, row []parser.Value) ([]parser.Value, error) {
+	if len(sel.ProjectionExprs) > 0 {
+		out := make([]parser.Value, 0, len(sel.ProjectionExprs))
+		for _, expr := range sel.ProjectionExprs {
+			value, err := evalValueExpr(row, table, expr)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, value)
+		}
+		return out, nil
+	}
+
+	indexes, err := resolveSelectColumns(sel, table)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]parser.Value, 0, len(indexes))
+	for _, idx := range indexes {
+		out = append(out, row[idx])
+	}
+	return out, nil
+}
+
+func validateProjectionExprs(sel *parser.SelectExpr, table *Table) error {
+	if sel == nil {
+		return nil
+	}
+	if len(sel.ProjectionExprs) == 0 {
+		if len(sel.Columns) == 0 {
+			return nil
+		}
+		_, err := resolveSelectColumns(sel, table)
+		return err
+	}
+	for _, expr := range sel.ProjectionExprs {
+		if err := validateValueExprColumns(expr, table); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func resolveSelectColumns(sel *parser.SelectExpr, table *Table) ([]int, error) {

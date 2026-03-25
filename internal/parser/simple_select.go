@@ -77,13 +77,15 @@ type OrderByClause struct {
 
 // SelectExpr is the minimal parsed form for SELECT <expr>.
 type SelectExpr struct {
-	Expr        *Expr
-	TableName   string
-	Columns     []string
-	Where       *WhereClause
-	Predicate   *PredicateExpr
-	OrderBy     *OrderByClause
-	IsCountStar bool
+	Expr             *Expr
+	TableName        string
+	Columns          []string
+	ProjectionExprs  []*ValueExpr
+	ProjectionLabels []string
+	Where            *WhereClause
+	Predicate        *PredicateExpr
+	OrderBy          *OrderByClause
+	IsCountStar      bool
 }
 
 // ParseSelectExpr recognizes the tiny Stage 1 SELECT <expr> shape.

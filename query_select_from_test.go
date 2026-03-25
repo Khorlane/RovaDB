@@ -217,6 +217,42 @@ func TestQuerySelectSingleProjectedColumn(t *testing.T) {
 	}
 }
 
+func TestQuerySelectExpressionProjection(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'SteVe')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT LOWER(name), LENGTH(name) FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if got := rows.Columns(); len(got) != 2 || got[0] != "LOWER(name)" || got[1] != "LENGTH(name)" {
+		t.Fatalf("Columns() = %#v, want [LOWER(name) LENGTH(name)]", got)
+	}
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+	var lower string
+	var length int
+	if err := rows.Scan(&lower, &length); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if lower != "steve" || length != 5 {
+		t.Fatalf("row = (%q, %d), want (%q, %d)", lower, length, "steve", 5)
+	}
+}
+
 func TestQuerySelectMissingTable(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

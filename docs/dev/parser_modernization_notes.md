@@ -167,9 +167,16 @@ At the end of a working session, update this file with:
 - placeholder binding now walks predicate operand expressions, including placeholders nested inside function arguments
 - planner index-scan selection remains conservative and still only uses plain column-equality-to-literal predicates
 - full repo verification still passes after the operand-expression milestone
+- `Parser Modernization Slice 19` completed as a batched projection-expression milestone
+- `SELECT ... FROM ...` projections now support shared value expressions in addition to plain column lists
+- plain column projections still preserve the existing `Columns` path for compatibility
+- expression projections now carry stable labels from the parsed select items
+- executor projection now evaluates expression items per row instead of requiring every projection to resolve to a base column index
+- `*` and `COUNT(*)` behavior remain unchanged
+- full repo verification still passes after the projection-expression milestone
 
 ## Next Recommended Step
 
 - next major parser step is deeper expression modernization
 - future `SELECT` and predicate growth should focus on richer projection expressions, qualified references, and join-ready operand shapes
-- the next high-value parser seam is moving from predicate-only operand expressions toward shared value-expression parsing across more SQL contexts
+- the next high-value parser seam is qualified references and join-ready table/alias resolution across projections and predicates

@@ -147,24 +147,42 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 	}
 
 	rawColumns := strings.Split(selectList, ",")
+	labels := make([]string, 0, len(rawColumns))
+	projections := make([]*ValueExpr, 0, len(rawColumns))
 	columns := make([]string, 0, len(rawColumns))
+	allColumns := true
 	for _, raw := range rawColumns {
-		column := strings.TrimSpace(raw)
-		if column == "*" || !isIdentifier(column) {
+		item := strings.TrimSpace(raw)
+		if item == "*" || item == "" {
 			return nil, false
 		}
-		columns = append(columns, column)
+		expr, ok := parseValueExpr(item)
+		if !ok {
+			return nil, false
+		}
+		labels = append(labels, item)
+		projections = append(projections, expr)
+		if expr.Kind == ValueExprKindColumnRef {
+			columns = append(columns, expr.Column)
+		} else {
+			allColumns = false
+		}
 	}
-	if len(columns) == 0 {
+	if len(projections) == 0 {
 		return nil, false
+	}
+	if !allColumns {
+		columns = nil
 	}
 
 	return &SelectExpr{
-		TableName: tableTok.Lexeme,
-		Columns:   columns,
-		Where:     where,
-		Predicate: predicate,
-		OrderBy:   orderBy,
+		TableName:        tableTok.Lexeme,
+		Columns:          columns,
+		ProjectionExprs:  projections,
+		ProjectionLabels: labels,
+		Where:            where,
+		Predicate:        predicate,
+		OrderBy:          orderBy,
 	}, true
 }
 
