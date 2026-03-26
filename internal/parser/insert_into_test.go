@@ -191,6 +191,16 @@ func TestParseInsertTokens(t *testing.T) {
 	}
 }
 
+func TestParseInsertTokensArithmeticValueExpr(t *testing.T) {
+	got, err := parseInsertTokens("INSERT INTO users VALUES (1 + 2)")
+	if err != nil {
+		t.Fatalf("parseInsertTokens() error = %v", err)
+	}
+	if len(got.ValueExprs) != 1 || got.ValueExprs[0] == nil || got.ValueExprs[0].Kind != ValueExprKindBinary || got.ValueExprs[0].Op != ValueExprBinaryOpAdd {
+		t.Fatalf("ValueExprs = %#v, want one binary add expr", got.ValueExprs)
+	}
+}
+
 func TestParseInsertInvalid(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -199,7 +209,6 @@ func TestParseInsertInvalid(t *testing.T) {
 		{name: "missing values", input: "INSERT INTO users (1, 'steve')"},
 		{name: "missing parens", input: "INSERT INTO users VALUES 1, 'steve'"},
 		{name: "empty value slot", input: "INSERT INTO users VALUES (1, )"},
-		{name: "expression value", input: "INSERT INTO users VALUES (1+2, 'steve')"},
 		{name: "empty values list", input: "INSERT INTO users VALUES ()"},
 		{name: "duplicate column", input: "INSERT INTO users (id, id) VALUES (1, 'steve')"},
 		{name: "empty column list", input: "INSERT INTO users () VALUES (1, 'steve')"},
@@ -227,7 +236,6 @@ func TestParseInsertTokensInvalid(t *testing.T) {
 		{name: "missing values", input: "INSERT INTO users (1, 'steve')"},
 		{name: "missing parens", input: "INSERT INTO users VALUES 1, 'steve'"},
 		{name: "empty value slot", input: "INSERT INTO users VALUES (1, )"},
-		{name: "expression value", input: "INSERT INTO users VALUES (1+2, 'steve')"},
 		{name: "empty values list", input: "INSERT INTO users VALUES ()"},
 		{name: "duplicate column", input: "INSERT INTO users (id, id) VALUES (1, 'steve')"},
 		{name: "empty column list", input: "INSERT INTO users () VALUES (1, 'steve')"},

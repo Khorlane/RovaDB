@@ -212,6 +212,34 @@ func evalScalarFunction(name string, arg parser.Value) (parser.Value, error) {
 	}
 }
 
+func evalBinaryValueExpr(op parser.ValueExprBinaryOp, left, right parser.Value) (parser.Value, error) {
+	if left.Kind != right.Kind {
+		return parser.Value{}, errTypeMismatch
+	}
+	switch left.Kind {
+	case parser.ValueKindInt64:
+		switch op {
+		case parser.ValueExprBinaryOpAdd:
+			return parser.Int64Value(left.I64 + right.I64), nil
+		case parser.ValueExprBinaryOpSub:
+			return parser.Int64Value(left.I64 - right.I64), nil
+		default:
+			return parser.Value{}, errInvalidExpression
+		}
+	case parser.ValueKindReal:
+		switch op {
+		case parser.ValueExprBinaryOpAdd:
+			return parser.RealValue(left.F64 + right.F64), nil
+		case parser.ValueExprBinaryOpSub:
+			return parser.RealValue(left.F64 - right.F64), nil
+		default:
+			return parser.Value{}, errInvalidExpression
+		}
+	default:
+		return parser.Value{}, errTypeMismatch
+	}
+}
+
 func isAggregateExpr(expr *parser.ValueExpr) bool {
 	return expr != nil && expr.Kind == parser.ValueExprKindAggregateCall
 }

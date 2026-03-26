@@ -349,6 +349,11 @@ func validateJoinValueExprColumns(expr *parser.ValueExpr, resolver *joinSelectRe
 		return err
 	case parser.ValueExprKindParen:
 		return validateJoinValueExprColumns(expr.Inner, resolver)
+	case parser.ValueExprKindBinary:
+		if err := validateJoinValueExprColumns(expr.Left, resolver); err != nil {
+			return err
+		}
+		return validateJoinValueExprColumns(expr.Right, resolver)
 	case parser.ValueExprKindFunctionCall:
 		return validateJoinValueExprColumns(expr.Arg, resolver)
 	case parser.ValueExprKindAggregateCall:
@@ -487,6 +492,16 @@ func evalJoinValueExpr(row []parser.Value, expr *parser.ValueExpr, resolver *joi
 		return row[idx], nil
 	case parser.ValueExprKindParen:
 		return evalJoinValueExpr(row, expr.Inner, resolver)
+	case parser.ValueExprKindBinary:
+		left, err := evalJoinValueExpr(row, expr.Left, resolver)
+		if err != nil {
+			return parser.Value{}, err
+		}
+		right, err := evalJoinValueExpr(row, expr.Right, resolver)
+		if err != nil {
+			return parser.Value{}, err
+		}
+		return evalBinaryValueExpr(expr.Op, left, right)
 	case parser.ValueExprKindFunctionCall:
 		arg, err := evalJoinValueExpr(row, expr.Arg, resolver)
 		if err != nil {

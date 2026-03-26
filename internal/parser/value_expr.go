@@ -8,9 +8,18 @@ const (
 	ValueExprKindInvalid ValueExprKind = iota
 	ValueExprKindLiteral
 	ValueExprKindColumnRef
+	ValueExprKindBinary
 	ValueExprKindFunctionCall
 	ValueExprKindAggregateCall
 	ValueExprKindParen
+)
+
+type ValueExprBinaryOp int
+
+const (
+	ValueExprBinaryOpInvalid ValueExprBinaryOp = iota
+	ValueExprBinaryOpAdd
+	ValueExprBinaryOpSub
 )
 
 type ValueExpr struct {
@@ -18,6 +27,9 @@ type ValueExpr struct {
 	Value     Value
 	Qualifier string
 	Column    string
+	Op        ValueExprBinaryOp
+	Left      *ValueExpr
+	Right     *ValueExpr
 	FuncName  string
 	Arg       *ValueExpr
 	StarArg   bool
@@ -52,10 +64,43 @@ func parseValueExprTokenStream(tokens []token) (*ValueExpr, int, bool) {
 }
 
 func (p *valueExprTokenParser) parse() (*ValueExpr, bool) {
+	return p.parseAddSub()
+}
+
+func (p *valueExprTokenParser) parseAddSub() (*ValueExpr, bool) {
+	left, ok := p.parsePrimary()
+	if !ok {
+		return nil, false
+	}
+	for {
+		var op ValueExprBinaryOp
+		switch p.current().Kind {
+		case tokenPlus:
+			op = ValueExprBinaryOpAdd
+		case tokenMinus:
+			op = ValueExprBinaryOpSub
+		default:
+			return left, true
+		}
+		p.pos++
+		right, ok := p.parsePrimary()
+		if !ok {
+			return nil, false
+		}
+		left = &ValueExpr{
+			Kind:  ValueExprKindBinary,
+			Op:    op,
+			Left:  left,
+			Right: right,
+		}
+	}
+}
+
+func (p *valueExprTokenParser) parsePrimary() (*ValueExpr, bool) {
 	switch p.current().Kind {
 	case tokenLParen:
 		p.pos++
-		inner, ok := p.parse()
+		inner, ok := p.parseAddSub()
 		if !ok || p.current().Kind != tokenRParen {
 			return nil, false
 		}

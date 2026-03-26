@@ -426,3 +426,32 @@ func TestExecuteUpdateAssignmentExprFunction(t *testing.T) {
 		t.Fatalf("rows = %#v, want ALICE", tables["users"].Rows)
 	}
 }
+
+func TestExecuteUpdateAssignmentExprArithmetic(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {
+			Name:    "users",
+			Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}},
+			Rows:    [][]parser.Value{{parser.Int64Value(1), parser.StringValue("alice")}},
+		},
+	}
+
+	affected, err := executeUpdate(&parser.UpdateStmt{
+		TableName: "users",
+		Assignments: []parser.UpdateAssignment{
+			{Column: "id", Expr: &parser.ValueExpr{
+				Kind:  parser.ValueExprKindBinary,
+				Op:    parser.ValueExprBinaryOpAdd,
+				Left:  &parser.ValueExpr{Kind: parser.ValueExprKindColumnRef, Column: "id"},
+				Right: &parser.ValueExpr{Kind: parser.ValueExprKindLiteral, Value: parser.Int64Value(2)},
+			}},
+		},
+		Where: where(parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(1)}),
+	}, tables)
+	if err != nil {
+		t.Fatalf("executeUpdate() error = %v", err)
+	}
+	if affected != 1 || tables["users"].Rows[0][0] != parser.Int64Value(3) {
+		t.Fatalf("rows = %#v, want id 3", tables["users"].Rows)
+	}
+}

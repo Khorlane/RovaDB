@@ -223,6 +223,16 @@ func TestParseUpdateTokens(t *testing.T) {
 	}
 }
 
+func TestParseUpdateTokensArithmeticAssignmentExpr(t *testing.T) {
+	got, err := parseUpdateTokens("UPDATE users SET id = id + 1 WHERE id = 1")
+	if err != nil {
+		t.Fatalf("parseUpdateTokens() error = %v", err)
+	}
+	if len(got.Assignments) != 1 || got.Assignments[0].Expr == nil || got.Assignments[0].Expr.Kind != ValueExprKindBinary || got.Assignments[0].Expr.Op != ValueExprBinaryOpAdd {
+		t.Fatalf("Assignments = %#v, want binary add expr", got.Assignments)
+	}
+}
+
 func TestParseUpdateInvalid(t *testing.T) {
 	tests := []struct {
 		name  string

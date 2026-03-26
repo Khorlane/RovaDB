@@ -965,6 +965,47 @@ func TestSelectQualifiedProjectionAndPredicate(t *testing.T) {
 	}
 }
 
+func TestSelectProjectionAndPredicateArithmetic(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+		}},
+	}
+
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
+		TableName: "users",
+		ProjectionExprs: []*parser.ValueExpr{
+			{
+				Kind:  parser.ValueExprKindBinary,
+				Op:    parser.ValueExprBinaryOpAdd,
+				Left:  &parser.ValueExpr{Kind: parser.ValueExprKindColumnRef, Column: "id"},
+				Right: &parser.ValueExpr{Kind: parser.ValueExprKindLiteral, Value: parser.Int64Value(1)},
+			},
+		},
+		ProjectionLabels: []string{"id + 1"},
+		Predicate: &parser.PredicateExpr{
+			Kind: parser.PredicateKindComparison,
+			Comparison: &parser.Condition{
+				LeftExpr: &parser.ValueExpr{
+					Kind:  parser.ValueExprKindBinary,
+					Op:    parser.ValueExprBinaryOpAdd,
+					Left:  &parser.ValueExpr{Kind: parser.ValueExprKindColumnRef, Column: "id"},
+					Right: &parser.ValueExpr{Kind: parser.ValueExprKindLiteral, Value: parser.Int64Value(1)},
+				},
+				Operator:  "=",
+				RightExpr: &parser.ValueExpr{Kind: parser.ValueExprKindLiteral, Value: parser.Int64Value(3)},
+			},
+		},
+	}), tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 1 || rows[0][0] != parser.Int64Value(3) {
+		t.Fatalf("rows = %#v, want [[3]]", rows)
+	}
+}
+
 func TestSelectAliasQualifiedProjectionPredicateAndOrderBy(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{

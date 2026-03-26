@@ -72,6 +72,22 @@ func TestParseSelectExprProjectionFunctions(t *testing.T) {
 	}
 }
 
+func TestParseSelectExprProjectionArithmetic(t *testing.T) {
+	got, ok := ParseSelectExpr("SELECT id + 1, score - 1.5 FROM metrics")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	if got == nil || len(got.ProjectionExprs) != 2 {
+		t.Fatalf("ParseSelectExpr() = %#v, want two projection exprs", got)
+	}
+	if got.ProjectionExprs[0].Kind != ValueExprKindBinary || got.ProjectionExprs[0].Op != ValueExprBinaryOpAdd {
+		t.Fatalf("ProjectionExprs[0] = %#v, want binary add", got.ProjectionExprs[0])
+	}
+	if got.ProjectionExprs[1].Kind != ValueExprKindBinary || got.ProjectionExprs[1].Op != ValueExprBinaryOpSub {
+		t.Fatalf("ProjectionExprs[1] = %#v, want binary sub", got.ProjectionExprs[1])
+	}
+}
+
 func TestParseSelectExprQualifiedProjectionColumn(t *testing.T) {
 	got, ok := ParseSelectExpr("SELECT users.id FROM users")
 	if !ok {

@@ -751,6 +751,16 @@ func evalValueExpr(row []parser.Value, table *Table, expr *parser.ValueExpr) (pa
 		return row[idx], nil
 	case parser.ValueExprKindParen:
 		return evalValueExpr(row, table, expr.Inner)
+	case parser.ValueExprKindBinary:
+		left, err := evalValueExpr(row, table, expr.Left)
+		if err != nil {
+			return parser.Value{}, err
+		}
+		right, err := evalValueExpr(row, table, expr.Right)
+		if err != nil {
+			return parser.Value{}, err
+		}
+		return evalBinaryValueExpr(expr.Op, left, right)
 	case parser.ValueExprKindFunctionCall:
 		arg, err := evalValueExpr(row, table, expr.Arg)
 		if err != nil {
@@ -782,6 +792,16 @@ func evalSelectValueExpr(row []parser.Value, sel *parser.SelectExpr, table *Tabl
 		return row[idx], nil
 	case parser.ValueExprKindParen:
 		return evalSelectValueExpr(row, sel, table, expr.Inner)
+	case parser.ValueExprKindBinary:
+		left, err := evalSelectValueExpr(row, sel, table, expr.Left)
+		if err != nil {
+			return parser.Value{}, err
+		}
+		right, err := evalSelectValueExpr(row, sel, table, expr.Right)
+		if err != nil {
+			return parser.Value{}, err
+		}
+		return evalBinaryValueExpr(expr.Op, left, right)
 	case parser.ValueExprKindFunctionCall:
 		arg, err := evalSelectValueExpr(row, sel, table, expr.Arg)
 		if err != nil {
@@ -810,6 +830,11 @@ func validateValueExprColumns(expr *parser.ValueExpr, table *Table) error {
 		return err
 	case parser.ValueExprKindParen:
 		return validateValueExprColumns(expr.Inner, table)
+	case parser.ValueExprKindBinary:
+		if err := validateValueExprColumns(expr.Left, table); err != nil {
+			return err
+		}
+		return validateValueExprColumns(expr.Right, table)
 	case parser.ValueExprKindFunctionCall:
 		return validateValueExprColumns(expr.Arg, table)
 	default:
@@ -833,6 +858,11 @@ func validateSelectValueExprColumns(sel *parser.SelectExpr, expr *parser.ValueEx
 		return err
 	case parser.ValueExprKindParen:
 		return validateSelectValueExprColumns(sel, expr.Inner, table)
+	case parser.ValueExprKindBinary:
+		if err := validateSelectValueExprColumns(sel, expr.Left, table); err != nil {
+			return err
+		}
+		return validateSelectValueExprColumns(sel, expr.Right, table)
 	case parser.ValueExprKindFunctionCall:
 		return validateSelectValueExprColumns(sel, expr.Arg, table)
 	case parser.ValueExprKindAggregateCall:

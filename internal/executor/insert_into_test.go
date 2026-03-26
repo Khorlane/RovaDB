@@ -308,3 +308,26 @@ func TestExecuteInsertValueExprFunction(t *testing.T) {
 		t.Fatalf("rows = %#v, want [[steve]]", tables["users"].Rows)
 	}
 }
+
+func TestExecuteInsertValueExprArithmetic(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}}},
+	}
+
+	affected, err := Execute(&parser.InsertStmt{
+		TableName: "users",
+		ValueExprs: []*parser.ValueExpr{{
+			Kind:  parser.ValueExprKindBinary,
+			Op:    parser.ValueExprBinaryOpAdd,
+			Left:  &parser.ValueExpr{Kind: parser.ValueExprKindLiteral, Value: parser.Int64Value(1)},
+			Right: &parser.ValueExpr{Kind: parser.ValueExprKindLiteral, Value: parser.Int64Value(2)},
+		}},
+		Values: []parser.Value{{}},
+	}, tables)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if affected != 1 || tables["users"].Rows[0][0] != parser.Int64Value(3) {
+		t.Fatalf("rows = %#v, want [[3]]", tables["users"].Rows)
+	}
+}

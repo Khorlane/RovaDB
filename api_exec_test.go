@@ -372,3 +372,29 @@ func TestExecAPIValueExprInsertAndUpdate(t *testing.T) {
 		t.Fatalf("rows.data = %#v, want [[\"STEVE\"]]", rows.data)
 	}
 }
+
+func TestExecAPIArithmeticValueExprInsertAndUpdate(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, score REAL)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1 + 2, 1.5 + 2.5)"); err != nil {
+		t.Fatalf("Exec(insert arithmetic) error = %v", err)
+	}
+	if _, err := db.Exec("UPDATE users SET score = score - 1.0 WHERE id = 3"); err != nil {
+		t.Fatalf("Exec(update arithmetic) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT id, score FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 2 || rows.data[0][0] != 3 || rows.data[0][1] != 3.0 {
+		t.Fatalf("rows.data = %#v, want [[3 3.0]]", rows.data)
+	}
+}

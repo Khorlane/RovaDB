@@ -100,6 +100,11 @@ func validateInsertValueExpr(expr *parser.ValueExpr) error {
 		return nil
 	case parser.ValueExprKindParen:
 		return validateInsertValueExpr(expr.Inner)
+	case parser.ValueExprKindBinary:
+		if err := validateInsertValueExpr(expr.Left); err != nil {
+			return err
+		}
+		return validateInsertValueExpr(expr.Right)
 	case parser.ValueExprKindFunctionCall:
 		return validateInsertValueExpr(expr.Arg)
 	default:
@@ -116,6 +121,16 @@ func evalInsertValueExpr(expr *parser.ValueExpr) (parser.Value, error) {
 		return expr.Value, nil
 	case parser.ValueExprKindParen:
 		return evalInsertValueExpr(expr.Inner)
+	case parser.ValueExprKindBinary:
+		left, err := evalInsertValueExpr(expr.Left)
+		if err != nil {
+			return parser.Value{}, err
+		}
+		right, err := evalInsertValueExpr(expr.Right)
+		if err != nil {
+			return parser.Value{}, err
+		}
+		return evalBinaryValueExpr(expr.Op, left, right)
 	case parser.ValueExprKindFunctionCall:
 		arg, err := evalInsertValueExpr(expr.Arg)
 		if err != nil {

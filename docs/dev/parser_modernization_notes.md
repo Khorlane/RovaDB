@@ -229,10 +229,17 @@ At the end of a working session, update this file with:
 - placeholder binding now walks write-statement expression trees, including placeholders nested inside scalar-function arguments
 - legacy literal fields are still backfilled where possible so compatibility scaffolding remains intact while the expression path becomes active
 - full repo verification still passes after the write-expression milestone
+- `Parser Modernization Slice 27` completed as a shared arithmetic-expression milestone
+- shared `ValueExpr` parsing now supports binary `+` and `-` with parenthesized grouping on top of the existing literal, column-reference, and scalar-function forms
+- arithmetic expression parsing is now active in the current spec-aligned contexts that already use shared `ValueExpr` nodes: `SELECT` projection, predicate comparisons, `INSERT ... VALUES (...)`, and `UPDATE ... SET ...`
+- executor evaluation now resolves arithmetic expressions consistently across single-table selects, joined selects, insert values, and update assignments
+- arithmetic evaluation is intentionally strict: `int + int` and `real + real` are supported, while mixed domains and non-numeric operands return the existing type-mismatch path
+- placeholder binding now walks arithmetic expression trees in the same left-to-right order as other shared value-expression forms
+- full repo verification still passes after the shared arithmetic-expression milestone
 
 ## Next Recommended Step
 
 - future `SELECT` growth should keep using the resolver-based join path for richer expressions and additional join-adjacent features
 - stay within the current language spec surface unless the spec is updated first
-- the next high-value seam is broadening the current non-date-time expression surface in a spec-aligned way, such as arithmetic expression support on the shared value-expression path
+- the next high-value seam is continuing to broaden the current non-date-time expression surface in a spec-aligned way, such as multi-argument function support or further value-expression cleanup where the spec already allows it
 - another good candidate is continued cleanup of legacy compatibility fields once the active expression path is well covered by tests

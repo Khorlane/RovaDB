@@ -245,6 +245,9 @@ func collectValueExprPlaceholders(expr *ValueExpr) []*Value {
 			return values
 		}
 		values = append(values, collectValueExprPlaceholders(expr.Arg)...)
+	case ValueExprKindBinary:
+		values = append(values, collectValueExprPlaceholders(expr.Left)...)
+		values = append(values, collectValueExprPlaceholders(expr.Right)...)
 	case ValueExprKindParen:
 		values = append(values, collectValueExprPlaceholders(expr.Inner)...)
 	}
@@ -267,6 +270,9 @@ func collectAllValueExprValues(expr *ValueExpr) []*Value {
 			return values
 		}
 		values = append(values, collectAllValueExprValues(expr.Arg)...)
+	case ValueExprKindBinary:
+		values = append(values, collectAllValueExprValues(expr.Left)...)
+		values = append(values, collectAllValueExprValues(expr.Right)...)
 	case ValueExprKindParen:
 		values = append(values, collectAllValueExprValues(expr.Inner)...)
 	}
