@@ -72,7 +72,7 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 	}
 
 	if plan.Stmt.IsCountStar {
-		if plan.Stmt.OrderBy != nil {
+		if len(plan.Stmt.OrderBys) > 0 || plan.Stmt.OrderBy != nil {
 			return nil, errCountOrderByUnsupported
 		}
 		return [][]parser.Value{{parser.Int64Value(int64(len(joinedRows)))}}, nil
@@ -514,27 +514,41 @@ func evalJoinValueExpr(row []parser.Value, expr *parser.ValueExpr, resolver *joi
 }
 
 func sortJoinRows(rows [][]parser.Value, sel *parser.SelectExpr, resolver *joinSelectResolver) error {
-	if sel == nil || sel.OrderBy == nil {
+	if sel == nil {
 		return nil
 	}
-	idx, err := resolver.resolveColumnIndex(sel.OrderBy.Column)
-	if err != nil {
-		return err
+	orderBys := selectOrderByList(sel)
+	if len(orderBys) == 0 {
+		return nil
+	}
+	indexes := make([]int, 0, len(orderBys))
+	for _, orderBy := range orderBys {
+		idx, err := resolver.resolveColumnIndex(orderBy.Column)
+		if err != nil {
+			return err
+		}
+		indexes = append(indexes, idx)
 	}
 	var sortErr error
 	sort.SliceStable(rows, func(i, j int) bool {
 		if sortErr != nil {
 			return false
 		}
-		cmp, err := compareSortableValues(rows[i][idx], rows[j][idx])
-		if err != nil {
-			sortErr = err
-			return false
+		for idxPos, idx := range indexes {
+			cmp, err := compareSortableValues(rows[i][idx], rows[j][idx])
+			if err != nil {
+				sortErr = err
+				return false
+			}
+			if cmp == 0 {
+				continue
+			}
+			if orderBys[idxPos].Desc {
+				return cmp > 0
+			}
+			return cmp < 0
 		}
-		if sel.OrderBy.Desc {
-			return cmp > 0
-		}
-		return cmp < 0
+		return false
 	})
 	return sortErr
 }

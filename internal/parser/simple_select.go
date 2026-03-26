@@ -99,6 +99,7 @@ type SelectExpr struct {
 	Where            *WhereClause
 	Predicate        *PredicateExpr
 	OrderBy          *OrderByClause
+	OrderBys         []OrderByClause
 	IsCountStar      bool
 }
 
@@ -132,6 +133,15 @@ func (s *SelectExpr) PrimaryTableRef() *TableRef {
 }
 
 func parseOrderByClause(input string) (*OrderByClause, bool) {
+	orderBys, ok := parseOrderByClauses(input)
+	if !ok || len(orderBys) == 0 {
+		return nil, false
+	}
+	first := orderBys[0]
+	return &first, true
+}
+
+func parseOrderByClauses(input string) ([]OrderByClause, bool) {
 	tokens, err := lexSQL(input)
 	if err != nil {
 		return nil, false
@@ -139,35 +149,48 @@ func parseOrderByClause(input string) (*OrderByClause, bool) {
 	if len(tokens) < 2 {
 		return nil, false
 	}
-	if tokens[0].Kind != tokenIdentifier || !isIdentifier(tokens[0].Lexeme) {
-		return nil, false
-	}
-
-	column := tokens[0].Lexeme
-	pos := 1
-	if len(tokens) > 3 && tokens[1].Kind == tokenDot && tokens[2].Kind == tokenIdentifier && isIdentifier(tokens[2].Lexeme) {
-		column = column + "." + tokens[2].Lexeme
-		pos = 3
-	}
-
-	orderBy := &OrderByClause{Column: column}
-	switch {
-	case pos >= len(tokens):
-		return nil, false
-	case tokens[pos].Kind == tokenEOF:
-		return orderBy, true
-	case pos+1 < len(tokens) && tokens[pos+1].Kind == tokenEOF:
-		switch {
-		case strings.EqualFold(tokens[pos].Lexeme, "ASC"):
-			return orderBy, true
-		case strings.EqualFold(tokens[pos].Lexeme, "DESC"):
-			orderBy.Desc = true
-			return orderBy, true
+	orderBys := make([]OrderByClause, 0, 2)
+	pos := 0
+	for {
+		if tokens[pos].Kind != tokenIdentifier || !isIdentifier(tokens[pos].Lexeme) {
+			return nil, false
+		}
+		column := tokens[pos].Lexeme
+		pos++
+		if pos+1 < len(tokens) && tokens[pos].Kind == tokenDot && tokens[pos+1].Kind == tokenIdentifier && isIdentifier(tokens[pos+1].Lexeme) {
+			column = column + "." + tokens[pos+1].Lexeme
+			pos += 2
+		}
+		item := OrderByClause{Column: column}
+		if pos < len(tokens) {
+			switch {
+			case tokens[pos].Kind == tokenKeywordAsc:
+				pos++
+			case tokens[pos].Kind == tokenKeywordDesc:
+				item.Desc = true
+				pos++
+			case tokens[pos].Kind == tokenIdentifier && strings.EqualFold(tokens[pos].Lexeme, "ASC"):
+				pos++
+			case tokens[pos].Kind == tokenIdentifier && strings.EqualFold(tokens[pos].Lexeme, "DESC"):
+				item.Desc = true
+				pos++
+			}
+		}
+		orderBys = append(orderBys, item)
+		if pos >= len(tokens) {
+			return nil, false
+		}
+		switch tokens[pos].Kind {
+		case tokenEOF:
+			return orderBys, true
+		case tokenComma:
+			pos++
+			if pos >= len(tokens) || tokens[pos].Kind == tokenEOF {
+				return nil, false
+			}
 		default:
 			return nil, false
 		}
-	default:
-		return nil, false
 	}
 }
 

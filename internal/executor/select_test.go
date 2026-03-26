@@ -696,6 +696,34 @@ func TestSelectOrderByWithWhereAndProjection(t *testing.T) {
 	}
 }
 
+func TestSelectOrderByMultipleColumns(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(2), parser.StringValue("alice")},
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(3), parser.StringValue("bob")},
+		}},
+	}
+
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
+		TableName: "users",
+		Columns:   []string{"name", "id"},
+		OrderBys: []parser.OrderByClause{
+			{Column: "name"},
+			{Column: "id", Desc: true},
+		},
+		OrderBy: &parser.OrderByClause{Column: "name"},
+	}), tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if rows[0][0] != parser.StringValue("alice") || rows[0][1] != parser.Int64Value(2) ||
+		rows[1][0] != parser.StringValue("alice") || rows[1][1] != parser.Int64Value(1) ||
+		rows[2][0] != parser.StringValue("bob") || rows[2][1] != parser.Int64Value(3) {
+		t.Fatalf("Select() rows = %#v, want alice/2 alice/1 bob/3", rows)
+	}
+}
+
 func TestSelectOrderByUnknownColumn(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("alice")}}},

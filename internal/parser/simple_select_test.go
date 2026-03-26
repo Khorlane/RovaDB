@@ -401,6 +401,25 @@ func TestParseSelectExprOrderBy(t *testing.T) {
 	}
 }
 
+func TestParseSelectExprOrderByMultiple(t *testing.T) {
+	got, ok := ParseSelectExpr("SELECT * FROM users ORDER BY name ASC, id DESC")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	if got == nil || len(got.OrderBys) != 2 {
+		t.Fatalf("ParseSelectExpr() = %#v, want two ORDER BY items", got)
+	}
+	if got.OrderBys[0].Column != "name" || got.OrderBys[0].Desc {
+		t.Fatalf("OrderBys[0] = %#v, want name ASC", got.OrderBys[0])
+	}
+	if got.OrderBys[1].Column != "id" || !got.OrderBys[1].Desc {
+		t.Fatalf("OrderBys[1] = %#v, want id DESC", got.OrderBys[1])
+	}
+	if got.OrderBy == nil || got.OrderBy.Column != "name" || got.OrderBy.Desc {
+		t.Fatalf("OrderBy = %#v, want backfilled first order item", got.OrderBy)
+	}
+}
+
 func TestParseSelectFromTokensOrderBy(t *testing.T) {
 	got, ok := parseSelectFromTokens("SELECT name FROM users WHERE id > 1 ORDER BY name DESC")
 	if !ok {

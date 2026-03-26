@@ -1295,6 +1295,35 @@ func TestQuerySelectOrderByWithWhere(t *testing.T) {
 	assertRowsStringSequence(t, rows, "cara", "bob")
 }
 
+func TestQuerySelectOrderByMultipleColumns(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (2, 'alice')",
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (3, 'bob')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT name FROM users ORDER BY name ASC, id DESC")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsStringSequence(t, rows, "alice", "alice", "bob")
+}
+
 func TestQuerySelectOrderByUnknownColumn(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

@@ -61,6 +61,7 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 	var where *WhereClause
 	var predicate *PredicateExpr
 	var orderBy *OrderByClause
+	var orderBys []OrderByClause
 
 	if !p.lexer.skipWhitespaceAndEOF() {
 		nextTok, err := p.lexer.nextToken()
@@ -104,11 +105,12 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 			}
 			if orderStart >= 0 {
 				orderPart := strings.TrimSpace(p.lexer.input[orderStart:])
-				parsedOrderBy, ok := parseOrderByClause(orderPart)
+				parsedOrderBys, ok := parseOrderByClauses(orderPart)
 				if !ok {
 					return nil, false
 				}
-				orderBy = parsedOrderBy
+				orderBys = parsedOrderBys
+				orderBy = &orderBys[0]
 			}
 		case tokenKeywordOrder:
 			byTok, ok := p.expect(tokenKeywordBy)
@@ -116,11 +118,12 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 				return nil, false
 			}
 			orderPart := strings.TrimSpace(p.lexer.input[byTok.Pos+len(byTok.Lexeme):])
-			parsedOrderBy, ok := parseOrderByClause(orderPart)
+			parsedOrderBys, ok := parseOrderByClauses(orderPart)
 			if !ok {
 				return nil, false
 			}
-			orderBy = parsedOrderBy
+			orderBys = parsedOrderBys
+			orderBy = &orderBys[0]
 		default:
 			return nil, false
 		}
@@ -134,6 +137,7 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 			Where:     where,
 			Predicate: predicate,
 			OrderBy:   orderBy,
+			OrderBys:  orderBys,
 		}, true
 	}
 	if strings.EqualFold(selectList, "COUNT(*)") {
@@ -144,6 +148,7 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 			Where:       where,
 			Predicate:   predicate,
 			OrderBy:     orderBy,
+			OrderBys:    orderBys,
 			IsCountStar: true,
 		}, true
 	}
@@ -187,6 +192,7 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 		Where:            where,
 		Predicate:        predicate,
 		OrderBy:          orderBy,
+		OrderBys:         orderBys,
 	}, true
 }
 

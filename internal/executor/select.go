@@ -71,7 +71,7 @@ func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]p
 		return nil, err
 	}
 	if sel.IsCountStar {
-		if sel.OrderBy != nil {
+		if len(sel.OrderBys) > 0 || sel.OrderBy != nil {
 			return nil, errCountOrderByUnsupported
 		}
 		count := int64(0)
@@ -100,7 +100,7 @@ func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]p
 	if hasAggregateProjection(sel) {
 		return executeAggregateSelectRows(sel, table, baseRows)
 	}
-	if err := sortSelectRows(baseRows, sel, table, sel.OrderBy); err != nil {
+	if err := sortSelectRows(baseRows, sel, table, selectOrderByList(sel)); err != nil {
 		return nil, err
 	}
 
@@ -135,7 +135,7 @@ func validateAggregateProjectionShape(sel *parser.SelectExpr) error {
 	if sel == nil {
 		return nil
 	}
-	if sel.OrderBy != nil {
+	if len(sel.OrderBys) > 0 || sel.OrderBy != nil {
 		return errUnsupportedStatement
 	}
 	if sel.IsCountStar {
@@ -908,14 +908,30 @@ func sortRows(rows [][]parser.Value, table *Table, orderBy *parser.OrderByClause
 	return sortErr
 }
 
-func sortSelectRows(rows [][]parser.Value, sel *parser.SelectExpr, table *Table, orderBy *parser.OrderByClause) error {
-	if orderBy == nil {
+func selectOrderByList(sel *parser.SelectExpr) []parser.OrderByClause {
+	if sel == nil {
 		return nil
 	}
+	if len(sel.OrderBys) > 0 {
+		return sel.OrderBys
+	}
+	if sel.OrderBy != nil {
+		return []parser.OrderByClause{*sel.OrderBy}
+	}
+	return nil
+}
 
-	idx, err := resolveSelectColumnIndex(sel, orderBy.Column, table)
-	if err != nil {
-		return err
+func sortSelectRows(rows [][]parser.Value, sel *parser.SelectExpr, table *Table, orderBys []parser.OrderByClause) error {
+	if len(orderBys) == 0 {
+		return nil
+	}
+	indexes := make([]int, 0, len(orderBys))
+	for _, orderBy := range orderBys {
+		idx, err := resolveSelectColumnIndex(sel, orderBy.Column, table)
+		if err != nil {
+			return err
+		}
+		indexes = append(indexes, idx)
 	}
 
 	var sortErr error
@@ -923,15 +939,21 @@ func sortSelectRows(rows [][]parser.Value, sel *parser.SelectExpr, table *Table,
 		if sortErr != nil {
 			return false
 		}
-		cmp, err := compareSortableValues(rows[i][idx], rows[j][idx])
-		if err != nil {
-			sortErr = err
-			return false
+		for idxPos, idx := range indexes {
+			cmp, err := compareSortableValues(rows[i][idx], rows[j][idx])
+			if err != nil {
+				sortErr = err
+				return false
+			}
+			if cmp == 0 {
+				continue
+			}
+			if orderBys[idxPos].Desc {
+				return cmp > 0
+			}
+			return cmp < 0
 		}
-		if orderBy.Desc {
-			return cmp > 0
-		}
-		return cmp < 0
+		return false
 	})
 	return sortErr
 }

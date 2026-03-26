@@ -243,6 +243,12 @@ At the end of a working session, update this file with:
 - `CREATE INDEX` parsing currently supports the current language-spec shape: optional `UNIQUE`, one or more index columns, and optional `ASC` or `DESC` per column
 - runtime behavior is intentionally unchanged: these statements now parse successfully but still fall through the existing unsupported-execution path until planner/executor work exists
 - full repo verification still passes after the parser-only utility-statement milestone
+- `Parser Modernization Slice 29` completed as a multi-item `ORDER BY` milestone
+- `SELECT` parsing now recognizes comma-separated `ORDER BY` lists instead of only a single order item
+- the parsed AST now carries the full ordered list while still backfilling the legacy single `OrderBy` field with the first item for compatibility
+- single-table and join execution now sort using the full `ORDER BY` list in stable left-to-right key order
+- `COUNT(*)` and aggregate-only projection queries still reject `ORDER BY`, now using the full order list rather than only the legacy first-item field
+- full repo verification still passes after the multi-item `ORDER BY` milestone
 
 ## Next Recommended Step
 
