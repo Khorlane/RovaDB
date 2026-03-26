@@ -61,6 +61,32 @@ func TestExecAPIAllowsAlterTable(t *testing.T) {
 	}
 }
 
+func TestExecAPIAcceptsTrailingSemicolon(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT);"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice');"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT id, name FROM users;")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || rows.err != nil {
+		t.Fatalf("rows = %#v, want successful rowset", rows)
+	}
+	if len(rows.data) != 1 || len(rows.data[0]) != 2 || rows.data[0][0] != 1 || rows.data[0][1] != "alice" {
+		t.Fatalf("rows.data = %#v, want [[1 \"alice\"]]", rows.data)
+	}
+}
+
 func TestExecAPIRejectsSelect(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

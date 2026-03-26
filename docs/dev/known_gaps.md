@@ -12,15 +12,15 @@ Status values:
 
 ## Summary
 
-- [kg001] Engine `done` Support `<>` as a not-equal operator
+- [kg001] Engine `done` Support `<>` as a not-equal operator `(commit: 4aaa9a6)`
 - [kg002] Engine `pending` Review text comparison / collation behavior
 - [kg011] CLI `pending` Improve CLI result formatting for wider query output
-- [kg012] Engine `pending` Accept trailing semicolons in core SQL input
+- [kg012] Engine `done` Accept trailing semicolons in core SQL input
 - [kg013] CLI `pending` Distinguish obvious non-SQL input from SQL passthrough
 
 ## Engine
 
-### `done` Support `<>` as a not-equal operator [kg001]
+### `done` Support `<>` as a not-equal operator [kg001] `(commit: 4aaa9a6)`
 
 Observed gap:
 
@@ -52,13 +52,13 @@ Expected direction:
 
 - document and/or refine string comparison semantics so text predicates match the intended SQL behavior and user expectations
 
-### `pending` Accept trailing semicolons in core SQL input [kg012]
+### `done` Accept trailing semicolons in core SQL input [kg012]
 
 Observed gap:
 
 - semicolon-terminated SQL is common user input, but core engine handling should not depend entirely on CLI normalization
 
-Expected direction:
+Completed behavior:
 
 - the engine should accept otherwise valid SQL statements with a trailing semicolon
 - semicolons should remain optional rather than required

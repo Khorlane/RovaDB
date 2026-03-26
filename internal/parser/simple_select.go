@@ -105,7 +105,7 @@ type SelectExpr struct {
 
 // ParseSelectExpr recognizes the tiny Stage 1 SELECT <expr> shape.
 func ParseSelectExpr(sql string) (*SelectExpr, bool) {
-	trimmed := strings.TrimSpace(sql)
+	trimmed := normalizeSQLInput(sql)
 	upper := strings.ToUpper(trimmed)
 	if strings.HasPrefix(upper, "SELECT ") {
 		if selectFrom, ok := parseSelectFromTokens(trimmed); ok {

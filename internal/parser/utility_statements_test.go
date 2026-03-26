@@ -84,6 +84,46 @@ func TestParseDropAndTxnStatements(t *testing.T) {
 	}
 }
 
+func TestParseDropAndTxnStatementsAcceptTrailingSemicolon(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		kind  any
+	}{
+		{name: "drop table", input: "DROP TABLE users;", kind: &DropTableStmt{}},
+		{name: "drop index", input: "DROP INDEX idx_users_name;", kind: &DropIndexStmt{}},
+		{name: "commit", input: "COMMIT;", kind: &CommitStmt{}},
+		{name: "rollback", input: "ROLLBACK;", kind: &RollbackStmt{}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Parse(tc.input)
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			switch tc.kind.(type) {
+			case *DropTableStmt:
+				if _, ok := got.(*DropTableStmt); !ok {
+					t.Fatalf("Parse() type = %T, want *DropTableStmt", got)
+				}
+			case *DropIndexStmt:
+				if _, ok := got.(*DropIndexStmt); !ok {
+					t.Fatalf("Parse() type = %T, want *DropIndexStmt", got)
+				}
+			case *CommitStmt:
+				if _, ok := got.(*CommitStmt); !ok {
+					t.Fatalf("Parse() type = %T, want *CommitStmt", got)
+				}
+			case *RollbackStmt:
+				if _, ok := got.(*RollbackStmt); !ok {
+					t.Fatalf("Parse() type = %T, want *RollbackStmt", got)
+				}
+			}
+		})
+	}
+}
+
 func TestParseUtilityStatementsInvalid(t *testing.T) {
 	tests := []string{
 		"CREATE INDEX idx ON users",

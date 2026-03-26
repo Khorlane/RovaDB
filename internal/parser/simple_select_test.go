@@ -421,6 +421,20 @@ func TestParseSelectExprOrderByMultiple(t *testing.T) {
 	}
 }
 
+func TestParseSelectExprAcceptsTrailingSemicolon(t *testing.T) {
+	got, ok := ParseSelectExpr("SELECT id FROM users WHERE id = 1;")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	if got == nil || got.Where == nil || len(got.Where.Items) != 1 {
+		t.Fatalf("ParseSelectExpr() = %#v, want WHERE clause", got)
+	}
+	cond := got.Where.Items[0].Condition
+	if cond.Left != "id" || cond.Operator != "=" || cond.Right != Int64Value(1) {
+		t.Fatalf("Condition = %#v, want id = 1", cond)
+	}
+}
+
 func TestParseSelectFromTokensOrderBy(t *testing.T) {
 	got, ok := parseSelectFromTokens("SELECT name FROM users WHERE id > 1 ORDER BY name DESC")
 	if !ok {

@@ -62,7 +62,7 @@ type CreateTableStmt struct {
 
 // Parse dispatches the tiny Stage 1 statement shapes.
 func Parse(input string) (any, error) {
-	trimmed := strings.TrimSpace(input)
+	trimmed := normalizeSQLInput(input)
 	upper := strings.ToUpper(trimmed)
 
 	if strings.HasPrefix(upper, "CREATE TABLE ") {
@@ -100,6 +100,14 @@ func Parse(input string) (any, error) {
 	}
 
 	return nil, errUnsupportedStatement
+}
+
+func normalizeSQLInput(input string) string {
+	trimmed := strings.TrimSpace(input)
+	if strings.HasSuffix(trimmed, ";") {
+		trimmed = strings.TrimSpace(strings.TrimSuffix(trimmed, ";"))
+	}
+	return trimmed
 }
 
 func parseCreateTable(input string) (*CreateTableStmt, error) {
