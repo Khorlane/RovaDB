@@ -68,8 +68,17 @@ func Parse(input string) (any, error) {
 	if strings.HasPrefix(upper, "CREATE TABLE ") {
 		return parseCreateTable(trimmed)
 	}
+	if strings.HasPrefix(upper, "CREATE INDEX ") || strings.HasPrefix(upper, "CREATE UNIQUE INDEX ") {
+		return parseCreateIndexTokens(trimmed)
+	}
 	if strings.HasPrefix(upper, "ALTER TABLE ") {
 		return parseAlterTable(trimmed)
+	}
+	if strings.HasPrefix(upper, "DROP TABLE ") {
+		return parseDropTableTokens(trimmed)
+	}
+	if strings.HasPrefix(upper, "DROP INDEX ") {
+		return parseDropIndexTokens(trimmed)
 	}
 	if strings.HasPrefix(upper, "INSERT INTO ") {
 		return parseInsert(trimmed)
@@ -79,6 +88,12 @@ func Parse(input string) (any, error) {
 	}
 	if strings.HasPrefix(upper, "UPDATE ") {
 		return parseUpdate(trimmed)
+	}
+	if upper == "COMMIT" {
+		return parseCommitTokens(trimmed)
+	}
+	if upper == "ROLLBACK" {
+		return parseRollbackTokens(trimmed)
 	}
 	if sel, ok := ParseSelectExpr(trimmed); ok {
 		return sel, nil

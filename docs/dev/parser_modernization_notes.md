@@ -236,10 +236,17 @@ At the end of a working session, update this file with:
 - arithmetic evaluation is intentionally strict: `int + int` and `real + real` are supported, while mixed domains and non-numeric operands return the existing type-mismatch path
 - placeholder binding now walks arithmetic expression trees in the same left-to-right order as other shared value-expression forms
 - full repo verification still passes after the shared arithmetic-expression milestone
+- `Parser Modernization Slice 28` completed as a parser-only utility-statement milestone
+- parser dispatch now recognizes `CREATE INDEX`, `CREATE UNIQUE INDEX`, `DROP TABLE`, `DROP INDEX`, `COMMIT`, and `ROLLBACK`
+- the lexer now tokenizes the additional utility-statement keywords needed for those forms, including index modifiers and sort-direction markers
+- new parser-only AST shapes now exist for create-index, drop-table, drop-index, commit, and rollback statements
+- `CREATE INDEX` parsing currently supports the current language-spec shape: optional `UNIQUE`, one or more index columns, and optional `ASC` or `DESC` per column
+- runtime behavior is intentionally unchanged: these statements now parse successfully but still fall through the existing unsupported-execution path until planner/executor work exists
+- full repo verification still passes after the parser-only utility-statement milestone
 
 ## Next Recommended Step
 
 - future `SELECT` growth should keep using the resolver-based join path for richer expressions and additional join-adjacent features
 - stay within the current language spec surface unless the spec is updated first
-- the next high-value seam is continuing to broaden the current non-date-time expression surface in a spec-aligned way, such as multi-argument function support or further value-expression cleanup where the spec already allows it
+- the next high-value seam is continued parser/runtime cleanup against the current spec surface, especially around expression capability and legacy compatibility backfill
 - another good candidate is continued cleanup of legacy compatibility fields once the active expression path is well covered by tests

@@ -19,6 +19,13 @@ const (
 	tokenKeywordColumn
 	tokenKeywordCreate
 	tokenKeywordDelete
+	tokenKeywordDrop
+	tokenKeywordCommit
+	tokenKeywordRollback
+	tokenKeywordUnique
+	tokenKeywordIndex
+	tokenKeywordAsc
+	tokenKeywordDesc
 	tokenKeywordInner
 	tokenKeywordJoin
 	tokenKeywordNot
@@ -205,6 +212,20 @@ func classifyWord(word string) tokenKind {
 		return tokenKeywordCreate
 	case "DELETE":
 		return tokenKeywordDelete
+	case "DROP":
+		return tokenKeywordDrop
+	case "COMMIT":
+		return tokenKeywordCommit
+	case "ROLLBACK":
+		return tokenKeywordRollback
+	case "UNIQUE":
+		return tokenKeywordUnique
+	case "INDEX":
+		return tokenKeywordIndex
+	case "ASC":
+		return tokenKeywordAsc
+	case "DESC":
+		return tokenKeywordDesc
 	case "INNER":
 		return tokenKeywordInner
 	case "JOIN":

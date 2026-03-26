@@ -94,6 +94,34 @@ func TestExecAPIRejectsSelect(t *testing.T) {
 	}
 }
 
+func TestExecAPIParserOnlyUtilityStatementsStillUnsupportedAtExecution(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+
+	tests := []string{
+		"CREATE INDEX idx_users_name ON users (name)",
+		"DROP TABLE users",
+		"DROP INDEX idx_users_name",
+		"COMMIT",
+		"ROLLBACK",
+	}
+
+	for _, sql := range tests {
+		t.Run(sql, func(t *testing.T) {
+			if _, err := db.Exec(sql); err == nil {
+				t.Fatalf("Exec(%q) error = nil, want unsupported query form", sql)
+			}
+		})
+	}
+}
+
 func TestExecAPIWriteFlowStillValidatesViaQuery(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
