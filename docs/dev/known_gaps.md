@@ -12,7 +12,7 @@ Status values:
 
 ## Summary
 
-- [kg001] Engine `pending` Support `<>` as a not-equal operator
+- [kg001] Engine `done` Support `<>` as a not-equal operator
 - [kg002] Engine `pending` Review text comparison / collation behavior
 - [kg011] CLI `pending` Improve CLI result formatting for wider query output
 - [kg012] Engine `pending` Accept trailing semicolons in core SQL input
@@ -20,7 +20,7 @@ Status values:
 
 ## Engine
 
-### `in progress` Support `<>` as a not-equal operator [kg001]
+### `done` Support `<>` as a not-equal operator [kg001]
 
 Observed gap:
 
@@ -28,7 +28,7 @@ Observed gap:
 SELECT * FROM users WHERE id <> 3
 ```
 
-Current behavior:
+Previous behavior:
 
 - parse error: `invalid where clause`
 

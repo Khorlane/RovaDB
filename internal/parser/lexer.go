@@ -131,6 +131,10 @@ func (l *lexer) nextToken() (token, error) {
 			return token{Kind: tokenNotEq, Lexeme: "!=", Pos: start}, nil
 		}
 	case '<':
+		if l.pos+1 < len(l.input) && l.input[l.pos+1] == '>' {
+			l.pos += 2
+			return token{Kind: tokenNotEq, Lexeme: "<>", Pos: start}, nil
+		}
 		if l.pos+1 < len(l.input) && l.input[l.pos+1] == '=' {
 			l.pos += 2
 			return token{Kind: tokenLTE, Lexeme: "<=", Pos: start}, nil

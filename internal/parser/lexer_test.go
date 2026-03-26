@@ -186,6 +186,32 @@ func TestLexSQLPredicateTokens(t *testing.T) {
 	}
 }
 
+func TestLexSQLPredicateTokensAlternateNotEquals(t *testing.T) {
+	tokens, err := lexSQL("WHERE id <> 10")
+	if err != nil {
+		t.Fatalf("lexSQL() error = %v", err)
+	}
+
+	wantKinds := []tokenKind{
+		tokenKeywordWhere,
+		tokenIdentifier,
+		tokenNotEq,
+		tokenNumber,
+		tokenEOF,
+	}
+	if len(tokens) != len(wantKinds) {
+		t.Fatalf("len(tokens) = %d, want %d (%#v)", len(tokens), len(wantKinds), tokens)
+	}
+	for i, want := range wantKinds {
+		if tokens[i].Kind != want {
+			t.Fatalf("tokens[%d].Kind = %v, want %v", i, tokens[i].Kind, want)
+		}
+	}
+	if tokens[2].Lexeme != "<>" {
+		t.Fatalf("tokens[2].Lexeme = %q, want %q", tokens[2].Lexeme, "<>")
+	}
+}
+
 func TestLexSQLLiteralExpressionTokens(t *testing.T) {
 	tokens, err := lexSQL("SELECT 10 + -3")
 	if err != nil {

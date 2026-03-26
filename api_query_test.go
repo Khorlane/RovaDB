@@ -473,6 +473,40 @@ func TestQueryAPIArithmeticProjectionAndPredicate(t *testing.T) {
 	}
 }
 
+func TestQueryAPIAlternateNotEqualsWhereClause(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT id, name FROM users WHERE id <> 1 ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || rows.err != nil {
+		t.Fatalf("rows = %#v, want successful rowset", rows)
+	}
+	if len(rows.data) != 1 || len(rows.data[0]) != 2 {
+		t.Fatalf("rows.data = %#v, want one row with two columns", rows.data)
+	}
+	if rows.data[0][0] != 2 || rows.data[0][1] != "bob" {
+		t.Fatalf("rows.data = %#v, want [[2 \"bob\"]]", rows.data)
+	}
+}
+
 func TestQueryAPIRejectsPlaceholderOutsideValuePositionThroughPublicPath(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

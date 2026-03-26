@@ -126,7 +126,7 @@ func (p *predicateTokenParser) parseComparison() (*PredicateExpr, bool) {
 	}
 	cond := &Condition{
 		LeftExpr:  leftExpr,
-		Operator:  op.Lexeme,
+		Operator:  canonicalComparisonOperator(op),
 		RightExpr: rightExpr,
 	}
 	p.pos += consumed
@@ -250,4 +250,11 @@ func predicateKindForBooleanOp(op BooleanOp) PredicateKind {
 	default:
 		return PredicateKindInvalid
 	}
+}
+
+func canonicalComparisonOperator(tok token) string {
+	if tok.Kind == tokenNotEq {
+		return "!="
+	}
+	return tok.Lexeme
 }

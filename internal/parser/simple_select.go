@@ -254,7 +254,7 @@ func parseWhereItems(tokens []string) []ConditionChainItem {
 
 func isWhereOperator(op string) bool {
 	switch op {
-	case "=", "!=", "<", "<=", ">", ">=":
+	case "=", "!=", "<>", "<", "<=", ">", ">=":
 		return true
 	default:
 		return false
