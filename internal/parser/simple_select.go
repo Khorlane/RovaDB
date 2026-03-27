@@ -129,15 +129,6 @@ func (s *SelectExpr) PrimaryTableRef() *TableRef {
 	return &TableRef{Name: s.TableName}
 }
 
-func parseOrderByClause(input string) (*OrderByClause, bool) {
-	orderBys, ok := parseOrderByClauses(input)
-	if !ok || len(orderBys) == 0 {
-		return nil, false
-	}
-	first := orderBys[0]
-	return &first, true
-}
-
 func parseOrderByClauses(input string) ([]OrderByClause, bool) {
 	tokens, err := lexSQL(input)
 	if err != nil {
@@ -191,20 +182,6 @@ func parseOrderByClauses(input string) ([]OrderByClause, bool) {
 	}
 }
 
-func parseWhereClause(input string) (*WhereClause, bool) {
-	tokens := strings.Fields(strings.TrimSpace(input))
-	if len(tokens) < 3 || len(tokens)%4 != 3 {
-		return nil, false
-	}
-
-	items := parseWhereItems(tokens)
-	if len(items) == 0 {
-		return nil, false
-	}
-
-	return &WhereClause{Items: items}, true
-}
-
 func parseWhereBridge(input string) (*WhereClause, *PredicateExpr, bool) {
 	predicate, ok := parsePredicateExpr(input)
 	if !ok {
@@ -214,41 +191,6 @@ func parseWhereBridge(input string) (*WhereClause, *PredicateExpr, bool) {
 	return where, predicate, true
 }
 
-func parseWhereItems(tokens []string) []ConditionChainItem {
-	items := make([]ConditionChainItem, 0, len(tokens)/4+1)
-	for i := 0; i < len(tokens); i += 4 {
-		var op BooleanOp
-		if i > 0 {
-			switch {
-			case strings.EqualFold(tokens[i-1], string(BooleanOpAnd)):
-				op = BooleanOpAnd
-			case strings.EqualFold(tokens[i-1], string(BooleanOpOr)):
-				op = BooleanOpOr
-			default:
-				return nil
-			}
-		}
-		if !isIdentifier(tokens[i]) || !isWhereOperator(tokens[i+1]) {
-			return nil
-		}
-		value, ok := parseLiteralValue(tokens[i+2])
-		if !ok {
-			return nil
-		}
-
-		items = append(items, ConditionChainItem{
-			Op: op,
-			Condition: Condition{
-				Left:     tokens[i],
-				Operator: tokens[i+1],
-				Right:    value,
-			},
-		})
-	}
-
-	return items
-}
-
 func isWhereOperator(op string) bool {
 	switch op {
 	case "=", "!=", "<>", "<", "<=", ">", ">=":
@@ -256,133 +198,6 @@ func isWhereOperator(op string) bool {
 	default:
 		return false
 	}
-}
-
-func parseParenExpr(expr string) (*Expr, bool) {
-	if len(expr) < 2 || expr[0] != '(' || expr[len(expr)-1] != ')' {
-		return nil, false
-	}
-
-	inner := expr[1 : len(expr)-1]
-	innerExpr, ok := parseInnerExpr(inner)
-	if !ok {
-		return nil, false
-	}
-
-	return &Expr{Kind: ExprKindParen, Inner: innerExpr}, true
-}
-
-func parseExpr(token string) (*Expr, bool) {
-	if strings.HasPrefix(token, "+") {
-		return nil, false
-	}
-
-	value, ok := parsePublicIntLiteral(token)
-	if ok {
-		return &Expr{Kind: ExprKindInt64Literal, I64: value}, true
-	}
-	if value, ok := parseRealLiteral(token); ok {
-		return &Expr{Kind: ExprKindRealLiteral, F64: value}, true
-	}
-
-	if isSingleQuotedStringLiteral(token) {
-		return &Expr{Kind: ExprKindStringLiteral, Str: token[1 : len(token)-1]}, true
-	}
-	if strings.EqualFold(token, "TRUE") {
-		return &Expr{Kind: ExprKindBoolLiteral, Bool: true}, true
-	}
-	if strings.EqualFold(token, "FALSE") {
-		return &Expr{Kind: ExprKindBoolLiteral, Bool: false}, true
-	}
-
-	return parseIntBinaryExpr(token)
-}
-
-func parseInnerExpr(expr string) (*Expr, bool) {
-	if strings.Contains(expr, "(") || strings.Contains(expr, ")") {
-		return nil, false
-	}
-
-	innerTokens := strings.Fields(strings.TrimSpace(expr))
-	switch len(innerTokens) {
-	case 1:
-		return parseExpr(innerTokens[0])
-	case 3:
-		sel, ok := parseSpacedIntBinaryExpr(innerTokens[0], innerTokens[1], innerTokens[2])
-		if !ok {
-			return nil, false
-		}
-		return sel.Expr, true
-	default:
-		return nil, false
-	}
-}
-
-func parseIntBinaryExpr(expr string) (*Expr, bool) {
-	for i := 1; i < len(expr); i++ {
-		if expr[i] != '+' && expr[i] != '-' {
-			continue
-		}
-
-		leftToken := expr[:i]
-		rightToken := expr[i+1:]
-		if leftToken == "" || rightToken == "" {
-			return nil, false
-		}
-
-		left, ok := parseIntLiteral(leftToken)
-		if !ok {
-			return nil, false
-		}
-		right, ok := parseIntLiteral(rightToken)
-		if !ok {
-			return nil, false
-		}
-
-		op := BinaryOpAdd
-		if expr[i] == '-' {
-			op = BinaryOpSub
-		}
-
-		return &Expr{
-			Kind:  ExprKindInt64Binary,
-			Left:  left,
-			Right: right,
-			Op:    op,
-		}, true
-	}
-
-	return nil, false
-}
-
-func parseSpacedIntBinaryExpr(leftToken, opToken, rightToken string) (*SelectExpr, bool) {
-	left, ok := parseIntLiteral(leftToken)
-	if !ok {
-		return nil, false
-	}
-	right, ok := parseIntLiteral(rightToken)
-	if !ok {
-		return nil, false
-	}
-
-	op := BinaryOpInvalid
-	switch opToken {
-	case "+":
-		op = BinaryOpAdd
-	case "-":
-		op = BinaryOpSub
-	default:
-		return nil, false
-	}
-
-	return &SelectExpr{
-		Expr: &Expr{
-			Kind:  ExprKindInt64Binary,
-			Left:  left,
-			Right: right,
-			Op:    op,
-		},
-	}, true
 }
 
 func parseIntLiteral(token string) (*Expr, bool) {

@@ -886,36 +886,6 @@ func validateSelectValueExprColumns(sel *parser.SelectExpr, expr *parser.ValueEx
 	}
 }
 
-func sortRows(rows [][]parser.Value, table *Table, orderBy *parser.OrderByClause) error {
-	if orderBy == nil {
-		return nil
-	}
-
-	idx, err := resolveColumnIndex(orderBy.Column, table)
-	if err != nil {
-		return err
-	}
-
-	var sortErr error
-	sort.SliceStable(rows, func(i, j int) bool {
-		if sortErr != nil {
-			return false
-		}
-
-		cmp, err := compareSortableValues(rows[i][idx], rows[j][idx])
-		if err != nil {
-			sortErr = err
-			return false
-		}
-		if orderBy.Desc {
-			return cmp > 0
-		}
-		return cmp < 0
-	})
-
-	return sortErr
-}
-
 func selectOrderByList(sel *parser.SelectExpr) []parser.OrderByClause {
 	if sel == nil {
 		return nil

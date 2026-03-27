@@ -78,27 +78,3 @@ func parseLiteralToken(tok token) (Value, bool) {
 		return Value{}, false
 	}
 }
-
-func parseInsertColumns(input string) ([]string, bool) {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" {
-		return nil, false
-	}
-
-	rawColumns := strings.Split(trimmed, ",")
-	columns := make([]string, 0, len(rawColumns))
-	seen := make(map[string]struct{}, len(rawColumns))
-	for _, raw := range rawColumns {
-		column := strings.TrimSpace(raw)
-		if !isIdentifier(column) {
-			return nil, false
-		}
-		if _, ok := seen[column]; ok {
-			return nil, false
-		}
-		seen[column] = struct{}{}
-		columns = append(columns, column)
-	}
-
-	return columns, len(columns) > 0
-}
