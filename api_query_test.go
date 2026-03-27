@@ -78,6 +78,51 @@ func TestQueryAPISelectFromReturnsMaterializedRows(t *testing.T) {
 	}
 }
 
+func TestQueryAPITextComparisonsAreCaseInsensitiveAcrossWhereAndOrderBy(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'Alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'Charles')",
+		"INSERT INTO users VALUES (4, 'BOB')",
+		"INSERT INTO users VALUES (5, 'Bob')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	ordered, err := db.Query("SELECT name FROM users ORDER BY name")
+	if err != nil {
+		t.Fatalf("Query(order) error = %v", err)
+	}
+	if ordered == nil || len(ordered.data) < 3 {
+		t.Fatalf("ordered rows = %#v, want materialized ordered rows", ordered)
+	}
+	if ordered.data[0][0] != "Alice" || ordered.data[1][0] != "bob" || ordered.data[2][0] != "BOB" {
+		t.Fatalf("ordered rows = %#v, want Alice then bob-group before Charles", ordered.data)
+	}
+
+	filtered, err := db.Query("SELECT name FROM users WHERE name = 'bob' ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query(where) error = %v", err)
+	}
+	if filtered == nil || len(filtered.data) != 3 {
+		t.Fatalf("filtered rows = %#v, want 3 bob matches", filtered)
+	}
+	if filtered.data[0][0] != "bob" || filtered.data[1][0] != "BOB" || filtered.data[2][0] != "Bob" {
+		t.Fatalf("filtered rows = %#v, want bob/BOB/Bob", filtered.data)
+	}
+}
+
 func TestQueryAPICountStarStillReturnsRows(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

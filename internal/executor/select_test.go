@@ -219,6 +219,69 @@ func TestSelectWithStringNotEqual(t *testing.T) {
 	}
 }
 
+func TestSelectStringEqualityIsCaseInsensitive(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("Bob")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.Int64Value(3), parser.StringValue("BOB")},
+			{parser.Int64Value(4), parser.StringValue("alice")},
+		}},
+	}
+
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
+		TableName: "users",
+		Columns:   []string{"name"},
+		Where:     where(parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("bob")}),
+		OrderBy:   &parser.OrderByClause{Column: "id"},
+	}), tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 3 ||
+		rows[0][0] != parser.StringValue("Bob") ||
+		rows[1][0] != parser.StringValue("bob") ||
+		rows[2][0] != parser.StringValue("BOB") {
+		t.Fatalf("Select() rows = %#v, want Bob/bob/BOB matches", rows)
+	}
+}
+
+func TestSelectStringOrderingComparisonsAreCaseInsensitive(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("Alice")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.Int64Value(3), parser.StringValue("Charles")},
+		}},
+	}
+
+	lessRows, err := Select(planSelect(t, &parser.SelectExpr{
+		TableName: "users",
+		Columns:   []string{"name"},
+		Where:     where(parser.Condition{Left: "name", Operator: "<", Right: parser.StringValue("bob")}),
+		OrderBy:   &parser.OrderByClause{Column: "id"},
+	}), tables)
+	if err != nil {
+		t.Fatalf("Select(<) error = %v", err)
+	}
+	if len(lessRows) != 1 || lessRows[0][0] != parser.StringValue("Alice") {
+		t.Fatalf("Select(<) rows = %#v, want [[Alice]]", lessRows)
+	}
+
+	greaterRows, err := Select(planSelect(t, &parser.SelectExpr{
+		TableName: "users",
+		Columns:   []string{"name"},
+		Where:     where(parser.Condition{Left: "name", Operator: ">", Right: parser.StringValue("bob")}),
+		OrderBy:   &parser.OrderByClause{Column: "id"},
+	}), tables)
+	if err != nil {
+		t.Fatalf("Select(>) error = %v", err)
+	}
+	if len(greaterRows) != 1 || greaterRows[0][0] != parser.StringValue("Charles") {
+		t.Fatalf("Select(>) rows = %#v, want [[Charles]]", greaterRows)
+	}
+}
+
 func TestSelectWhereTypeMismatch(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{{parser.Int64Value(1), parser.StringValue("alice")}}},
@@ -648,6 +711,28 @@ func TestSelectOrderByStringAsc(t *testing.T) {
 	}
 	if rows[0][0] != parser.StringValue("alice") || rows[1][0] != parser.StringValue("bob") || rows[2][0] != parser.StringValue("cara") {
 		t.Fatalf("Select() rows = %#v, want [[alice] [bob] [cara]]", rows)
+	}
+}
+
+func TestSelectOrderByStringAscIsCaseInsensitive(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.Int64Value(1), parser.StringValue("Alice")},
+			{parser.Int64Value(3), parser.StringValue("Charles")},
+		}},
+	}
+
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
+		TableName: "users",
+		Columns:   []string{"name"},
+		OrderBy:   &parser.OrderByClause{Column: "name"},
+	}), tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if rows[0][0] != parser.StringValue("Alice") || rows[1][0] != parser.StringValue("bob") || rows[2][0] != parser.StringValue("Charles") {
+		t.Fatalf("Select() rows = %#v, want [[Alice] [bob] [Charles]]", rows)
 	}
 }
 

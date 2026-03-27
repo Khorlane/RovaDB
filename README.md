@@ -106,6 +106,13 @@ Only the following SQL forms are supported today.
 - REAL-to-REAL `WHERE` comparisons support `=`, `!=`, `<`, `<=`, `>`, and `>=`
 - mixed `INT` / `REAL`, `TEXT` / `REAL`, and `BOOL` / `REAL` comparisons remain strict type mismatches
 
+### Text comparison semantics
+
+- TEXT comparisons are case-insensitive
+- comparisons are performed using lowercase normalization
+- no locale-aware or accent-aware collation is applied
+- behavior is deterministic and consistent across `WHERE` and `ORDER BY`
+
 ## Positional Arguments
 
 The public API supports one-shot positional argument binding on:

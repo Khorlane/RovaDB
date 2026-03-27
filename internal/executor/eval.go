@@ -87,19 +87,20 @@ func compareValues(op string, left, right parser.Value) (bool, error) {
 			return false, errUnsupportedComparisonOp
 		}
 	case parser.ValueKindString:
+		cmp := compareTextValues(left.Str, right.Str)
 		switch op {
 		case "=":
-			return left.Str == right.Str, nil
+			return strings.EqualFold(left.Str, right.Str), nil
 		case "!=":
-			return left.Str != right.Str, nil
+			return !strings.EqualFold(left.Str, right.Str), nil
 		case "<":
-			return left.Str < right.Str, nil
+			return cmp < 0, nil
 		case "<=":
-			return left.Str <= right.Str, nil
+			return cmp <= 0, nil
 		case ">":
-			return left.Str > right.Str, nil
+			return cmp > 0, nil
 		case ">=":
-			return left.Str >= right.Str, nil
+			return cmp >= 0, nil
 		default:
 			return false, errUnsupportedComparisonOp
 		}
@@ -153,10 +154,10 @@ func compareSortableValues(left, right parser.Value) (int, error) {
 			return 0, nil
 		}
 	case parser.ValueKindString:
-		switch {
-		case left.Str < right.Str:
+		switch cmp := compareTextValues(left.Str, right.Str); {
+		case cmp < 0:
 			return -1, nil
-		case left.Str > right.Str:
+		case cmp > 0:
 			return 1, nil
 		default:
 			return 0, nil
@@ -173,6 +174,10 @@ func compareSortableValues(left, right parser.Value) (int, error) {
 	default:
 		return 0, errTypeMismatch
 	}
+}
+
+func compareTextValues(left, right string) int {
+	return strings.Compare(strings.ToLower(left), strings.ToLower(right))
 }
 
 func evalScalarFunction(name string, arg parser.Value) (parser.Value, error) {
