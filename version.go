@@ -1,6 +1,6 @@
 package rovadb
 
-const version = "v0.13.0"
+const version = "v0.13.1"
 
 // Version reports the current RovaDB product version.
 func Version() string {

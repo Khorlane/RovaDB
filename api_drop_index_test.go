@@ -1,0 +1,124 @@
+package rovadb
+
+import (
+	"testing"
+
+	"github.com/Khorlane/RovaDB/internal/parser"
+	"github.com/Khorlane/RovaDB/internal/planner"
+)
+
+func TestExecAPIDropIndexRemovesDefinitionAndPlannerUse(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"CREATE INDEX idx_users_name ON users (name)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	stmt, ok := parser.ParseSelectExpr("SELECT id FROM users WHERE name = 'alice'")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	plan, err := planner.PlanSelect(stmt, plannerTableMetadata(db.tables))
+	if err != nil {
+		t.Fatalf("PlanSelect(before drop) error = %v", err)
+	}
+	if plan.ScanType != planner.ScanTypeIndex || plan.IndexScan == nil {
+		t.Fatalf("plan before drop = %#v, want index scan", plan)
+	}
+
+	result, err := db.Exec("DROP INDEX idx_users_name")
+	if err != nil {
+		t.Fatalf("Exec(drop index) error = %v", err)
+	}
+	if result.RowsAffected() != 0 {
+		t.Fatalf("RowsAffected() = %d, want 0", result.RowsAffected())
+	}
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil")
+	}
+	if table.IndexDefinition("idx_users_name") != nil {
+		t.Fatalf("IndexDefinition(idx_users_name) = %#v, want nil", table.IndexDefinition("idx_users_name"))
+	}
+	if len(table.Indexes) != 0 {
+		t.Fatalf("table.Indexes = %#v, want empty", table.Indexes)
+	}
+
+	plan, err = planner.PlanSelect(stmt, plannerTableMetadata(db.tables))
+	if err != nil {
+		t.Fatalf("PlanSelect(after drop) error = %v", err)
+	}
+	if plan.ScanType != planner.ScanTypeTable || plan.IndexScan != nil {
+		t.Fatalf("plan after drop = %#v, want table scan fallback", plan)
+	}
+}
+
+func TestExecAPIDropIndexMissingFails(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+
+	if _, err := db.Exec("DROP INDEX idx_users_name"); err == nil || err.Error() != "execution: index not found" {
+		t.Fatalf("Exec(drop missing index) error = %v, want %q", err, "execution: index not found")
+	}
+}
+
+func TestExecAPIDropIndexLeavesOtherIndexesIntactAndPersistsAcrossReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT, score INT)",
+		"CREATE INDEX idx_users_name ON users (name)",
+		"CREATE INDEX idx_users_name_score ON users (name, score DESC)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	if _, err := db.Exec("DROP INDEX idx_users_name"); err != nil {
+		t.Fatalf("Exec(drop index) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil")
+	}
+	if table.IndexDefinition("idx_users_name") != nil {
+		t.Fatalf("IndexDefinition(idx_users_name) = %#v, want nil", table.IndexDefinition("idx_users_name"))
+	}
+	if table.IndexDefinition("idx_users_name_score") == nil {
+		t.Fatalf("IndexDefinition(idx_users_name_score) = nil, want non-nil (defs=%#v)", table.IndexDefs)
+	}
+	if len(table.Indexes) != 0 {
+		t.Fatalf("table.Indexes = %#v, want no legacy index after dropping the only compatible one", table.Indexes)
+	}
+}

@@ -257,6 +257,31 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		}
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
+	case *parser.DropIndexStmt:
+		var rowsAffected int64
+		var committedTables map[string]*executor.Table
+		err := db.execMutatingStatement(func() error {
+			stagedTables := cloneTables(db.tables)
+
+			var err error
+			rowsAffected, committedTables, err = executeDropIndex(stmt, stagedTables)
+			if err != nil {
+				return err
+			}
+
+			if err := db.applyStagedCatalogOnly(stagedTables); err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return Result{}, err
+		}
+		if err := validateTables(committedTables, false); err != nil {
+			return Result{}, err
+		}
+		db.tables = committedTables
+		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.UpdateStmt:
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table
@@ -987,6 +1012,35 @@ func indexDefinitionFromStmt(table *executor.Table, stmt *parser.CreateIndexStmt
 		Unique:  stmt.Unique,
 		Columns: columns,
 	}, nil
+}
+
+func executeDropIndex(stmt *parser.DropIndexStmt, tables map[string]*executor.Table) (int64, map[string]*executor.Table, error) {
+	if stmt == nil {
+		return 0, nil, newExecError("unsupported query form")
+	}
+
+	for _, table := range tables {
+		if table == nil {
+			continue
+		}
+		indexDef := table.IndexDefinition(stmt.Name)
+		if indexDef == nil {
+			continue
+		}
+		if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok && table.Indexes != nil {
+			delete(table.Indexes, columnName)
+		}
+		filtered := make([]storage.CatalogIndex, 0, len(table.IndexDefs)-1)
+		for _, existing := range table.IndexDefs {
+			if existing.Name != stmt.Name {
+				filtered = append(filtered, existing)
+			}
+		}
+		table.IndexDefs = filtered
+		return 0, tables, nil
+	}
+
+	return 0, nil, newExecError("index not found")
 }
 
 func (db *DB) defineBasicIndex(tableName, columnName string) error {
