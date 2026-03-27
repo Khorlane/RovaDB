@@ -27,6 +27,9 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 
 		row := append([]parser.Value(nil), values...)
 		candidateRows := append(cloneRows(table.Rows), row)
+		if err := validateIndexedTextLimits(table, candidateRows); err != nil {
+			return 0, err
+		}
 		if err := validateUniqueIndexes(table, candidateRows); err != nil {
 			return 0, err
 		}
@@ -68,6 +71,9 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 	}
 
 	candidateRows := append(cloneRows(table.Rows), row)
+	if err := validateIndexedTextLimits(table, candidateRows); err != nil {
+		return 0, err
+	}
 	if err := validateUniqueIndexes(table, candidateRows); err != nil {
 		return 0, err
 	}

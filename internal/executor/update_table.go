@@ -61,6 +61,9 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 	if err := validateUniqueIndexes(table, updatedRows); err != nil {
 		return 0, err
 	}
+	if err := validateIndexedTextLimits(table, updatedRows); err != nil {
+		return 0, err
+	}
 	table.Rows = updatedRows
 	if err := rebuildIndexesForTable(table); err != nil {
 		return 0, err
