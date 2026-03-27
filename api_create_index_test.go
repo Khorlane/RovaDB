@@ -160,6 +160,83 @@ func TestExecAPICreateIndexRejectsMissingTableOrColumn(t *testing.T) {
 	}
 }
 
+func TestExecAPICreateUniqueIndexRejectsExistingDuplicateKeys(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'alice')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	if _, err := db.Exec("CREATE UNIQUE INDEX idx_users_name ON users (name)"); err == nil || err.Error() != "execution: duplicate indexed key values already exist" {
+		t.Fatalf("Exec(create unique duplicate) error = %v, want %q", err, "execution: duplicate indexed key values already exist")
+	}
+}
+
+func TestExecAPICreateUniqueIndexRejectsExistingNulls(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"INSERT INTO users VALUES (1, NULL)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	if _, err := db.Exec("CREATE UNIQUE INDEX idx_users_name ON users (name)"); err == nil || err.Error() != "execution: NULL exists in unique indexed key" {
+		t.Fatalf("Exec(create unique null) error = %v, want %q", err, "execution: NULL exists in unique indexed key")
+	}
+}
+
+func TestExecAPICreateUniqueIndexEnforcesLaterWrites(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if _, err := db.Exec("CREATE UNIQUE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create unique) error = %v", err)
+	}
+
+	if _, err := db.Exec("INSERT INTO users VALUES (3, 'alice')"); err == nil || err.Error() != "execution: duplicate indexed key values already exist" {
+		t.Fatalf("Exec(insert duplicate) error = %v, want %q", err, "execution: duplicate indexed key values already exist")
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (3, NULL)"); err == nil || err.Error() != "execution: NULL exists in unique indexed key" {
+		t.Fatalf("Exec(insert null) error = %v, want %q", err, "execution: NULL exists in unique indexed key")
+	}
+	if _, err := db.Exec("UPDATE users SET name = 'alice' WHERE id = 2"); err == nil || err.Error() != "execution: duplicate indexed key values already exist" {
+		t.Fatalf("Exec(update duplicate) error = %v, want %q", err, "execution: duplicate indexed key values already exist")
+	}
+	if _, err := db.Exec("UPDATE users SET name = NULL WHERE id = 2"); err == nil || err.Error() != "execution: NULL exists in unique indexed key" {
+		t.Fatalf("Exec(update null) error = %v, want %q", err, "execution: NULL exists in unique indexed key")
+	}
+}
+
 func collectIntRowsFromRows(t *testing.T, rows *Rows) []int {
 	t.Helper()
 

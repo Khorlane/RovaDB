@@ -916,9 +916,6 @@ func executeCreateIndex(stmt *parser.CreateIndexStmt, tables map[string]*executo
 	if stmt == nil {
 		return 0, nil, newExecError("unsupported query form")
 	}
-	if stmt.Unique {
-		return 0, nil, newExecError("unsupported query form")
-	}
 	if indexNameInUse(tables, stmt.Name) {
 		return 0, nil, newExecError("index already exists")
 	}
@@ -937,6 +934,10 @@ func executeCreateIndex(stmt *parser.CreateIndexStmt, tables map[string]*executo
 	}
 
 	table.IndexDefs = append(table.IndexDefs, indexDef)
+	if err := executor.ValidateUniqueIndexesForTable(table); err != nil {
+		table.IndexDefs = table.IndexDefs[:len(table.IndexDefs)-1]
+		return 0, nil, err
+	}
 	if columnName, ok := executor.LegacyBasicIndexColumn(indexDef); ok {
 		if table.Indexes == nil {
 			table.Indexes = make(map[string]*planner.BasicIndex)

@@ -37,7 +37,8 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 	}
 
 	var affected int64
-	for _, row := range table.Rows {
+	updatedRows := cloneRows(table.Rows)
+	for _, row := range updatedRows {
 		match, err := evalPredicateOrWhere(row, table, stmt.Predicate, stmt.Where)
 		if err != nil {
 			return 0, err
@@ -57,6 +58,10 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 		}
 		affected++
 	}
+	if err := validateUniqueIndexes(table, updatedRows); err != nil {
+		return 0, err
+	}
+	table.Rows = updatedRows
 	if err := rebuildIndexesForTable(table); err != nil {
 		return 0, err
 	}

@@ -26,6 +26,10 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 		}
 
 		row := append([]parser.Value(nil), values...)
+		candidateRows := append(cloneRows(table.Rows), row)
+		if err := validateUniqueIndexes(table, candidateRows); err != nil {
+			return 0, err
+		}
 		table.Rows = append(table.Rows, row)
 		if err := rebuildIndexesForTable(table); err != nil {
 			return 0, err
@@ -63,6 +67,10 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 		return 0, errWrongValueCount
 	}
 
+	candidateRows := append(cloneRows(table.Rows), row)
+	if err := validateUniqueIndexes(table, candidateRows); err != nil {
+		return 0, err
+	}
 	table.Rows = append(table.Rows, row)
 	if err := rebuildIndexesForTable(table); err != nil {
 		return 0, err
