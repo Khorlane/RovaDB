@@ -20,7 +20,7 @@ Status values:
 - [kg002] Engine `done` Review text comparison / collation behavior `(commit: 2edb9e1)`
 - [kg015] Engine `done` Expose catalog/schema introspection in the public API `(commit: 97c726c)`
 - [kg024] Engine `done` Make `CREATE INDEX` executable and durable
-- [kg025] Engine `pending` Make `DROP INDEX` executable and durable
+- [kg025] Engine `done` Make `DROP INDEX` executable and durable
 - [kg026] Engine `pending` Make `DROP TABLE` executable and durable
 - [kg022] Engine `done` Realign `INT` semantics to 32-bit
 - [kg023] Engine `pending` Enforce a bounded indexable TEXT size
@@ -70,19 +70,14 @@ Resolved direction:
   - compatible single-column ascending non-unique equality indexes participate in the current planner path
   - broader multi-column planner behavior remains tracked under `dx002`
 
-### `pending` Make `DROP INDEX` executable and durable [kg025]
+### `done` Make `DROP INDEX` executable and durable [kg025]
 
-Observed gap:
+Resolved direction:
 
-- the parser already recognizes `DROP INDEX`, but the statement is not executable through the public SQL surface
-- once public `CREATE INDEX` exists, users also need to be able to remove mistaken indexes
-
-Expected direction:
-
-- make `DROP INDEX` executable through `Exec`
-- remove dropped indexes from runtime and durable catalog state
-- preserve reopen and recovery correctness
-- follow `docs/dev/SCHEMA_LIFECYCLE_design.md`
+- `DROP INDEX` is now executable through `Exec`
+- dropped indexes are removed from runtime and durable catalog state
+- planner state falls back cleanly when a compatible index is removed
+- reopen and rollback-journal recovery preserve the correct dropped or pre-drop committed state
 
 ### `pending` Make `DROP TABLE` executable and durable [kg026]
 

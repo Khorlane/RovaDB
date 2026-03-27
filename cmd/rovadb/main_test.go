@@ -54,7 +54,7 @@ func TestBannerShowsRovaDBVersion(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("run() code = %d, want 0", code)
 	}
-	if !strings.Contains(out.String(), "RovaDB CLI (v0.13.1)") {
+	if !strings.Contains(out.String(), "RovaDB CLI (v0.13.2)") {
 		t.Fatalf("output missing shared version banner:\n%s", out.String())
 	}
 }
