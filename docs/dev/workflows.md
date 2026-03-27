@@ -85,6 +85,31 @@ Notes:
 - The snapshot should also include a concise function/method signature inventory grouped by source file.
 - This workflow defines the process only; it is not run automatically.
 
+
+### Load file into context
+
+ - `Name`: Load File Into Context
+ - `Trigger`: `load <file>`
+- `Mode`: `safe routine`
+- `Purpose`: Read a specified file into chat context without echoing or discussing its contents.
+
+Steps:
+
+1. Read the specified file into context.
+2. Do not print, quote, summarize, analyze, transform, or edit the file.
+3. After completion, respond with exactly `OK`.
+
+Outputs:
+
+- None
+
+Notes:
+
+- This is a context-ingestion workflow only.
+- The file path must be explicitly provided in the request that invokes the workflow.
+- This workflow intentionally uses a parameterized trigger rather than the usual `workflow <name>` shape.
+
+
 ## Maintenance Rules
 
 - Workflows may be added, edited, or removed as project needs change.

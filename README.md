@@ -4,7 +4,7 @@ A small, idiomatic embedded SQL database for Go.
 
 RovaDB is a Go-first embedded relational database engine designed for clarity, portability, and long-term extensibility. It is intended to feel natural to Go developers, remain understandable to contributors, and grow without boxing itself into a dead-end architecture.
 
-> **Status:** Pre-release. The current `v0.10.x` line establishes a practical, durable baseline with a small public API and focused SQL support.
+> **Status:** Pre-release. The current `v0.11.x` line establishes a practical, durable baseline with a small public API and focused SQL support.
 
 ## Product Boundary
 
@@ -33,16 +33,17 @@ RovaDB is a Go-first embedded relational database engine designed for clarity, p
 
 - `CREATE TABLE`
 - `INSERT INTO ... VALUES`
-- `SELECT` over a single table with projection, `WHERE`, `ORDER BY`, and `COUNT(*)`
+- `SELECT` with projection expressions, `WHERE`, `ORDER BY`, joins, and the current supported aggregate set
 - `UPDATE`
 - `DELETE`
 - `ALTER TABLE ... ADD COLUMN`
 - positional args via `?` in `Exec`, `Query`, and `QueryRow`
+- public catalog introspection via `ListTables` and `GetTableSchema`
 - strict value support for `INT`, `TEXT`, `BOOL`, `REAL`, and `NULL`
 
 ### Scope Discipline
 
-The current `v0.10.x` line is the practical baseline for this intended use case. Future changes should prioritize correctness, determinism, durability, and API stability over feature expansion, and any new feature should justify crossing this boundary.
+The current `v0.11.x` line is the practical baseline for this intended use case. Future changes should prioritize correctness, determinism, durability, and API stability over feature expansion, and any new feature should justify crossing this boundary.
 
 ## Supported SQL
 
@@ -57,27 +58,51 @@ Only the following SQL forms are supported today.
 - `UPDATE ... SET ...`
 - `DELETE FROM ...`
 
+Parser-recognized but not executable today:
+
+- `CREATE INDEX ...`
+- `DROP TABLE ...`
+- `DROP INDEX ...`
+- `COMMIT`
+- `ROLLBACK`
+
 ### SELECT support
 
-- literal selects such as `SELECT 1`, `SELECT 'hello'`, `SELECT TRUE`, `SELECT FALSE`, and the current simple integer arithmetic forms
-- column projection such as `SELECT id` and `SELECT id, name`
+- literal selects such as `SELECT 1`, `SELECT 'hello'`, `SELECT TRUE`, `SELECT FALSE`, and arithmetic expressions with `+` and `-`
+- projection expressions, column projection, qualified column references, and aliases
 - single-table `FROM`
-- `WHERE` with flat `AND` / `OR` evaluation from left to right
-- comparison operators: `=`, `!=`, `<`, `<=`, `>`, `>=`
-- `ORDER BY <column> [ASC|DESC]`
-- `COUNT(*)`
+- explicit two-table `INNER JOIN ... ON ...` equality joins
+- `WHERE` with `NOT`, precedence, and parenthesized grouping
+- comparison operators: `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`
+- `ORDER BY` with one or more items
+- scalar functions: `LOWER`, `UPPER`, `LENGTH`, and `ABS`
+- aggregates: `COUNT(*)`, `COUNT(expr)`, `MIN`, `MAX`, `AVG`, and `SUM`
 
 ### Not supported today
 
-- `JOIN`
 - `GROUP BY`
 - `HAVING`
 - subqueries
-- multi-table queries
-- aggregate forms other than `COUNT(*)`
-- expression precedence in `WHERE` beyond the current flat left-to-right chain
+- joins over more than two tables
+- non-`INNER` joins
+- non-equality join predicates
+- comma-style multi-table `FROM` queries at runtime
+- mixed aggregate and non-aggregate projections
 - public `CREATE INDEX` SQL
+- public `DROP TABLE` SQL
+- public `DROP INDEX` SQL
+- public `COMMIT` / `ROLLBACK` SQL
 - schema changes other than `ALTER TABLE ... ADD COLUMN`
+
+### Public API
+
+- `Open(path string) (*DB, error)`
+- `(*DB).Close() error`
+- `(*DB).Exec(query string, args ...any) (Result, error)`
+- `(*DB).Query(query string, args ...any) (*Rows, error)`
+- `(*DB).QueryRow(query string, args ...any) *Row`
+- `(*DB).ListTables() ([]TableInfo, error)`
+- `(*DB).GetTableSchema(table string) (TableInfo, error)`
 
 ### Supported schema types
 
@@ -134,6 +159,15 @@ Supported Go argument types are:
 - `nil`
 
 Unsupported argument types fail with an error.
+
+## Catalog Introspection
+
+RovaDB exposes a small public catalog API for listing tables and reading table schema metadata:
+
+- `ListTables()`
+- `GetTableSchema(table)`
+
+`ListTables()` returns table names and column definitions for all tables in the open database. `GetTableSchema(table)` returns the same metadata for one table.
 
 ## Canonical Example
 
@@ -281,7 +315,10 @@ Current documentation in the repository includes:
 
 - `README.md`
 - `docs/dev/BOOL_design.md`
+- `docs/dev/known_gaps.md`
 - `docs/dev/REAL_design.md`
+- `docs/dev/RovaDB_SQL_Language_Spec.md`
+- `docs/dev/workflows.md`
 - `examples/basic_usage/main.go`
 
 ## Contributing

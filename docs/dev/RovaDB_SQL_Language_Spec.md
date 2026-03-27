@@ -48,6 +48,7 @@ index-column:
 >>-column-name--+----------+--><
                 '-ASC|DESC-'
 ```
+
 **DROP TABLE**
 ```
 >>-DROP TABLE--table-name--><
@@ -125,7 +126,46 @@ boolean-operator:
 >>-AND--><
   '-OR-'
 ```
-### 3. Expression Inventory
+
+### 3. Statement Semantic Notes
+
+**CREATE INDEX semantics**
+
+- index names must be unique across the database
+- `CREATE INDEX` fails if an equivalent index definition already exists on the same table
+- equivalent index definitions are compared by:
+  - target table
+  - `UNIQUE` setting
+  - ordered indexed column list
+  - per-column `ASC` / `DESC` modifiers
+- the same column must not appear more than once in a single index definition
+- if omitted, `ASC` is assumed for an indexed column
+- `ASC` / `DESC` are part of the index definition and are semantically significant
+- column order is significant for multi-column indexes
+- an index on `(a, b)` is different from an index on `(b, a)`
+- `CREATE UNIQUE INDEX` enforces uniqueness across the full indexed key
+- `CREATE UNIQUE INDEX` fails if duplicate indexed key values already exist in the target table
+- for V1, `CREATE UNIQUE INDEX` also fails if any existing row has `NULL` in any indexed column
+
+**DROP INDEX semantics**
+
+- `DROP INDEX` identifies the target index by database-wide index name
+- `DROP INDEX` fails if the named index does not exist
+- `DROP INDEX` removes only the named index and does not remove table data
+
+**DROP TABLE semantics**
+
+- `DROP TABLE` fails if the named table does not exist
+- `DROP TABLE` removes the named table and all indexes defined on that table
+- `DROP TABLE` removes both table schema metadata and table row data
+
+**ALTER TABLE ... ADD COLUMN semantics**
+
+- `ALTER TABLE ... ADD COLUMN` appends the new column to the end of the table schema
+- existing stored rows are not rewritten when the column is added
+- existing rows read after the schema change yield `NULL` for the added column unless and until later writes populate it
+
+### 4. Expression Inventory
 
 Expressions are shared across projection, predicates, assignments, and value lists, but each context may apply additional restrictions.
 
@@ -217,7 +257,7 @@ Aggregate function calls are context-restricted and are not valid in every expre
 - each item in a `VALUES` list must be a value expression
 - aggregate function calls are not allowed in `VALUES` lists
 
-### 4. Function Inventory
+### 5. Function Inventory
 
 Supported scalar functions:
 
@@ -237,7 +277,7 @@ Supported aggregate functions:
 
 Function calls may appear only in expression contexts that allow them.
 
-### 5. Join Inventory
+### 6. Join Inventory
 
 Supported join shape:
 
@@ -261,7 +301,7 @@ Rejected join forms for now:
 - subquery joins
 - joins over more than two tables
 
-### 6. Aggregate Inventory
+### 7. Aggregate Inventory
 
 Supported aggregate functions:
 
@@ -285,12 +325,13 @@ Initial aggregate query scope:
 - `COUNT(expr)` is supported explicitly
 - mixed aggregate and non-aggregate projection rules should be defined explicitly before implementation expands
 
-### 7. Accepted Examples
+### 8. Accepted Examples
 
 Representative accepted examples:
 
 - `CREATE TABLE users (id INT, name TEXT, active BOOL, score REAL)`
 - `CREATE UNIQUE INDEX idx_users_name ON users (name ASC)`
+- `CREATE INDEX idx_users_name_score ON users (name ASC, score DESC)`
 - `DROP TABLE users`
 - `DROP INDEX idx_users_name`
 - `ALTER TABLE users ADD COLUMN created_at TEXT`
@@ -309,13 +350,16 @@ Representative accepted examples:
 - `SELECT AVG(score), SUM(score), MIN(score), MAX(score) FROM users`
 - `SELECT u.name, d.name FROM users u JOIN departments d ON u.department_id = d.id`
 
-### 8. Rejected Examples
+### 9. Rejected Examples
 
 Representative rejected examples:
 
 - `CREATE TABLE users ()`
 - `CREATE TABLE users (id INT, id TEXT)`
 - `CREATE INDEX idx_users_name ON users`
+- `CREATE INDEX idx_users_name ON users ()`
+- `CREATE INDEX idx_users_name_twice ON users (name, name)`
+- `CREATE INDEX idx_users_name ON missing_users (name)`
 - `DROP TABLE`
 - `DROP INDEX`
 - `ALTER TABLE users DROP COLUMN created_at`
@@ -332,6 +376,6 @@ Representative rejected examples:
 - `SELECT * FROM users NATURAL JOIN departments`
 - `SELECT * FROM users JOIN departments USING (department_id)`
 
-### 9. Notes
+### 10. Notes
 
 Boolean expression precedence is `NOT`, then `AND`, then `OR`. Parenthesized boolean grouping is supported.

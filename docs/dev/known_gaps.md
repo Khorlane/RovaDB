@@ -19,10 +19,13 @@ Status values:
 
 - [kg002] Engine `done` Review text comparison / collation behavior `(commit: 2edb9e1)`
 - [kg015] Engine `done` Expose catalog/schema introspection in the public API `(commit: 97c726c)`
-- [kg022] Engine `pending` Add explicit SMALLINT / INT / BIGINT integer widths
+- [kg024] Engine `pending` Make `CREATE INDEX` executable and durable
+- [kg025] Engine `pending` Make `DROP INDEX` executable and durable
+- [kg026] Engine `pending` Make `DROP TABLE` executable and durable
+- [kg022] Engine `pending` Realign `INT` semantics to 32-bit
 - [kg023] Engine `pending` Enforce a bounded indexable TEXT size
 - [dx001] Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc
-- [dx002] Explore multi-column index support
+- [dx002] Explore planner usage for multi-column indexes
 - [dx003] Explore primary key as an explicit table-definition contract
 - [dx004] Explore table-level foreign key constraints
 
@@ -56,24 +59,64 @@ Expected direction:
 - provide a supported public API for catalog/schema inspection
 - the CLI and Go callers should be able to discover table names and column definitions without depending on internal storage packages
 
-### `pending` Add explicit SMALLINT / INT / BIGINT integer widths [kg022]
+### `pending` Make `CREATE INDEX` executable and durable [kg024]
+
+Observed gap:
+
+- the parser already recognizes `CREATE INDEX`, but the statement is not executable through the public SQL surface
+- the current internal index path is narrower than the SQL language spec for `CREATE INDEX`
+
+Expected direction:
+
+- make `CREATE INDEX` and `CREATE UNIQUE INDEX` executable through `Exec`
+- persist and reload the full index definition durably
+- enforce created indexes correctly on later writes
+- follow `docs/dev/CREATE_INDEX_design.md`
+
+### `pending` Make `DROP INDEX` executable and durable [kg025]
+
+Observed gap:
+
+- the parser already recognizes `DROP INDEX`, but the statement is not executable through the public SQL surface
+- once public `CREATE INDEX` exists, users also need to be able to remove mistaken indexes
+
+Expected direction:
+
+- make `DROP INDEX` executable through `Exec`
+- remove dropped indexes from runtime and durable catalog state
+- preserve reopen and recovery correctness
+- follow `docs/dev/SCHEMA_LIFECYCLE_design.md`
+
+### `pending` Make `DROP TABLE` executable and durable [kg026]
+
+Observed gap:
+
+- the parser already recognizes `DROP TABLE`, but the statement is not executable through the public SQL surface
+- practical schema lifecycle in V1 requires users to be able to remove mistaken tables
+
+Expected direction:
+
+- make `DROP TABLE` executable through `Exec`
+- remove dropped tables and dependent indexes from runtime and durable catalog state
+- preserve reopen and recovery correctness
+- follow `docs/dev/SCHEMA_LIFECYCLE_design.md`
+
+### `pending` Realign `INT` semantics to 32-bit [kg022]
 
 Observed gap:
 
 - RovaDB currently exposes a single `INT` schema type
-- engine/storage behavior currently maps that `INT` path to `int64`
-- if RovaDB adds multiple integer widths, the intended mapping under discussion is:
-  - `SMALLINT` -> `int16`
-  - `INT` -> `int32`
-  - `BIGINT` -> `int64`
+- current engine/storage behavior effectively treats that `INT` path as `int64`
 
 Expected direction:
 
-- add explicit multi-width integer schema support for:
+- keep `INT` as the only public integer schema type for now
+- realign `INT` semantics to 32-bit behavior consistently across parser, runtime, storage, comparison, and scan paths
+- treat the current wider `int64` behavior as a compatibility-sensitive mismatch that should be corrected intentionally
+- preserve future direction to add explicit multi-width integer types later:
   - `SMALLINT`
   - `INT`
   - `BIGINT`
-- preserve awareness that current `INT` behavior is effectively `int64`, so redefining `INT` as `int32` would be a semantic compatibility change that should be handled intentionally
 
 ### `pending` Enforce a bounded indexable TEXT size [kg023]
 
@@ -125,31 +168,27 @@ Current context:
 - current `ALTER TABLE ... ADD COLUMN` behavior is catalog-only and pads existing rows with `NULL`
 - there is no current parser or executor support for `NOT NULL` or `DEFAULT`
 
-### Explore multi-column index support [dx002]
+### Explore planner usage for multi-column indexes [dx002]
 
 Exploration scope:
 
-- whether RovaDB should support multi-column indexes beyond parser/spec shape
-- how multi-column indexes should behave for uniqueness, planner matching, and future key/constraint features
+- what planner/query shapes should be able to use a persisted multi-column index
+- how planner support for multi-column indexes should grow beyond the initial executable baseline
+- how multi-column indexes should relate to future key/constraint features
 
 Questions to resolve:
 
-- whether multi-column indexes should be supported for:
-  - non-unique indexes
-  - unique indexes
-  - future primary-key backing
 - what ordering metadata should mean for multi-column indexes
 - what planner/query shapes should be able to use a multi-column index
 - whether left-prefix matching should be part of the initial design or deferred
 - how multi-column index keys should be encoded and compared
-- how catalog metadata should represent multi-column index definitions
-- how `CREATE INDEX` should behave when existing data violates a multi-column `UNIQUE` definition
+- how planner behavior should interact with multi-column unique indexes and future primary-key backing
 
 Current context:
 
 - the SQL language spec and parser already allow more than one column in `CREATE INDEX (...)`
-- the current runtime/storage implementation is still single-column only
-- current persisted/runtime index metadata carries one `ColumnName`, not a column list
+- V1 executable index work is expected to persist and enforce multi-column index definitions
+- planner support may remain narrower than the full persisted index-definition space at first
 
 ### Explore primary key as an explicit table-definition contract [dx003]
 
