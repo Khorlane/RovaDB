@@ -1,7 +1,10 @@
 package rovadb
 
 import (
+	"os"
 	"testing"
+
+	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
 func TestExecAPICreateIndexSingleColumnPersistsAndSupportsQueryPath(t *testing.T) {
@@ -234,6 +237,100 @@ func TestExecAPICreateUniqueIndexEnforcesLaterWrites(t *testing.T) {
 	}
 	if _, err := db.Exec("UPDATE users SET name = NULL WHERE id = 2"); err == nil || err.Error() != "execution: NULL exists in unique indexed key" {
 		t.Fatalf("Exec(update null) error = %v, want %q", err, "execution: NULL exists in unique indexed key")
+	}
+}
+
+func TestExecAPIMultiColumnUniqueIndexPersistsAndEnforcesAfterReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, first TEXT, last TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'Ada', 'Lovelace')",
+		"INSERT INTO users VALUES (2, 'Grace', 'Hopper')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if _, err := db.Exec("CREATE UNIQUE INDEX idx_users_full_name ON users (first ASC, last DESC)"); err != nil {
+		t.Fatalf("Exec(create unique multi-column) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	table := db.tables["users"]
+	if table == nil || table.IndexDefinition("idx_users_full_name") == nil {
+		t.Fatalf("IndexDefinition(idx_users_full_name) missing after reopen, table=%#v", table)
+	}
+	if len(table.Indexes) != 0 {
+		t.Fatalf("table.Indexes = %#v, want no legacy planner index for multi-column definition", table.Indexes)
+	}
+
+	if _, err := db.Exec("INSERT INTO users VALUES (3, 'Ada', 'Lovelace')"); err == nil || err.Error() != "execution: duplicate indexed key values already exist" {
+		t.Fatalf("Exec(insert duplicate tuple) error = %v, want %q", err, "execution: duplicate indexed key values already exist")
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (3, 'Ada', NULL)"); err == nil || err.Error() != "execution: NULL exists in unique indexed key" {
+		t.Fatalf("Exec(insert null tuple) error = %v, want %q", err, "execution: NULL exists in unique indexed key")
+	}
+}
+
+func TestCreateIndexRecoveryDoesNotExposePartialIndex(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	db.afterJournalWriteHook = func() error {
+		return os.ErrInvalid
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err == nil {
+		t.Fatal("Exec(create index) error = nil, want failure")
+	}
+	if _, err := os.Stat(storage.JournalPath(path)); err != nil {
+		t.Fatalf("journal stat error = %v, want surviving journal", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil")
+	}
+	if table.IndexDefinition("idx_users_name") != nil {
+		t.Fatalf("IndexDefinition(idx_users_name) = %#v, want nil after recovery", table.IndexDefinition("idx_users_name"))
+	}
+	if len(table.Indexes) != 0 {
+		t.Fatalf("table.Indexes = %#v, want empty after recovery", table.Indexes)
+	}
+	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+	if got := collectIntRowsFromRows(t, rows); len(got) != 1 || got[0] != 1 {
+		t.Fatalf("query rows = %#v, want []int{1}", got)
 	}
 }
 

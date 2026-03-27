@@ -4,7 +4,7 @@ A small, idiomatic embedded SQL database for Go.
 
 RovaDB is a Go-first embedded relational database engine designed for clarity, portability, and long-term extensibility. It is intended to feel natural to Go developers, remain understandable to contributors, and grow without boxing itself into a dead-end architecture.
 
-> **Status:** Pre-release. The current `v0.11.x` line establishes a practical, durable baseline with a small public API and focused SQL support.
+> **Status:** Pre-release. The current `v0.13.x` line establishes a practical, durable baseline with a small public API and focused SQL support.
 
 ## Product Boundary
 
@@ -32,6 +32,7 @@ RovaDB is a Go-first embedded relational database engine designed for clarity, p
 ### Supported Features
 
 - `CREATE TABLE`
+- `CREATE INDEX` / `CREATE UNIQUE INDEX`
 - `INSERT INTO ... VALUES`
 - `SELECT` with projection expressions, `WHERE`, `ORDER BY`, joins, and the current supported aggregate set
 - `UPDATE`
@@ -43,7 +44,7 @@ RovaDB is a Go-first embedded relational database engine designed for clarity, p
 
 ### Scope Discipline
 
-The current `v0.11.x` line is the practical baseline for this intended use case. Future changes should prioritize correctness, determinism, durability, and API stability over feature expansion, and any new feature should justify crossing this boundary.
+The current `v0.13.x` line is the practical baseline for this intended use case. Future changes should prioritize correctness, determinism, durability, and API stability over feature expansion, and any new feature should justify crossing this boundary.
 
 ## Supported SQL
 
@@ -52,6 +53,7 @@ Only the following SQL forms are supported today.
 ### Statements
 
 - `CREATE TABLE`
+- `CREATE INDEX ...`
 - `ALTER TABLE <table> ADD COLUMN <column> <type>`
 - `INSERT INTO ... VALUES (...)`
 - `SELECT ...`
@@ -60,7 +62,6 @@ Only the following SQL forms are supported today.
 
 Parser-recognized but not executable today:
 
-- `CREATE INDEX ...`
 - `DROP TABLE ...`
 - `DROP INDEX ...`
 - `COMMIT`
@@ -88,7 +89,6 @@ Parser-recognized but not executable today:
 - non-equality join predicates
 - comma-style multi-table `FROM` queries at runtime
 - mixed aggregate and non-aggregate projections
-- public `CREATE INDEX` SQL
 - public `DROP TABLE` SQL
 - public `DROP INDEX` SQL
 - public `COMMIT` / `ROLLBACK` SQL

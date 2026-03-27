@@ -19,7 +19,7 @@ Status values:
 
 - [kg002] Engine `done` Review text comparison / collation behavior `(commit: 2edb9e1)`
 - [kg015] Engine `done` Expose catalog/schema introspection in the public API `(commit: 97c726c)`
-- [kg024] Engine `pending` Make `CREATE INDEX` executable and durable
+- [kg024] Engine `done` Make `CREATE INDEX` executable and durable
 - [kg025] Engine `pending` Make `DROP INDEX` executable and durable
 - [kg026] Engine `pending` Make `DROP TABLE` executable and durable
 - [kg022] Engine `done` Realign `INT` semantics to 32-bit
@@ -59,19 +59,16 @@ Expected direction:
 - provide a supported public API for catalog/schema inspection
 - the CLI and Go callers should be able to discover table names and column definitions without depending on internal storage packages
 
-### `pending` Make `CREATE INDEX` executable and durable [kg024]
+### `done` Make `CREATE INDEX` executable and durable [kg024]
 
-Observed gap:
+Resolved direction:
 
-- the parser already recognizes `CREATE INDEX`, but the statement is not executable through the public SQL surface
-- the current internal index path is narrower than the SQL language spec for `CREATE INDEX`
-
-Expected direction:
-
-- make `CREATE INDEX` and `CREATE UNIQUE INDEX` executable through `Exec`
-- persist and reload the full index definition durably
-- enforce created indexes correctly on later writes
-- follow `docs/dev/CREATE_INDEX_design.md`
+- `CREATE INDEX` and `CREATE UNIQUE INDEX` are now executable through `Exec`
+- the full SQL-visible index definition is persisted and reloaded durably
+- non-unique and unique index rules are enforced on later writes
+- planner usage remains intentionally narrow for now:
+  - compatible single-column ascending non-unique equality indexes participate in the current planner path
+  - broader multi-column planner behavior remains tracked under `dx002`
 
 ### `pending` Make `DROP INDEX` executable and durable [kg025]
 

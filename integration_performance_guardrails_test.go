@@ -23,8 +23,8 @@ func TestPlannerGuardrailIndexedEqualityChoosesIndexScan(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
 	}
 
 	stmt, ok := parser.ParseSelectExpr("SELECT id FROM users WHERE name = 'alice'")
@@ -57,8 +57,8 @@ func TestPlannerGuardrailReopenedIndexMetadataStillChoosesIndexScan(t *testing.T
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -98,8 +98,8 @@ func TestIndexedEqualityGuardrailAfterMutationAndReopen(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
 	}
 
 	assertQueryIntRows(t, db, "SELECT id FROM users WHERE name = 'alice' ORDER BY id", 1, 3)
@@ -138,8 +138,8 @@ func TestPlannerGuardrailUnsupportedIndexedPredicateFallsBackToTableScan(t *test
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
 	}
 
 	stmt, ok := parser.ParseSelectExpr("SELECT id FROM users WHERE name != 'alice'")
