@@ -182,14 +182,10 @@ Use `v0.x.0` milestone releases until the project is intentionally judged ready 
 
 Current baseline:
 
-- `v0.13.x`
+- `v0.14.x`
 
 Compressed milestone plan:
 
-- `v0.14.0`
-  - complete `kg025`
-  - complete `kg026`
-  - make practical schema lifecycle real through executable durable `DROP INDEX` and `DROP TABLE`
 - `v0.15.0`
   - complete `kg023`
   - enforce bounded indexed `TEXT`

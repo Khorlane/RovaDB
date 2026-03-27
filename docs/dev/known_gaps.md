@@ -21,7 +21,7 @@ Status values:
 - [kg015] Engine `done` Expose catalog/schema introspection in the public API `(commit: 97c726c)`
 - [kg024] Engine `done` Make `CREATE INDEX` executable and durable
 - [kg025] Engine `done` Make `DROP INDEX` executable and durable
-- [kg026] Engine `pending` Make `DROP TABLE` executable and durable
+- [kg026] Engine `done` Make `DROP TABLE` executable and durable
 - [kg022] Engine `done` Realign `INT` semantics to 32-bit
 - [kg023] Engine `pending` Enforce a bounded indexable TEXT size
 - [dx001] Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc
@@ -79,19 +79,14 @@ Resolved direction:
 - planner state falls back cleanly when a compatible index is removed
 - reopen and rollback-journal recovery preserve the correct dropped or pre-drop committed state
 
-### `pending` Make `DROP TABLE` executable and durable [kg026]
+### `done` Make `DROP TABLE` executable and durable [kg026]
 
-Observed gap:
+Resolved direction:
 
-- the parser already recognizes `DROP TABLE`, but the statement is not executable through the public SQL surface
-- practical schema lifecycle in V1 requires users to be able to remove mistaken tables
-
-Expected direction:
-
-- make `DROP TABLE` executable through `Exec`
-- remove dropped tables and dependent indexes from runtime and durable catalog state
-- preserve reopen and recovery correctness
-- follow `docs/dev/SCHEMA_LIFECYCLE_design.md`
+- `DROP TABLE` is now executable through `Exec`
+- dropped tables and their dependent indexes are removed from runtime and durable catalog state
+- queries against dropped tables fail deterministically as table-not-found
+- reopen and rollback-journal recovery preserve the correct dropped or pre-drop committed state
 
 ### `done` Realign `INT` semantics to 32-bit [kg022]
 

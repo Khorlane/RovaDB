@@ -62,7 +62,6 @@ Only the following SQL forms are supported today.
 
 Parser-recognized but not executable today:
 
-- `DROP TABLE ...`
 - `COMMIT`
 - `ROLLBACK`
 
@@ -88,7 +87,6 @@ Parser-recognized but not executable today:
 - non-equality join predicates
 - comma-style multi-table `FROM` queries at runtime
 - mixed aggregate and non-aggregate projections
-- public `DROP TABLE` SQL
 - public `COMMIT` / `ROLLBACK` SQL
 - schema changes other than `ALTER TABLE ... ADD COLUMN`
 
