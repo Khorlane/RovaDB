@@ -10,8 +10,6 @@ import (
 	rovadb "github.com/Khorlane/RovaDB"
 )
 
-const cliVersion = "v0.3.0"
-
 func main() {
 	os.Exit(runWithArgs(os.Stdin, os.Stdout, os.Stderr, os.Args[1:]))
 }
@@ -730,7 +728,7 @@ func writeBanner(w io.Writer) error {
 	if _, err := fmt.Fprintln(w, "+---------------------+"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "| RovaDB CLI (%s) |\n", cliVersion); err != nil {
+	if _, err := fmt.Fprintf(w, "| RovaDB CLI (%s) |\n", rovadb.Version()); err != nil {
 		return err
 	}
 	_, err := fmt.Fprintln(w, "+---------------------+")

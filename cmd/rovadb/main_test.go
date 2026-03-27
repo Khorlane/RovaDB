@@ -46,6 +46,19 @@ func TestRunHelp(t *testing.T) {
 	}
 }
 
+func TestBannerShowsRovaDBVersion(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	code := runWithArgs(strings.NewReader("quit\n"), &out, &errOut, nil)
+	if code != 0 {
+		t.Fatalf("run() code = %d, want 0", code)
+	}
+	if !strings.Contains(out.String(), "RovaDB CLI (v0.11.1)") {
+		t.Fatalf("output missing shared version banner:\n%s", out.String())
+	}
+}
+
 func TestRunHelpInsert(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
