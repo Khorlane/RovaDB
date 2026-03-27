@@ -984,6 +984,10 @@ func executeCreateIndex(stmt *parser.CreateIndexStmt, tables map[string]*executo
 	}
 
 	table.IndexDefs = append(table.IndexDefs, indexDef)
+	if err := executor.ValidateIndexedTextLimitsForTable(table); err != nil {
+		table.IndexDefs = table.IndexDefs[:len(table.IndexDefs)-1]
+		return 0, nil, err
+	}
 	if err := executor.ValidateUniqueIndexesForTable(table); err != nil {
 		table.IndexDefs = table.IndexDefs[:len(table.IndexDefs)-1]
 		return 0, nil, err

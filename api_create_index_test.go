@@ -2,6 +2,7 @@ package rovadb
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/storage"
@@ -58,6 +59,89 @@ func TestExecAPICreateIndexSingleColumnPersistsAndSupportsQueryPath(t *testing.T
 	defer rows.Close()
 	if got := collectIntRowsFromRows(t, rows); len(got) != 2 || got[0] != 1 || got[1] != 3 {
 		t.Fatalf("alice ids = %#v, want []int{1, 3}", got)
+	}
+}
+
+func TestExecAPICreateIndexRejectsExistingOversizedIndexedText(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	tooLarge := strings.Repeat("a", 513)
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", 1, tooLarge); err != nil {
+		t.Fatalf("Exec(insert oversized plain text before indexing) error = %v", err)
+	}
+
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err == nil || err.Error() != "execution: indexed TEXT column value exceeds 512-byte limit" {
+		t.Fatalf("Exec(create index oversized text) error = %v, want %q", err, "execution: indexed TEXT column value exceeds 512-byte limit")
+	}
+}
+
+func TestExecAPICreateUniqueIndexRejectsExistingOversizedIndexedText(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	tooLarge := strings.Repeat("b", 513)
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", 1, tooLarge); err != nil {
+		t.Fatalf("Exec(insert oversized plain text before indexing) error = %v", err)
+	}
+
+	if _, err := db.Exec("CREATE UNIQUE INDEX idx_users_name ON users (name)"); err == nil || err.Error() != "execution: indexed TEXT column value exceeds 512-byte limit" {
+		t.Fatalf("Exec(create unique index oversized text) error = %v, want %q", err, "execution: indexed TEXT column value exceeds 512-byte limit")
+	}
+}
+
+func TestExecAPICreateIndexRejectsExistingOversizedMultiColumnIndexedText(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	tooLarge := strings.Repeat("c", 513)
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, bio TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", 1, "alice", tooLarge); err != nil {
+		t.Fatalf("Exec(insert oversized plain text before indexing) error = %v", err)
+	}
+
+	if _, err := db.Exec("CREATE INDEX idx_users_name_bio ON users (name, bio DESC)"); err == nil || err.Error() != "execution: indexed TEXT column value exceeds 512-byte limit" {
+		t.Fatalf("Exec(create multi-column index oversized text) error = %v, want %q", err, "execution: indexed TEXT column value exceeds 512-byte limit")
+	}
+}
+
+func TestExecAPICreateIndexAllowsIndexedTextAt512Bytes(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	atLimit := strings.Repeat("d", 512)
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", 1, atLimit); err != nil {
+		t.Fatalf("Exec(insert at limit) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index at limit) error = %v", err)
 	}
 }
 
