@@ -132,12 +132,17 @@ Why this comes after executable indexes:
 
 Goal:
 
+- complete internal naming cleanup where it improves maintainability without changing behavior or public/user-facing terminology
 - recheck README, examples, and CLI alignment
 - verify deterministic error behavior across the supported public surface
 - harden reopen, rollback, and recovery coverage around the completed feature set
 - confirm the supported V1 surface feels coherent rather than merely implemented
 
 This phase should focus on confidence and usability, not broad new feature expansion.
+
+Reference note:
+
+- `C:\Projects\RovaDB Research\Var Func Name Refactor.txt`
 
 ## V1 Must-Haves
 
