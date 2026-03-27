@@ -2,7 +2,12 @@
 
 This document tracks concrete identified gaps in current RovaDB behavior.
 
-It is intended to be a lightweight developer backlog for things that should be fixed or clarified, based on observed behavior in the engine or CLI.
+It is intended to be a lightweight developer backlog for things that should be fixed, clarified, or explored.
+
+Prefix values:
+
+- kg - known gap
+- dx - design exploration
 
 Status values:
 
@@ -13,8 +18,13 @@ Status values:
 ## Summary
 
 - [kg002] Engine `pending` Review text comparison / collation behavior
-- [kg011] CLI `pending` Improve CLI result formatting for wider query output
-- [kg013] CLI `pending` Distinguish obvious non-SQL input from SQL passthrough
+- [kg015] Engine `pending` Expose catalog/schema introspection in the public API
+- [kg022] Engine `pending` Add explicit SMALLINT / INT / BIGINT integer widths
+- [kg023] Engine `pending` Enforce a bounded indexable TEXT size
+- [dx001] Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc
+- [dx002] Explore multi-column index support
+- [dx003] Explore primary key as an explicit table-definition contract
+- [dx004] Explore table-level foreign key constraints
 
 ## Engine
 
@@ -34,30 +44,183 @@ Expected direction:
 
 - document and/or refine string comparison semantics so text predicates match the intended SQL behavior and user expectations
 
-## CLI
-
-### `pending` Improve CLI result formatting for wider query output [kg011]
+### `pending` Expose catalog/schema introspection in the public API [kg015]
 
 Observed gap:
 
-- current query-result printing is intentionally minimal and does not try to align or format wider result sets
+- the CLI currently reaches into `internal/storage` to implement `tables` and `schema`
+- a Go program embedding RovaDB may also need access to table and column metadata
 
 Expected direction:
 
-- improve output readability for broader result shapes while keeping the CLI lightweight
+- provide a supported public API for catalog/schema inspection
+- the CLI and Go callers should be able to discover table names and column definitions without depending on internal storage packages
 
-### `pending` Distinguish obvious non-SQL input from SQL passthrough [kg013]
+### `pending` Add explicit SMALLINT / INT / BIGINT integer widths [kg022]
 
 Observed gap:
 
-```text
-rovadb> look
-  exec error: parse: unsupported query form
+- RovaDB currently exposes a single `INT` schema type
+- engine/storage behavior currently maps that `INT` path to `int64`
+- if RovaDB adds multiple integer widths, the intended mapping under discussion is:
+  - `SMALLINT` -> `int16`
+  - `INT` -> `int32`
+  - `BIGINT` -> `int64`
+
+Expected direction:
+
+- add explicit multi-width integer schema support for:
+  - `SMALLINT`
+  - `INT`
+  - `BIGINT`
+- preserve awareness that current `INT` behavior is effectively `int64`, so redefining `INT` as `int32` would be a semantic compatibility change that should be handled intentionally
+
+### `pending` Enforce a bounded indexable TEXT size [kg023]
+
+Observed gap:
+
+- plain `TEXT` values can be much larger than is comfortable for a simple predictable index implementation
+- if RovaDB adds executable index support for `TEXT` columns, it should define a clear bound for indexed text values rather than treating all text sizes as equally indexable
+
+Expected direction:
+
+- allow plain `TEXT` values to remain larger, subject to normal row/page storage limits
+- define a specific byte-length cap for indexed `TEXT` values:
+  - indexed `TEXT` column values must be `<= 512` bytes
+- measure the limit in bytes, not characters
+- enforce the limit whenever a write would touch an indexed `TEXT` column:
+  - `INSERT`
+  - `UPDATE`
+- also enforce the limit when creating an index over existing `TEXT` data, so `CREATE INDEX` fails cleanly if existing rows violate the rule
+- use a specific error message:
+  - `indexed TEXT column value exceeds 512-byte limit`
+
+## Design Explorations
+
+### Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc [dx001]
+
+Exploration scope:
+
+- whether RovaDB should add column-level
+  - `NOT NULL`
+  - `NOT NULL WITH DEFAULT`
+  - `NOT NULL WITH DEFAULT <value>`
+- whether those clauses should be supported in:
+  - `CREATE TABLE`
+  - `ALTER TABLE ... ADD COLUMN`
+
+Questions to resolve:
+
+- what syntax should be accepted
+- what runtime enforcement should occur on `INSERT` and `UPDATE`
+- how `ALTER TABLE ... ADD COLUMN` should behave for existing rows
+- whether `NOT NULL` without `DEFAULT` is allowed when adding a column to a non-empty table
+- how defaults should be represented in catalog metadata
+- whether defaults are limited to literals or can include expressions
+- what error wording and compatibility rules should be standardized
+
+Current context:
+
+- current column definitions only carry `name` and `type`
+- current `ALTER TABLE ... ADD COLUMN` behavior is catalog-only and pads existing rows with `NULL`
+- there is no current parser or executor support for `NOT NULL` or `DEFAULT`
+
+### Explore multi-column index support [dx002]
+
+Exploration scope:
+
+- whether RovaDB should support multi-column indexes beyond parser/spec shape
+- how multi-column indexes should behave for uniqueness, planner matching, and future key/constraint features
+
+Questions to resolve:
+
+- whether multi-column indexes should be supported for:
+  - non-unique indexes
+  - unique indexes
+  - future primary-key backing
+- what ordering metadata should mean for multi-column indexes
+- what planner/query shapes should be able to use a multi-column index
+- whether left-prefix matching should be part of the initial design or deferred
+- how multi-column index keys should be encoded and compared
+- how catalog metadata should represent multi-column index definitions
+- how `CREATE INDEX` should behave when existing data violates a multi-column `UNIQUE` definition
+
+Current context:
+
+- the SQL language spec and parser already allow more than one column in `CREATE INDEX (...)`
+- the current runtime/storage implementation is still single-column only
+- current persisted/runtime index metadata carries one `ColumnName`, not a column list
+
+### Explore primary key as an explicit table-definition contract [dx003]
+
+Exploration scope:
+
+- whether RovaDB should support an optional `PRIMARY KEY` clause in `CREATE TABLE`
+- how primary key should relate to unique indexes and future foreign-key support
+
+Current intended direction:
+
+- `PRIMARY KEY` in `CREATE TABLE` is optional
+- if present, it may be multi-column
+- primary-key columns must be `NOT NULL`
+- a table may have multiple unique indexes, but only one unique index may serve as the primary key
+- RovaDB does not auto-create the backing unique index
+- the matching unique index must be created explicitly
+- until that matching unique index exists, the table is considered inconsistent / unusable
+
+Questions to resolve:
+
+- exact `CREATE TABLE` syntax for single-column and multi-column primary keys
+- how the engine records the declared primary-key intent before the matching unique index exists
+- what operations should be rejected while the table is in the inconsistent / unusable state
+- how the engine determines that a later unique index is the required primary-key backing index
+- what error wording should be used for tables whose declared primary key is not yet backed by the required unique index
+- whether future foreign keys should target only the primary key or also any qualifying unique key
+
+Current context:
+
+- unique indexes are already part of the SQL language spec
+- parser/spec direction is broader than the current executable index implementation
+- this exploration is partly in preparation for future foreign-key support
+
+### Explore table-level foreign key constraints [dx004]
+
+Exploration scope:
+
+- whether RovaDB should support named table-level foreign key constraints in `CREATE TABLE`
+- how foreign keys should relate to primary keys, unique indexes, and referential actions
+
+Canonical syntax direction:
+
+```sql
+CONSTRAINT fk_name
+  FOREIGN KEY (col1, col2)
+  REFERENCES parent_table (pk_col1, pk_col2)
+  ON DELETE RESTRICT
 ```
 
-Expected direction:
+Current intended direction:
 
-- obvious non-SQL input should be treated as an unknown CLI command rather than being passed through to SQL execution
-- the CLI should respond with a clearer message, such as:
-  - `unknown command: look`
-  - `type help for commands`
+- foreign keys are declared as table-level constraints in `CREATE TABLE`
+- multi-column foreign keys are part of the intended design
+- constraint names are included in the design
+- referenced columns are explicit
+- child and parent column counts must match
+- corresponding child and parent column data types must match exactly
+- type matching is strict, with no coercion
+- `ON DELETE RESTRICT` is the preferred first referential action
+- `ON DELETE CASCADE` may be a later expansion
+- `SET NULL` is not in scope
+
+Questions to resolve:
+
+- whether foreign keys should be allowed to reference only the declared primary key or also other qualifying unique keys
+- what operations should validate referential integrity and when
+- what error wording should be standardized for invalid foreign key definitions and violating writes/deletes
+- how foreign key metadata should be represented in catalog storage
+- how foreign keys should interact with tables whose declared primary key is still in the inconsistent / unusable state described in `dx003`
+
+Current context:
+
+- this exploration is downstream of primary-key and unique-index design
+- current executable index support is still narrower than the longer-term SQL language direction
