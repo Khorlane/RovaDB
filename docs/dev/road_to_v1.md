@@ -171,6 +171,34 @@ The following are intentionally not required for the initial V1 target:
 - do not let future-facing architecture delay the committed V1 surface
 - use the design docs to keep implementation aligned and avoid partial semantics
 
+## Rough Version Plan
+
+Use `v0.x.0` milestone releases until the project is intentionally judged ready for `v1.0.0`.
+
+Current baseline:
+
+- `v0.11.x`
+
+Compressed milestone plan:
+
+- `v0.12.0`
+  - complete `kg022`
+  - realign `INT` semantics to signed 32-bit behavior
+- `v0.13.0`
+  - complete `kg024`
+  - make `CREATE INDEX` and `CREATE UNIQUE INDEX` executable and durable
+- `v0.14.0`
+  - complete `kg025`
+  - complete `kg026`
+  - make practical schema lifecycle real through executable durable `DROP INDEX` and `DROP TABLE`
+- `v0.15.0`
+  - complete `kg023`
+  - enforce bounded indexed `TEXT`
+- `v0.16.0` if needed
+  - final hardening, reopen/recovery confidence, docs/examples/CLI alignment, and polish before `v1.0.0` consideration
+
+After the above milestones are complete, reassess intentionally for `v1.0.0` rather than treating it as an automatic next step.
+
 ## Temporary Nature
 
 This document is temporary and development-facing.
