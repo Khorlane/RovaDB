@@ -232,6 +232,31 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		}
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
+	case *parser.CreateIndexStmt:
+		var rowsAffected int64
+		var committedTables map[string]*executor.Table
+		err := db.execMutatingStatement(func() error {
+			stagedTables := cloneTables(db.tables)
+
+			var err error
+			rowsAffected, committedTables, err = executeCreateIndex(stmt, stagedTables)
+			if err != nil {
+				return err
+			}
+
+			if err := db.applyStagedCatalogOnly(stagedTables); err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return Result{}, err
+		}
+		if err := validateTables(committedTables, false); err != nil {
+			return Result{}, err
+		}
+		db.tables = committedTables
+		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.UpdateStmt:
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table
@@ -885,6 +910,82 @@ func columnNamesForTable(table *executor.Table) []string {
 		columnNames = append(columnNames, column.Name)
 	}
 	return columnNames
+}
+
+func executeCreateIndex(stmt *parser.CreateIndexStmt, tables map[string]*executor.Table) (int64, map[string]*executor.Table, error) {
+	if stmt == nil {
+		return 0, nil, newExecError("unsupported query form")
+	}
+	if stmt.Unique {
+		return 0, nil, newExecError("unsupported query form")
+	}
+	if indexNameInUse(tables, stmt.Name) {
+		return 0, nil, newExecError("index already exists")
+	}
+
+	table := tables[stmt.TableName]
+	if table == nil {
+		return 0, nil, newExecError("table not found")
+	}
+
+	indexDef, err := indexDefinitionFromStmt(table, stmt)
+	if err != nil {
+		return 0, nil, err
+	}
+	if table.HasEquivalentIndexDefinition(indexDef) {
+		return 0, nil, newExecError("equivalent index already exists")
+	}
+
+	table.IndexDefs = append(table.IndexDefs, indexDef)
+	if columnName, ok := executor.LegacyBasicIndexColumn(indexDef); ok {
+		if table.Indexes == nil {
+			table.Indexes = make(map[string]*planner.BasicIndex)
+		}
+		index := planner.NewBasicIndex(table.Name, columnName)
+		if err := index.Rebuild(columnNamesForTable(table), table.Rows); err != nil {
+			return 0, nil, err
+		}
+		table.Indexes[columnName] = index
+	}
+
+	return 0, tables, nil
+}
+
+func indexNameInUse(tables map[string]*executor.Table, indexName string) bool {
+	for _, table := range tables {
+		if table != nil && table.IndexDefinition(indexName) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func indexDefinitionFromStmt(table *executor.Table, stmt *parser.CreateIndexStmt) (storage.CatalogIndex, error) {
+	if table == nil || stmt == nil {
+		return storage.CatalogIndex{}, newExecError("unsupported query form")
+	}
+
+	availableColumns := make(map[string]struct{}, len(table.Columns))
+	for _, column := range table.Columns {
+		availableColumns[column.Name] = struct{}{}
+	}
+
+	columns := make([]storage.CatalogIndexColumn, 0, len(stmt.Columns))
+	for _, column := range stmt.Columns {
+		if _, ok := availableColumns[column.Name]; !ok {
+			return storage.CatalogIndex{}, newExecError("column not found")
+		}
+		columns = append(columns, storage.CatalogIndexColumn{
+			Name: column.Name,
+			Desc: column.Desc,
+		})
+	}
+
+	return storage.CatalogIndex{
+		Name:    stmt.Name,
+		Unique:  stmt.Unique,
+		Columns: columns,
+	}, nil
 }
 
 func (db *DB) defineBasicIndex(tableName, columnName string) error {

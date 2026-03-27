@@ -132,7 +132,7 @@ func TestExecAPIParserOnlyUtilityStatementsStillUnsupportedAtExecution(t *testin
 	}
 
 	tests := []string{
-		"CREATE INDEX idx_users_name ON users (name)",
+		"CREATE UNIQUE INDEX idx_users_name ON users (name)",
 		"DROP TABLE users",
 		"DROP INDEX idx_users_name",
 		"COMMIT",
