@@ -1,9 +1,6 @@
 package parser
 
-import (
-	"strconv"
-	"strings"
-)
+import "strings"
 
 // InsertStmt is the tiny parsed form for INSERT INTO ... VALUES (...).
 type InsertStmt struct {
@@ -34,8 +31,8 @@ func parseLiteralValue(token string) (Value, bool) {
 		return BoolValue(false), true
 	}
 
-	value, err := strconv.ParseInt(token, 10, 64)
-	if err == nil {
+	value, ok := parsePublicIntLiteral(token)
+	if ok {
 		return Int64Value(value), true
 	}
 	if value, ok := parseRealLiteral(token); ok {
@@ -54,7 +51,7 @@ func parseLiteralToken(tok token) (Value, bool) {
 	case tokenPlaceholder:
 		return PlaceholderValue(), true
 	case tokenNumber:
-		if value, err := strconv.ParseInt(tok.Lexeme, 10, 64); err == nil {
+		if value, ok := parsePublicIntLiteral(tok.Lexeme); ok {
 			return Int64Value(value), true
 		}
 		if value, ok := parseRealLiteral(tok.Lexeme); ok {

@@ -211,7 +211,11 @@ func bindArgumentValue(arg any) (Value, error) {
 	case nil:
 		return NullValue(), nil
 	case int:
-		return Int64Value(int64(v)), nil
+		value, err := bindPublicIntValue(v)
+		if err != nil {
+			return Value{}, newBindError(err.Error())
+		}
+		return value, nil
 	case string:
 		return StringValue(v), nil
 	case bool:

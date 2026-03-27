@@ -1,9 +1,6 @@
 package parser
 
-import (
-	"strconv"
-	"strings"
-)
+import "strings"
 
 // ExprKind identifies the parsed expression shape.
 type ExprKind int
@@ -280,8 +277,8 @@ func parseExpr(token string) (*Expr, bool) {
 		return nil, false
 	}
 
-	value, err := strconv.ParseInt(token, 10, 64)
-	if err == nil {
+	value, ok := parsePublicIntLiteral(token)
+	if ok {
 		return &Expr{Kind: ExprKindInt64Literal, I64: value}, true
 	}
 	if value, ok := parseRealLiteral(token); ok {
@@ -393,8 +390,8 @@ func parseIntLiteral(token string) (*Expr, bool) {
 		return nil, false
 	}
 
-	value, err := strconv.ParseInt(token, 10, 64)
-	if err != nil {
+	value, ok := parsePublicIntLiteral(token)
+	if !ok {
 		return nil, false
 	}
 

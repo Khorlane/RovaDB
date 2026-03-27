@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 )
@@ -153,4 +154,16 @@ func parseRealLiteral(token string) (float64, bool) {
 	}
 
 	return value, true
+}
+
+func parseInt64Literal(token string) (int64, error) {
+	return strconv.ParseInt(token, 10, 64)
+}
+
+func bindPublicIntValue(v int) (Value, error) {
+	value := int64(v)
+	if !publicIntInRange(value) {
+		return Value{}, errors.New("integer argument out of range for INT")
+	}
+	return Int64Value(value), nil
 }
