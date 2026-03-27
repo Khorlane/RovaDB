@@ -81,3 +81,59 @@ func TestCatalogRoundTripPreservesIndexMetadataForOpen(t *testing.T) {
 		t.Fatalf("catalog.Tables[0].Indexes[0] = %#v, want named single-column ASC non-unique id index", index)
 	}
 }
+
+func TestOpenRetainsUnsupportedIndexDefinitionsWithoutActivatingBasicIndex(t *testing.T) {
+	path := testDBPath(t)
+
+	dbFile, pager := openRawStorage(t, path)
+	rootPage := pager.NewPage()
+	storage.InitTableRootPage(rootPage)
+	if err := storage.SaveCatalog(pager, &storage.CatalogData{
+		Tables: []storage.CatalogTable{
+			{
+				Name:       "users",
+				RootPageID: uint32(rootPage.ID()),
+				RowCount:   0,
+				Columns: []storage.CatalogColumn{
+					{Name: "id", Type: storage.CatalogColumnTypeInt},
+					{Name: "name", Type: storage.CatalogColumnTypeText},
+				},
+				Indexes: []storage.CatalogIndex{
+					{
+						Name:   "idx_users_id_name",
+						Unique: true,
+						Columns: []storage.CatalogIndexColumn{
+							{Name: "id"},
+							{Name: "name", Desc: true},
+						},
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SaveCatalog() error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+	if err := dbFile.Close(); err != nil {
+		t.Fatalf("dbFile.Close() error = %v", err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil")
+	}
+	if len(table.IndexDefs) != 1 || table.IndexDefs[0].Name != "idx_users_id_name" {
+		t.Fatalf("table.IndexDefs = %#v, want retained rich index definition", table.IndexDefs)
+	}
+	if len(table.Indexes) != 0 {
+		t.Fatalf("table.Indexes = %#v, want no active BasicIndex for unsupported definition", table.Indexes)
+	}
+}

@@ -86,6 +86,41 @@ func TestQueryRejectsIndexTableMismatch(t *testing.T) {
 	}
 }
 
+func TestQueryRejectsLegacyIndexWithoutMatchingDefinition(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"INSERT INTO users VALUES (1, 'alice')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if err := db.defineBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineBasicIndex() error = %v", err)
+	}
+
+	db.tables["users"].IndexDefs = nil
+
+	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() == nil || rows.Err().Error() != "execution: index/table mismatch" {
+		t.Fatalf("Rows.Err() = %v, want %q", rows.Err(), "execution: index/table mismatch")
+	}
+}
+
 func TestQueryRejectsInvalidTransactionState(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

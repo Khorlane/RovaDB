@@ -846,10 +846,11 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 		}
 		tables[table.Name].SetStorageMeta(rootPageID, table.RowCount)
 		for _, index := range table.Indexes {
-			if len(index.Columns) != 1 || index.Unique || index.Columns[0].Name == "" || index.Columns[0].Desc {
+			columnName, ok := executor.LegacyBasicIndexColumn(index)
+			if !ok {
 				continue
 			}
-			tables[table.Name].Indexes[index.Columns[0].Name] = planner.NewBasicIndex(table.Name, index.Columns[0].Name)
+			tables[table.Name].Indexes[columnName] = planner.NewBasicIndex(table.Name, columnName)
 		}
 	}
 
@@ -911,13 +912,20 @@ func (db *DB) defineBasicIndex(tableName, columnName string) error {
 		if table.Indexes == nil {
 			table.Indexes = make(map[string]*planner.BasicIndex)
 		}
-		table.IndexDefs = append(table.IndexDefs, storage.CatalogIndex{
+		indexDef := storage.CatalogIndex{
 			Name:   columnName,
 			Unique: false,
 			Columns: []storage.CatalogIndexColumn{
 				{Name: columnName},
 			},
-		})
+		}
+		if table.IndexDefinition(indexDef.Name) != nil {
+			return newExecError("index already exists")
+		}
+		if table.HasEquivalentIndexDefinition(indexDef) {
+			return newExecError("equivalent index already exists")
+		}
+		table.IndexDefs = append(table.IndexDefs, indexDef)
 		index := planner.NewBasicIndex(tableName, columnName)
 		if err := index.Rebuild(columnNames, table.Rows); err != nil {
 			return err
@@ -1065,13 +1073,37 @@ func validateTableRowCount(table *executor.Table, storageBoundary bool) error {
 }
 
 func validateIndexConsistency(table *executor.Table) error {
-	if table == nil || len(table.Indexes) == 0 {
+	if table == nil {
+		return nil
+	}
+
+	seenIndexNames := make(map[string]struct{}, len(table.IndexDefs))
+	legacyIndexDefs := make(map[string]storage.CatalogIndex)
+	for _, indexDef := range table.IndexDefs {
+		if indexDef.Name == "" {
+			return newExecError("index/table mismatch")
+		}
+		if _, exists := seenIndexNames[indexDef.Name]; exists {
+			return newExecError("index/table mismatch")
+		}
+		seenIndexNames[indexDef.Name] = struct{}{}
+		if columnName, ok := executor.LegacyBasicIndexColumn(indexDef); ok {
+			if _, exists := legacyIndexDefs[columnName]; exists {
+				return newExecError("index/table mismatch")
+			}
+			legacyIndexDefs[columnName] = indexDef
+		}
+	}
+	if len(table.Indexes) == 0 {
 		return nil
 	}
 
 	columnNames := columnNamesForTable(table)
 	for columnName, index := range table.Indexes {
 		if index == nil {
+			return newExecError("index/table mismatch")
+		}
+		if _, exists := legacyIndexDefs[columnName]; !exists {
 			return newExecError("index/table mismatch")
 		}
 		if index.TableName != table.Name || index.ColumnName != columnName {
