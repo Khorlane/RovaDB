@@ -20,18 +20,22 @@ func (e *DBError) Error() string {
 	return string(e.Kind) + ": " + e.Message
 }
 
+// NewParse builds a structured parse-layer error.
 func NewParse(msg string) error {
 	return &DBError{Kind: ErrParse, Message: msg}
 }
 
+// NewPlan builds a structured planner-layer error.
 func NewPlan(msg string) error {
 	return &DBError{Kind: ErrPlan, Message: msg}
 }
 
+// NewExec builds a structured execution-layer error.
 func NewExec(msg string) error {
 	return &DBError{Kind: ErrExec, Message: msg}
 }
 
+// NewStorage builds a structured storage-layer error.
 func NewStorage(msg string) error {
 	return &DBError{Kind: ErrStorage, Message: msg}
 }

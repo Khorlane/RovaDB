@@ -73,6 +73,8 @@ func Int64Value(v int64) Value {
 	return Value{Kind: ValueKindInt64, I64: v}
 }
 
+// PublicIntValue builds a public INT value and enforces the signed 32-bit INT
+// contract exposed by the SQL layer.
 func PublicIntValue(v int64) (Value, error) {
 	if !PublicIntInRange(v) {
 		return Value{}, errors.New("integer out of range for INT")

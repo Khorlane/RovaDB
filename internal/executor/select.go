@@ -74,6 +74,8 @@ func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]p
 		if len(sel.OrderBys) > 0 || sel.OrderBy != nil {
 			return nil, errCountOrderByUnsupported
 		}
+		// COUNT(*) is reduced directly from matching base rows rather than flowing
+		// through normal projection logic.
 		count := int64(0)
 		for _, row := range candidateRows {
 			match, err := evalSelectFilter(row, sel, table)
@@ -102,6 +104,8 @@ func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]p
 		baseRows = append(baseRows, row)
 	}
 	if hasAggregateProjection(sel) {
+		// Aggregate SELECT consumes the filtered base rows before any row-by-row
+		// projection happens.
 		return executeAggregateSelectRows(sel, table, baseRows)
 	}
 	if err := sortSelectRows(baseRows, sel, table, selectOrderByList(sel)); err != nil {
@@ -139,6 +143,8 @@ func validateAggregateProjectionShape(sel *parser.SelectExpr) error {
 	if sel == nil {
 		return nil
 	}
+	// Current aggregate support is intentionally narrow: aggregate projections
+	// stand alone and do not combine with ORDER BY or mixed projection shapes.
 	if len(sel.OrderBys) > 0 || sel.OrderBy != nil {
 		return errUnsupportedStatement
 	}
