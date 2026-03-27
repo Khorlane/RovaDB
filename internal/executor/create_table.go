@@ -23,6 +23,7 @@ type Table struct {
 	Columns           []parser.ColumnDef
 	Rows              [][]parser.Value
 	Indexes           map[string]*planner.BasicIndex
+	IndexDefs         []storage.CatalogIndex
 	rootPageID        storage.PageID
 	persistedRowCount uint32
 }

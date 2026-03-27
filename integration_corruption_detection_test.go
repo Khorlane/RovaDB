@@ -156,7 +156,7 @@ func TestCorruptedIndexMetadataDetected(t *testing.T) {
 
 func corruptedIndexCatalogBytes(rootPageID uint32) []byte {
 	buf := make([]byte, 0, storage.PageSize)
-	buf = appendUint32LE(buf, 2)
+	buf = appendUint32LE(buf, 3)
 	buf = appendUint32LE(buf, 1)
 	buf = appendStringLE(buf, "users")
 	buf = appendUint32LE(buf, rootPageID)
@@ -165,6 +165,10 @@ func corruptedIndexCatalogBytes(rootPageID uint32) []byte {
 	buf = appendStringLE(buf, "id")
 	buf = append(buf, storage.CatalogColumnTypeInt)
 	buf = appendUint16LE(buf, 1)
+	buf = appendStringLE(buf, "idx_users_missing")
+	buf = append(buf, 0)
+	buf = appendUint16LE(buf, 1)
 	buf = appendStringLE(buf, "missing")
+	buf = append(buf, 0)
 	return buf
 }

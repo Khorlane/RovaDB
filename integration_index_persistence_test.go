@@ -73,7 +73,11 @@ func TestCatalogRoundTripPreservesIndexMetadataForOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCatalog() error = %v", err)
 	}
-	if len(catalog.Tables) != 1 || len(catalog.Tables[0].Indexes) != 1 || catalog.Tables[0].Indexes[0].ColumnName != "id" {
-		t.Fatalf("catalog.Tables = %#v, want users index on id", catalog.Tables)
+	if len(catalog.Tables) != 1 || len(catalog.Tables[0].Indexes) != 1 {
+		t.Fatalf("catalog.Tables = %#v, want one persisted users index", catalog.Tables)
+	}
+	index := catalog.Tables[0].Indexes[0]
+	if index.Name != "id" || index.Unique || len(index.Columns) != 1 || index.Columns[0].Name != "id" || index.Columns[0].Desc {
+		t.Fatalf("catalog.Tables[0].Indexes[0] = %#v, want named single-column ASC non-unique id index", index)
 	}
 }

@@ -6,7 +6,8 @@ import (
 
 const (
 	catalogVersionV1 = 1
-	catalogVersion   = 2
+	catalogVersionV2 = 2
+	catalogVersion   = 3
 	catalogPageID    = 0
 
 	CatalogColumnTypeInt  = 1
@@ -35,9 +36,17 @@ type CatalogColumn struct {
 	Type uint8
 }
 
-// CatalogIndex is a persisted single-column index definition.
+// CatalogIndex is a persisted index definition.
 type CatalogIndex struct {
-	ColumnName string
+	Name    string
+	Unique  bool
+	Columns []CatalogIndexColumn
+}
+
+// CatalogIndexColumn is a persisted indexed column entry.
+type CatalogIndexColumn struct {
+	Name string
+	Desc bool
 }
 
 // LoadCatalog decodes the catalog stored in page 0.
@@ -52,7 +61,7 @@ func LoadCatalog(pager *Pager) (*CatalogData, error) {
 
 	offset := 0
 	version, ok := readUint32(page.data, &offset)
-	if !ok || (version != catalogVersionV1 && version != catalogVersion) {
+	if !ok || (version != catalogVersionV1 && version != catalogVersionV2 && version != catalogVersion) {
 		return nil, errCorruptedCatalogPage
 	}
 	tableCount, ok := readUint32(page.data, &offset)
@@ -109,7 +118,7 @@ func LoadCatalog(pager *Pager) (*CatalogData, error) {
 				Type: columnType,
 			})
 		}
-		if version >= catalogVersion {
+		if version >= catalogVersionV2 {
 			indexCount, ok := readUint16(page.data, &offset)
 			if !ok {
 				return nil, errCorruptedCatalogPage
@@ -117,18 +126,11 @@ func LoadCatalog(pager *Pager) (*CatalogData, error) {
 			table.Indexes = make([]CatalogIndex, 0, indexCount)
 			indexNames := make(map[string]struct{}, indexCount)
 			for j := uint16(0); j < indexCount; j++ {
-				columnName, ok := readString(page.data, &offset)
-				if !ok || columnName == "" {
-					return nil, errCorruptedCatalogPage
+				index, err := readCatalogIndex(page.data, &offset, version, columnNames, indexNames)
+				if err != nil {
+					return nil, err
 				}
-				if _, exists := columnNames[columnName]; !exists {
-					return nil, errCorruptedIndexMetadata
-				}
-				if _, exists := indexNames[columnName]; exists {
-					return nil, errCorruptedIndexMetadata
-				}
-				indexNames[columnName] = struct{}{}
-				table.Indexes = append(table.Indexes, CatalogIndex{ColumnName: columnName})
+				table.Indexes = append(table.Indexes, index)
 			}
 		}
 
@@ -191,12 +193,10 @@ func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
 		}
 		buf = appendUint16(buf, uint16(len(table.Indexes)))
 		for _, index := range table.Indexes {
-			if index.ColumnName == "" {
-				return nil, errCorruptedIndexMetadata
-			}
-			buf = appendString(buf, index.ColumnName)
-			if len(buf) > PageSize {
-				return nil, errCatalogTooLarge
+			var err error
+			buf, err = appendCatalogIndex(buf, index, table.Columns)
+			if err != nil {
+				return nil, err
 			}
 		}
 		if len(buf) > PageSize {
@@ -264,4 +264,108 @@ func readString(data []byte, offset *int) (string, bool) {
 	value := string(data[*offset : *offset+int(length)])
 	*offset += int(length)
 	return value, true
+}
+
+func readCatalogIndex(data []byte, offset *int, version uint32, columnNames map[string]struct{}, indexNames map[string]struct{}) (CatalogIndex, error) {
+	if version == catalogVersionV2 {
+		columnName, ok := readString(data, offset)
+		if !ok || columnName == "" {
+			return CatalogIndex{}, errCorruptedCatalogPage
+		}
+		if _, exists := columnNames[columnName]; !exists {
+			return CatalogIndex{}, errCorruptedIndexMetadata
+		}
+		if _, exists := indexNames[columnName]; exists {
+			return CatalogIndex{}, errCorruptedIndexMetadata
+		}
+		indexNames[columnName] = struct{}{}
+		return CatalogIndex{
+			Name:   columnName,
+			Unique: false,
+			Columns: []CatalogIndexColumn{
+				{Name: columnName},
+			},
+		}, nil
+	}
+
+	name, ok := readString(data, offset)
+	if !ok || name == "" {
+		return CatalogIndex{}, errCorruptedCatalogPage
+	}
+	if _, exists := indexNames[name]; exists {
+		return CatalogIndex{}, errCorruptedIndexMetadata
+	}
+	if *offset >= len(data) {
+		return CatalogIndex{}, errCorruptedCatalogPage
+	}
+	unique := data[*offset] != 0
+	*offset++
+	columnCount, ok := readUint16(data, offset)
+	if !ok || columnCount == 0 {
+		return CatalogIndex{}, errCorruptedIndexMetadata
+	}
+	columns := make([]CatalogIndexColumn, 0, columnCount)
+	seenColumns := make(map[string]struct{}, columnCount)
+	for i := uint16(0); i < columnCount; i++ {
+		columnName, ok := readString(data, offset)
+		if !ok || columnName == "" {
+			return CatalogIndex{}, errCorruptedCatalogPage
+		}
+		if _, exists := columnNames[columnName]; !exists {
+			return CatalogIndex{}, errCorruptedIndexMetadata
+		}
+		if _, exists := seenColumns[columnName]; exists {
+			return CatalogIndex{}, errCorruptedIndexMetadata
+		}
+		seenColumns[columnName] = struct{}{}
+		if *offset >= len(data) {
+			return CatalogIndex{}, errCorruptedCatalogPage
+		}
+		desc := data[*offset] != 0
+		*offset++
+		columns = append(columns, CatalogIndexColumn{Name: columnName, Desc: desc})
+	}
+	indexNames[name] = struct{}{}
+	return CatalogIndex{Name: name, Unique: unique, Columns: columns}, nil
+}
+
+func appendCatalogIndex(buf []byte, index CatalogIndex, columns []CatalogColumn) ([]byte, error) {
+	if index.Name == "" || len(index.Columns) == 0 {
+		return nil, errCorruptedIndexMetadata
+	}
+	validColumns := make(map[string]struct{}, len(columns))
+	for _, column := range columns {
+		validColumns[column.Name] = struct{}{}
+	}
+	seenColumns := make(map[string]struct{}, len(index.Columns))
+
+	buf = appendString(buf, index.Name)
+	if index.Unique {
+		buf = append(buf, 1)
+	} else {
+		buf = append(buf, 0)
+	}
+	buf = appendUint16(buf, uint16(len(index.Columns)))
+	for _, column := range index.Columns {
+		if column.Name == "" {
+			return nil, errCorruptedIndexMetadata
+		}
+		if _, exists := validColumns[column.Name]; !exists {
+			return nil, errCorruptedIndexMetadata
+		}
+		if _, exists := seenColumns[column.Name]; exists {
+			return nil, errCorruptedIndexMetadata
+		}
+		seenColumns[column.Name] = struct{}{}
+		buf = appendString(buf, column.Name)
+		if column.Desc {
+			buf = append(buf, 1)
+		} else {
+			buf = append(buf, 0)
+		}
+		if len(buf) > PageSize {
+			return nil, errCatalogTooLarge
+		}
+	}
+	return buf, nil
 }

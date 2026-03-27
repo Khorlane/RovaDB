@@ -716,10 +716,11 @@ func cloneTable(table *executor.Table) *executor.Table {
 	rows := cloneRows(table.Rows)
 
 	cloned := &executor.Table{
-		Name:    table.Name,
-		Columns: columns,
-		Rows:    rows,
-		Indexes: cloneIndexes(table.Indexes),
+		Name:      table.Name,
+		Columns:   columns,
+		Rows:      rows,
+		Indexes:   cloneIndexes(table.Indexes),
+		IndexDefs: cloneIndexDefs(table.IndexDefs),
 	}
 	columnNames := columnNamesForTable(cloned)
 	for _, index := range cloned.Indexes {
@@ -747,6 +748,22 @@ func cloneIndexes(indexes map[string]*planner.BasicIndex) map[string]*planner.Ba
 	return cloned
 }
 
+func cloneIndexDefs(indexDefs []storage.CatalogIndex) []storage.CatalogIndex {
+	if len(indexDefs) == 0 {
+		return nil
+	}
+
+	cloned := make([]storage.CatalogIndex, 0, len(indexDefs))
+	for _, indexDef := range indexDefs {
+		cloned = append(cloned, storage.CatalogIndex{
+			Name:    indexDef.Name,
+			Unique:  indexDef.Unique,
+			Columns: append([]storage.CatalogIndexColumn(nil), indexDef.Columns...),
+		})
+	}
+	return cloned
+}
+
 func cloneRows(rows [][]parser.Value) [][]parser.Value {
 	cloned := make([][]parser.Value, 0, len(rows))
 	for _, row := range rows {
@@ -770,7 +787,7 @@ func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
 			RootPageID: uint32(table.RootPageID()),
 			RowCount:   table.PersistedRowCount(),
 			Columns:    make([]storage.CatalogColumn, 0, len(table.Columns)),
-			Indexes:    make([]storage.CatalogIndex, 0, len(table.Indexes)),
+			Indexes:    make([]storage.CatalogIndex, 0, len(table.IndexDefs)),
 		}
 		for _, column := range table.Columns {
 			entry.Columns = append(entry.Columns, storage.CatalogColumn{
@@ -778,13 +795,15 @@ func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
 				Type: catalogColumnType(column.Type),
 			})
 		}
-		indexNames := make([]string, 0, len(table.Indexes))
-		for columnName := range table.Indexes {
-			indexNames = append(indexNames, columnName)
+		indexNames := make([]string, 0, len(table.IndexDefs))
+		indexByName := make(map[string]storage.CatalogIndex, len(table.IndexDefs))
+		for _, indexDef := range table.IndexDefs {
+			indexNames = append(indexNames, indexDef.Name)
+			indexByName[indexDef.Name] = indexDef
 		}
 		sort.Strings(indexNames)
-		for _, columnName := range indexNames {
-			entry.Indexes = append(entry.Indexes, storage.CatalogIndex{ColumnName: columnName})
+		for _, indexName := range indexNames {
+			entry.Indexes = append(entry.Indexes, indexByName[indexName])
 		}
 		catalog.Tables = append(catalog.Tables, entry)
 	}
@@ -820,16 +839,17 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 			columns = append(columns, parser.ColumnDef{Name: column.Name, Type: columnType})
 		}
 		tables[table.Name] = &executor.Table{
-			Name:    table.Name,
-			Columns: columns,
-			Indexes: make(map[string]*planner.BasicIndex),
+			Name:      table.Name,
+			Columns:   columns,
+			Indexes:   make(map[string]*planner.BasicIndex),
+			IndexDefs: cloneIndexDefs(table.Indexes),
 		}
 		tables[table.Name].SetStorageMeta(rootPageID, table.RowCount)
 		for _, index := range table.Indexes {
-			if index.ColumnName == "" {
-				return nil, errInvalidStoredTableMeta
+			if len(index.Columns) != 1 || index.Unique || index.Columns[0].Name == "" || index.Columns[0].Desc {
+				continue
 			}
-			tables[table.Name].Indexes[index.ColumnName] = planner.NewBasicIndex(table.Name, index.ColumnName)
+			tables[table.Name].Indexes[index.Columns[0].Name] = planner.NewBasicIndex(table.Name, index.Columns[0].Name)
 		}
 	}
 
@@ -891,6 +911,13 @@ func (db *DB) defineBasicIndex(tableName, columnName string) error {
 		if table.Indexes == nil {
 			table.Indexes = make(map[string]*planner.BasicIndex)
 		}
+		table.IndexDefs = append(table.IndexDefs, storage.CatalogIndex{
+			Name:   columnName,
+			Unique: false,
+			Columns: []storage.CatalogIndexColumn{
+				{Name: columnName},
+			},
+		})
 		index := planner.NewBasicIndex(tableName, columnName)
 		if err := index.Rebuild(columnNames, table.Rows); err != nil {
 			return err
