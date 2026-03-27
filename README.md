@@ -44,7 +44,7 @@ RovaDB is a Go-first embedded relational database engine designed for clarity, p
 
 ### Scope Discipline
 
-The current `v0.13.x` line is the practical baseline for this intended use case. Future changes should prioritize correctness, determinism, durability, and API stability over feature expansion, and any new feature should justify crossing this boundary.
+The current `v0.15.x` line is the practical baseline for this intended use case. Future changes should prioritize correctness, determinism, durability, and API stability over feature expansion, and any new feature should justify crossing this boundary.
 
 ## Supported SQL
 
@@ -133,6 +133,14 @@ Parser-recognized but not executable today:
 - comparisons are performed using lowercase normalization
 - no locale-aware or accent-aware collation is applied
 - behavior is deterministic and consistent across `WHERE` and `ORDER BY`
+
+### Indexed TEXT limit
+
+- indexed `TEXT` values are limited to `<= 512` bytes
+- the limit is measured in bytes, not characters
+- the limit is enforced on `INSERT`, `UPDATE`, and `CREATE INDEX` / `CREATE UNIQUE INDEX`
+- oversized indexed `TEXT` values fail with:
+  - `execution: indexed TEXT column value exceeds 512-byte limit`
 
 ## Positional Arguments
 

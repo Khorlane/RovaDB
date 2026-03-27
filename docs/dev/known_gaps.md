@@ -23,7 +23,7 @@ Status values:
 - [kg025] Engine `done` Make `DROP INDEX` executable and durable
 - [kg026] Engine `done` Make `DROP TABLE` executable and durable
 - [kg022] Engine `done` Realign `INT` semantics to 32-bit
-- [kg023] Engine `pending` Enforce a bounded indexable TEXT size
+- [kg023] Engine `done` Enforce a bounded indexable TEXT size
 - [dx001] Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc
 - [dx002] Explore planner usage for multi-column indexes
 - [dx003] Explore primary key as an explicit table-definition contract
@@ -100,25 +100,20 @@ Resolved direction:
   - `INT`
   - `BIGINT`
 
-### `pending` Enforce a bounded indexable TEXT size [kg023]
+### `done` Enforce a bounded indexable TEXT size [kg023]
 
-Observed gap:
+Resolved direction:
 
-- plain `TEXT` values can be much larger than is comfortable for a simple predictable index implementation
-- if RovaDB adds executable index support for `TEXT` columns, it should define a clear bound for indexed text values rather than treating all text sizes as equally indexable
-
-Expected direction:
-
-- allow plain `TEXT` values to remain larger, subject to normal row/page storage limits
-- define a specific byte-length cap for indexed `TEXT` values:
-  - indexed `TEXT` column values must be `<= 512` bytes
-- measure the limit in bytes, not characters
-- enforce the limit whenever a write would touch an indexed `TEXT` column:
+- plain `TEXT` values may still be larger, subject to normal row/page storage limits
+- indexed `TEXT` column values are now limited to `<= 512` bytes
+- the limit is measured in bytes, not characters
+- the limit is enforced on:
   - `INSERT`
   - `UPDATE`
-- also enforce the limit when creating an index over existing `TEXT` data, so `CREATE INDEX` fails cleanly if existing rows violate the rule
-- use a specific error message:
-  - `indexed TEXT column value exceeds 512-byte limit`
+  - `CREATE INDEX`
+  - `CREATE UNIQUE INDEX`
+- violations fail with:
+  - `execution: indexed TEXT column value exceeds 512-byte limit`
 
 ## Design Explorations
 

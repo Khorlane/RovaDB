@@ -182,13 +182,10 @@ Use `v0.x.0` milestone releases until the project is intentionally judged ready 
 
 Current baseline:
 
-- `v0.14.x`
+- `v0.15.x`
 
 Compressed milestone plan:
 
-- `v0.15.0`
-  - complete `kg023`
-  - enforce bounded indexed `TEXT`
 - `v0.16.0` if needed
   - final hardening, reopen/recovery confidence, docs/examples/CLI alignment, and polish before `v1.0.0` consideration
 
