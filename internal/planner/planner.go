@@ -118,7 +118,7 @@ func chooseIndexScan(stmt *parser.SelectExpr, tables map[string]*TableMetadata) 
 		return nil
 	}
 
-	columnName, value, ok := simpleEqualityPredicate(stmt)
+	columnName, value, ok := indexedEquality(stmt)
 	if !ok {
 		return nil
 	}
@@ -135,18 +135,18 @@ func chooseIndexScan(stmt *parser.SelectExpr, tables map[string]*TableMetadata) 
 	}
 }
 
-func simpleEqualityPredicate(stmt *parser.SelectExpr) (string, parser.Value, bool) {
+func indexedEquality(stmt *parser.SelectExpr) (string, parser.Value, bool) {
 	if stmt == nil {
 		return "", parser.Value{}, false
 	}
 	tableRef := stmt.PrimaryTableRef()
 	if stmt.Predicate != nil {
-		return simpleEqualityPredicateFromPredicate(stmt.Predicate, tableRef)
+		return indexedEqualityFromPred(stmt.Predicate, tableRef)
 	}
-	return simpleEqualityPredicateFromWhere(stmt.Where, tableRef)
+	return indexedEqualityFromWhere(stmt.Where, tableRef)
 }
 
-func simpleEqualityPredicateFromPredicate(predicate *parser.PredicateExpr, tableRef *parser.TableRef) (string, parser.Value, bool) {
+func indexedEqualityFromPred(predicate *parser.PredicateExpr, tableRef *parser.TableRef) (string, parser.Value, bool) {
 	if predicate == nil || predicate.Kind != parser.PredicateKindComparison || predicate.Comparison == nil {
 		return "", parser.Value{}, false
 	}
@@ -215,7 +215,7 @@ func normalizePlannerColumnName(name string, tableRef *parser.TableRef) (string,
 	return parts[1], true
 }
 
-func simpleEqualityPredicateFromWhere(where *parser.WhereClause, tableRef *parser.TableRef) (string, parser.Value, bool) {
+func indexedEqualityFromWhere(where *parser.WhereClause, tableRef *parser.TableRef) (string, parser.Value, bool) {
 	if where == nil || len(where.Items) != 1 {
 		return "", parser.Value{}, false
 	}

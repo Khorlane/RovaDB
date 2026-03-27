@@ -4,7 +4,7 @@ A small, idiomatic embedded SQL database for Go.
 
 RovaDB is a Go-first embedded relational database engine designed for clarity, portability, and long-term extensibility. It is intended to feel natural to Go developers, remain understandable to contributors, and grow without boxing itself into a dead-end architecture.
 
-> **Status:** Pre-release. The current `v0.13.x` line establishes a practical, durable baseline with a small public API and focused SQL support.
+> **Status:** Pre-release. The current `v0.16.x` line reflects a practical, durable baseline with a small public API and focused SQL support.
 
 ## Product Boundary
 
@@ -44,7 +44,7 @@ RovaDB is a Go-first embedded relational database engine designed for clarity, p
 
 ### Scope Discipline
 
-The current `v0.15.x` line is the practical baseline for this intended use case. Future changes should prioritize correctness, determinism, durability, and API stability over feature expansion, and any new feature should justify crossing this boundary.
+The current `v0.16.x` line is the practical baseline for this intended use case. Future changes should prioritize correctness, determinism, durability, and API stability over feature expansion, and any new feature should justify crossing this boundary.
 
 ## Supported SQL
 

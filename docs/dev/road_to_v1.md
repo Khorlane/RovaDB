@@ -182,7 +182,7 @@ Use `v0.x.0` milestone releases until the project is intentionally judged ready 
 
 Current baseline:
 
-- `v0.15.x`
+- `v0.16.x`
 
 Compressed milestone plan:
 

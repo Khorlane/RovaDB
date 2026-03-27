@@ -42,7 +42,7 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 		return nil, err
 	}
 
-	if err := validateJoinPredicateOrWhereColumns(plan.Stmt, resolver); err != nil {
+	if err := validateJoinFilterCols(plan.Stmt, resolver); err != nil {
 		return nil, err
 	}
 	if err := validateJoinProjectionExprs(plan.Stmt, resolver); err != nil {
@@ -82,7 +82,7 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 		return [][]parser.Value{{value}}, nil
 	}
 	if hasAggregateProjection(plan.Stmt) {
-		return executeJoinAggregateSelectRows(plan.Stmt, joinedRows, resolver)
+		return executeJoinAggRows(plan.Stmt, joinedRows, resolver)
 	}
 
 	if err := sortJoinRows(joinedRows, plan.Stmt, resolver); err != nil {
@@ -100,8 +100,8 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 	return rows, nil
 }
 
-func executeJoinAggregateSelectRows(sel *parser.SelectExpr, rows [][]parser.Value, resolver *joinSelectResolver) ([][]parser.Value, error) {
-	if err := validateAggregateProjectionShape(sel); err != nil {
+func executeJoinAggRows(sel *parser.SelectExpr, rows [][]parser.Value, resolver *joinSelectResolver) ([][]parser.Value, error) {
+	if err := validateAggProjShape(sel); err != nil {
 		return nil, err
 	}
 	if sel.IsCountStar {
@@ -247,7 +247,7 @@ func resolveColumnOffset(table *Table, offset int, name string) (int, error) {
 	return -1, errColumnDoesNotExist
 }
 
-func validateJoinPredicateOrWhereColumns(sel *parser.SelectExpr, resolver *joinSelectResolver) error {
+func validateJoinFilterCols(sel *parser.SelectExpr, resolver *joinSelectResolver) error {
 	if sel != nil && sel.Predicate != nil {
 		return validateJoinPredicateColumns(sel.Predicate, resolver)
 	}

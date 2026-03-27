@@ -64,7 +64,7 @@ func executeIndexSelect(plan *planner.SelectPlan, table *Table) ([][]parser.Valu
 }
 
 func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
-	if err := validateSelectPredicateOrWhereColumns(sel, table); err != nil {
+	if err := validateFilterCols(sel, table); err != nil {
 		return nil, err
 	}
 	if err := validateProjectionExprs(sel, table); err != nil {
@@ -135,7 +135,7 @@ func hasAggregateProjection(sel *parser.SelectExpr) bool {
 	return false
 }
 
-func validateAggregateProjectionShape(sel *parser.SelectExpr) error {
+func validateAggProjShape(sel *parser.SelectExpr) error {
 	if sel == nil {
 		return nil
 	}
@@ -157,7 +157,7 @@ func validateAggregateProjectionShape(sel *parser.SelectExpr) error {
 }
 
 func executeAggregateSelectRows(sel *parser.SelectExpr, table *Table, rows [][]parser.Value) ([][]parser.Value, error) {
-	if err := validateAggregateProjectionShape(sel); err != nil {
+	if err := validateAggProjShape(sel); err != nil {
 		return nil, err
 	}
 	if sel.IsCountStar {
@@ -315,7 +315,7 @@ func resolveSelectColumns(sel *parser.SelectExpr, table *Table) ([]int, error) {
 }
 
 func resolveColumnIndex(name string, table *Table) (int, error) {
-	baseName, err := normalizeQualifiedColumnName(name, table)
+	baseName, err := normalizeQualColName(name, table)
 	if err != nil {
 		return -1, err
 	}
@@ -328,7 +328,7 @@ func resolveColumnIndex(name string, table *Table) (int, error) {
 	return -1, errColumnDoesNotExist
 }
 
-func normalizeQualifiedColumnName(name string, table *Table) (string, error) {
+func normalizeQualColName(name string, table *Table) (string, error) {
 	if !strings.Contains(name, ".") {
 		return name, nil
 	}
@@ -343,7 +343,7 @@ func normalizeQualifiedColumnName(name string, table *Table) (string, error) {
 }
 
 func resolveSelectColumnIndex(sel *parser.SelectExpr, name string, table *Table) (int, error) {
-	baseName, err := normalizeSelectQualifiedColumnName(sel, name, table)
+	baseName, err := normalizeSelectQualColName(sel, name, table)
 	if err != nil {
 		return -1, err
 	}
@@ -355,7 +355,7 @@ func resolveSelectColumnIndex(sel *parser.SelectExpr, name string, table *Table)
 	return -1, errColumnDoesNotExist
 }
 
-func normalizeSelectQualifiedColumnName(sel *parser.SelectExpr, name string, table *Table) (string, error) {
+func normalizeSelectQualColName(sel *parser.SelectExpr, name string, table *Table) (string, error) {
 	if !strings.Contains(name, ".") {
 		return name, nil
 	}
@@ -631,7 +631,7 @@ func validatePredicateOrWhereColumns(predicate *parser.PredicateExpr, where *par
 	return validateWhereColumns(where, table)
 }
 
-func validateSelectPredicateOrWhereColumns(sel *parser.SelectExpr, table *Table) error {
+func validateFilterCols(sel *parser.SelectExpr, table *Table) error {
 	if sel != nil && sel.Predicate != nil {
 		return validateSelectPredicateColumns(sel, sel.Predicate, table)
 	}

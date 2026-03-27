@@ -48,7 +48,7 @@ func collectBindableValues(stmt any) []*Value {
 		if len(stmt.ValueExprs) > 0 {
 			values := make([]*Value, 0, len(stmt.ValueExprs))
 			for i := range stmt.ValueExprs {
-				values = append(values, collectValueExprPlaceholders(stmt.ValueExprs[i])...)
+				values = append(values, collectExprPlaceholders(stmt.ValueExprs[i])...)
 			}
 			return values
 		}
@@ -63,7 +63,7 @@ func collectBindableValues(stmt any) []*Value {
 		values := make([]*Value, 0, len(stmt.Assignments))
 		for i := range stmt.Assignments {
 			if stmt.Assignments[i].Expr != nil {
-				values = append(values, collectValueExprPlaceholders(stmt.Assignments[i].Expr)...)
+				values = append(values, collectExprPlaceholders(stmt.Assignments[i].Expr)...)
 			} else if stmt.Assignments[i].Value.Kind == ValueKindPlaceholder {
 				values = append(values, &stmt.Assignments[i].Value)
 			}
@@ -110,17 +110,17 @@ func collectAllValues(stmt any) []*Value {
 	case *SelectExpr:
 		values := make([]*Value, 0)
 		for _, join := range stmt.Joins {
-			values = append(values, collectAllPredicateValues(join.Predicate)...)
+			values = append(values, collectPredValues(join.Predicate)...)
 		}
 		if stmt.Predicate != nil {
-			return append(values, collectAllPredicateValues(stmt.Predicate)...)
+			return append(values, collectPredValues(stmt.Predicate)...)
 		}
 		return append(values, collectAllWhereValues(stmt.Where)...)
 	case *InsertStmt:
 		if len(stmt.ValueExprs) > 0 {
 			values := make([]*Value, 0, len(stmt.ValueExprs))
 			for i := range stmt.ValueExprs {
-				values = append(values, collectAllValueExprValues(stmt.ValueExprs[i])...)
+				values = append(values, collectExprValues(stmt.ValueExprs[i])...)
 			}
 			return values
 		}
@@ -133,18 +133,18 @@ func collectAllValues(stmt any) []*Value {
 		values := make([]*Value, 0, len(stmt.Assignments))
 		for i := range stmt.Assignments {
 			if stmt.Assignments[i].Expr != nil {
-				values = append(values, collectAllValueExprValues(stmt.Assignments[i].Expr)...)
+				values = append(values, collectExprValues(stmt.Assignments[i].Expr)...)
 			} else {
 				values = append(values, &stmt.Assignments[i].Value)
 			}
 		}
 		if stmt.Predicate != nil {
-			return append(values, collectAllPredicateValues(stmt.Predicate)...)
+			return append(values, collectPredValues(stmt.Predicate)...)
 		}
 		return append(values, collectAllWhereValues(stmt.Where)...)
 	case *DeleteStmt:
 		if stmt.Predicate != nil {
-			return collectAllPredicateValues(stmt.Predicate)
+			return collectPredValues(stmt.Predicate)
 		}
 		return collectAllWhereValues(stmt.Where)
 	default:
@@ -161,8 +161,8 @@ func collectPredicateValues(predicate *PredicateExpr) []*Value {
 	switch predicate.Kind {
 	case PredicateKindComparison:
 		if predicate.Comparison != nil {
-			values = append(values, collectValueExprPlaceholders(predicate.Comparison.LeftExpr)...)
-			values = append(values, collectValueExprPlaceholders(predicate.Comparison.RightExpr)...)
+			values = append(values, collectExprPlaceholders(predicate.Comparison.LeftExpr)...)
+			values = append(values, collectExprPlaceholders(predicate.Comparison.RightExpr)...)
 		}
 	case PredicateKindAnd, PredicateKindOr:
 		values = append(values, collectPredicateValues(predicate.Left)...)
@@ -173,7 +173,7 @@ func collectPredicateValues(predicate *PredicateExpr) []*Value {
 	return values
 }
 
-func collectAllPredicateValues(predicate *PredicateExpr) []*Value {
+func collectPredValues(predicate *PredicateExpr) []*Value {
 	if predicate == nil {
 		return nil
 	}
@@ -182,14 +182,14 @@ func collectAllPredicateValues(predicate *PredicateExpr) []*Value {
 	switch predicate.Kind {
 	case PredicateKindComparison:
 		if predicate.Comparison != nil {
-			values = append(values, collectAllValueExprValues(predicate.Comparison.LeftExpr)...)
-			values = append(values, collectAllValueExprValues(predicate.Comparison.RightExpr)...)
+			values = append(values, collectExprValues(predicate.Comparison.LeftExpr)...)
+			values = append(values, collectExprValues(predicate.Comparison.RightExpr)...)
 		}
 	case PredicateKindAnd, PredicateKindOr:
-		values = append(values, collectAllPredicateValues(predicate.Left)...)
-		values = append(values, collectAllPredicateValues(predicate.Right)...)
+		values = append(values, collectPredValues(predicate.Left)...)
+		values = append(values, collectPredValues(predicate.Right)...)
 	case PredicateKindNot:
-		values = append(values, collectAllPredicateValues(predicate.Inner)...)
+		values = append(values, collectPredValues(predicate.Inner)...)
 	}
 	return values
 }
@@ -231,7 +231,7 @@ func newBindError(msg string) error {
 	return fmt.Errorf("bind: %s", msg)
 }
 
-func collectValueExprPlaceholders(expr *ValueExpr) []*Value {
+func collectExprPlaceholders(expr *ValueExpr) []*Value {
 	if expr == nil {
 		return nil
 	}
@@ -243,22 +243,22 @@ func collectValueExprPlaceholders(expr *ValueExpr) []*Value {
 			values = append(values, &expr.Value)
 		}
 	case ValueExprKindFunctionCall:
-		values = append(values, collectValueExprPlaceholders(expr.Arg)...)
+		values = append(values, collectExprPlaceholders(expr.Arg)...)
 	case ValueExprKindAggregateCall:
 		if expr.StarArg {
 			return values
 		}
-		values = append(values, collectValueExprPlaceholders(expr.Arg)...)
+		values = append(values, collectExprPlaceholders(expr.Arg)...)
 	case ValueExprKindBinary:
-		values = append(values, collectValueExprPlaceholders(expr.Left)...)
-		values = append(values, collectValueExprPlaceholders(expr.Right)...)
+		values = append(values, collectExprPlaceholders(expr.Left)...)
+		values = append(values, collectExprPlaceholders(expr.Right)...)
 	case ValueExprKindParen:
-		values = append(values, collectValueExprPlaceholders(expr.Inner)...)
+		values = append(values, collectExprPlaceholders(expr.Inner)...)
 	}
 	return values
 }
 
-func collectAllValueExprValues(expr *ValueExpr) []*Value {
+func collectExprValues(expr *ValueExpr) []*Value {
 	if expr == nil {
 		return nil
 	}
@@ -268,17 +268,17 @@ func collectAllValueExprValues(expr *ValueExpr) []*Value {
 	case ValueExprKindLiteral:
 		values = append(values, &expr.Value)
 	case ValueExprKindFunctionCall:
-		values = append(values, collectAllValueExprValues(expr.Arg)...)
+		values = append(values, collectExprValues(expr.Arg)...)
 	case ValueExprKindAggregateCall:
 		if expr.StarArg {
 			return values
 		}
-		values = append(values, collectAllValueExprValues(expr.Arg)...)
+		values = append(values, collectExprValues(expr.Arg)...)
 	case ValueExprKindBinary:
-		values = append(values, collectAllValueExprValues(expr.Left)...)
-		values = append(values, collectAllValueExprValues(expr.Right)...)
+		values = append(values, collectExprValues(expr.Left)...)
+		values = append(values, collectExprValues(expr.Right)...)
 	case ValueExprKindParen:
-		values = append(values, collectAllValueExprValues(expr.Inner)...)
+		values = append(values, collectExprValues(expr.Inner)...)
 	}
 	return values
 }

@@ -797,12 +797,12 @@ func cloneTable(table *executor.Table) *executor.Table {
 		Indexes:   cloneIndexes(table.Indexes),
 		IndexDefs: cloneIndexDefs(table.IndexDefs),
 	}
-	columnNames := columnNamesForTable(cloned)
+	colNames := tableColNames(cloned)
 	for _, index := range cloned.Indexes {
 		if index == nil {
 			continue
 		}
-		_ = index.Rebuild(columnNames, cloned.Rows)
+		_ = index.Rebuild(colNames, cloned.Rows)
 	}
 	cloned.SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
 	return cloned
@@ -937,13 +937,13 @@ func rebuildPersistedIndexes(tables map[string]*executor.Table) error {
 		if table == nil || len(table.Indexes) == 0 {
 			continue
 		}
-		columnNames := columnNamesForTable(table)
+		colNames := tableColNames(table)
 		for columnName, index := range table.Indexes {
 			if index == nil {
 				table.Indexes[columnName] = planner.NewBasicIndex(table.Name, columnName)
 				index = table.Indexes[columnName]
 			}
-			if err := index.Rebuild(columnNames, table.Rows); err != nil {
+			if err := index.Rebuild(colNames, table.Rows); err != nil {
 				return err
 			}
 		}
@@ -951,15 +951,15 @@ func rebuildPersistedIndexes(tables map[string]*executor.Table) error {
 	return nil
 }
 
-func columnNamesForTable(table *executor.Table) []string {
+func tableColNames(table *executor.Table) []string {
 	if table == nil {
 		return nil
 	}
-	columnNames := make([]string, 0, len(table.Columns))
-	for _, column := range table.Columns {
-		columnNames = append(columnNames, column.Name)
+	colNames := make([]string, 0, len(table.Columns))
+	for _, col := range table.Columns {
+		colNames = append(colNames, col.Name)
 	}
-	return columnNames
+	return colNames
 }
 
 func executeCreateIndex(stmt *parser.CreateIndexStmt, tables map[string]*executor.Table) (int64, map[string]*executor.Table, error) {
@@ -997,7 +997,7 @@ func executeCreateIndex(stmt *parser.CreateIndexStmt, tables map[string]*executo
 			table.Indexes = make(map[string]*planner.BasicIndex)
 		}
 		index := planner.NewBasicIndex(table.Name, columnName)
-		if err := index.Rebuild(columnNamesForTable(table), table.Rows); err != nil {
+		if err := index.Rebuild(tableColNames(table), table.Rows); err != nil {
 			return 0, nil, err
 		}
 		table.Indexes[columnName] = index
@@ -1095,7 +1095,7 @@ func (db *DB) defineBasicIndex(tableName, columnName string) error {
 		if table == nil {
 			return newExecError("table not found")
 		}
-		columnNames := columnNamesForTable(table)
+		colNames := tableColNames(table)
 		found := false
 		for _, column := range table.Columns {
 			if column.Name == columnName {
@@ -1123,7 +1123,7 @@ func (db *DB) defineBasicIndex(tableName, columnName string) error {
 		}
 		table.IndexDefs = append(table.IndexDefs, indexDef)
 		index := planner.NewBasicIndex(tableName, columnName)
-		if err := index.Rebuild(columnNames, table.Rows); err != nil {
+		if err := index.Rebuild(colNames, table.Rows); err != nil {
 			return err
 		}
 		table.Indexes[columnName] = index
@@ -1294,7 +1294,7 @@ func validateIndexConsistency(table *executor.Table) error {
 		return nil
 	}
 
-	columnNames := columnNamesForTable(table)
+	colNames := tableColNames(table)
 	for columnName, index := range table.Indexes {
 		if index == nil {
 			return newExecError("index/table mismatch")
@@ -1307,7 +1307,7 @@ func validateIndexConsistency(table *executor.Table) error {
 		}
 
 		expected := planner.NewBasicIndex(table.Name, columnName)
-		if err := expected.Rebuild(columnNames, table.Rows); err != nil {
+		if err := expected.Rebuild(colNames, table.Rows); err != nil {
 			return newExecError("index/table mismatch")
 		}
 		if !reflect.DeepEqual(expected.Entries, index.Entries) {
