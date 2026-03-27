@@ -282,6 +282,31 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		}
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
+	case *parser.DropTableStmt:
+		var rowsAffected int64
+		var committedTables map[string]*executor.Table
+		err := db.execMutatingStatement(func() error {
+			stagedTables := cloneTables(db.tables)
+
+			var err error
+			rowsAffected, committedTables, err = executeDropTable(stmt, stagedTables)
+			if err != nil {
+				return err
+			}
+
+			if err := db.applyStagedCatalogOnly(stagedTables); err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return Result{}, err
+		}
+		if err := validateTables(committedTables, false); err != nil {
+			return Result{}, err
+		}
+		db.tables = committedTables
+		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.UpdateStmt:
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table
@@ -1041,6 +1066,17 @@ func executeDropIndex(stmt *parser.DropIndexStmt, tables map[string]*executor.Ta
 	}
 
 	return 0, nil, newExecError("index not found")
+}
+
+func executeDropTable(stmt *parser.DropTableStmt, tables map[string]*executor.Table) (int64, map[string]*executor.Table, error) {
+	if stmt == nil {
+		return 0, nil, newExecError("unsupported query form")
+	}
+	if _, ok := tables[stmt.Name]; !ok {
+		return 0, nil, newExecError("table not found")
+	}
+	delete(tables, stmt.Name)
+	return 0, tables, nil
 }
 
 func (db *DB) defineBasicIndex(tableName, columnName string) error {

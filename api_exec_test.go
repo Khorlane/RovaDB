@@ -132,7 +132,6 @@ func TestExecAPIParserOnlyUtilityStatementsStillUnsupportedAtExecution(t *testin
 	}
 
 	tests := []string{
-		"DROP TABLE users",
 		"COMMIT",
 		"ROLLBACK",
 	}
