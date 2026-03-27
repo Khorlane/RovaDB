@@ -17,7 +17,7 @@ func evalAggregateExprRows(expr *parser.ValueExpr, rows [][]parser.Value, eval a
 	switch name {
 	case "COUNT":
 		if expr.StarArg {
-			return parser.Int64Value(int64(len(rows))), nil
+			return publicIntResult(int64(len(rows)))
 		}
 		count := int64(0)
 		for _, row := range rows {
@@ -29,7 +29,7 @@ func evalAggregateExprRows(expr *parser.ValueExpr, rows [][]parser.Value, eval a
 				count++
 			}
 		}
-		return parser.Int64Value(count), nil
+		return publicIntResult(count)
 	case "MIN":
 		return aggregateMinMax(rows, expr.Arg, eval, true)
 	case "MAX":

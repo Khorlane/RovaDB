@@ -84,7 +84,11 @@ func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]p
 				count++
 			}
 		}
-		return [][]parser.Value{{parser.Int64Value(count)}}, nil
+		value, err := publicIntResult(count)
+		if err != nil {
+			return nil, err
+		}
+		return [][]parser.Value{{value}}, nil
 	}
 	baseRows := make([][]parser.Value, 0, len(candidateRows))
 	for _, row := range candidateRows {
@@ -157,7 +161,11 @@ func executeAggregateSelectRows(sel *parser.SelectExpr, table *Table, rows [][]p
 		return nil, err
 	}
 	if sel.IsCountStar {
-		return [][]parser.Value{{parser.Int64Value(int64(len(rows)))}}, nil
+		value, err := publicIntResult(int64(len(rows)))
+		if err != nil {
+			return nil, err
+		}
+		return [][]parser.Value{{value}}, nil
 	}
 	out := make([]parser.Value, 0, len(sel.ProjectionExprs))
 	for _, expr := range sel.ProjectionExprs {

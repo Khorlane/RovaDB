@@ -75,7 +75,11 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 		if len(plan.Stmt.OrderBys) > 0 || plan.Stmt.OrderBy != nil {
 			return nil, errCountOrderByUnsupported
 		}
-		return [][]parser.Value{{parser.Int64Value(int64(len(joinedRows)))}}, nil
+		value, err := publicIntResult(int64(len(joinedRows)))
+		if err != nil {
+			return nil, err
+		}
+		return [][]parser.Value{{value}}, nil
 	}
 	if hasAggregateProjection(plan.Stmt) {
 		return executeJoinAggregateSelectRows(plan.Stmt, joinedRows, resolver)
@@ -101,7 +105,11 @@ func executeJoinAggregateSelectRows(sel *parser.SelectExpr, rows [][]parser.Valu
 		return nil, err
 	}
 	if sel.IsCountStar {
-		return [][]parser.Value{{parser.Int64Value(int64(len(rows)))}}, nil
+		value, err := publicIntResult(int64(len(rows)))
+		if err != nil {
+			return nil, err
+		}
+		return [][]parser.Value{{value}}, nil
 	}
 	out := make([]parser.Value, 0, len(sel.ProjectionExprs))
 	for _, expr := range sel.ProjectionExprs {

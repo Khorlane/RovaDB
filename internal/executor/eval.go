@@ -18,7 +18,7 @@ func Eval(expr *parser.Expr) (parser.Value, error) {
 
 	switch expr.Kind {
 	case parser.ExprKindInt64Literal:
-		return parser.Int64Value(expr.I64), nil
+		return publicIntResult(expr.I64)
 	case parser.ExprKindRealLiteral:
 		return parser.RealValue(expr.F64), nil
 	case parser.ExprKindStringLiteral:
@@ -42,9 +42,9 @@ func Eval(expr *parser.Expr) (parser.Value, error) {
 
 		switch expr.Op {
 		case parser.BinaryOpAdd:
-			return parser.Int64Value(left.I64 + right.I64), nil
+			return publicIntResult(left.I64 + right.I64)
 		case parser.BinaryOpSub:
-			return parser.Int64Value(left.I64 - right.I64), nil
+			return publicIntResult(left.I64 - right.I64)
 		default:
 			return parser.Value{}, errInvalidExpression
 		}
@@ -196,14 +196,14 @@ func evalScalarFunction(name string, arg parser.Value) (parser.Value, error) {
 		if arg.Kind != parser.ValueKindString {
 			return parser.Value{}, errTypeMismatch
 		}
-		return parser.Int64Value(int64(len(arg.Str))), nil
+		return publicIntResult(int64(len(arg.Str)))
 	case "ABS":
 		switch arg.Kind {
 		case parser.ValueKindInt64:
 			if arg.I64 < 0 {
-				return parser.Int64Value(-arg.I64), nil
+				return publicIntResult(-arg.I64)
 			}
-			return arg, nil
+			return publicIntResult(arg.I64)
 		case parser.ValueKindReal:
 			if arg.F64 < 0 {
 				return parser.RealValue(-arg.F64), nil
@@ -225,9 +225,9 @@ func evalBinaryValueExpr(op parser.ValueExprBinaryOp, left, right parser.Value) 
 	case parser.ValueKindInt64:
 		switch op {
 		case parser.ValueExprBinaryOpAdd:
-			return parser.Int64Value(left.I64 + right.I64), nil
+			return publicIntResult(left.I64 + right.I64)
 		case parser.ValueExprBinaryOpSub:
-			return parser.Int64Value(left.I64 - right.I64), nil
+			return publicIntResult(left.I64 - right.I64)
 		default:
 			return parser.Value{}, errInvalidExpression
 		}

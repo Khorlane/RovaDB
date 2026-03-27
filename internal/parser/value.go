@@ -73,6 +73,13 @@ func Int64Value(v int64) Value {
 	return Value{Kind: ValueKindInt64, I64: v}
 }
 
+func PublicIntValue(v int64) (Value, error) {
+	if !PublicIntInRange(v) {
+		return Value{}, errors.New("integer out of range for INT")
+	}
+	return Int64Value(v), nil
+}
+
 // StringValue builds a string Value.
 func StringValue(v string) Value {
 	return Value{Kind: ValueKindString, Str: v}
@@ -161,9 +168,9 @@ func parseInt64Literal(token string) (int64, error) {
 }
 
 func bindPublicIntValue(v int) (Value, error) {
-	value := int64(v)
-	if !PublicIntInRange(value) {
+	value, err := PublicIntValue(int64(v))
+	if err != nil {
 		return Value{}, errors.New("integer argument out of range for INT")
 	}
-	return Int64Value(value), nil
+	return value, nil
 }
