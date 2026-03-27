@@ -18,7 +18,7 @@ Status values:
 ## Summary
 
 - [kg002] Engine `done` Review text comparison / collation behavior `(commit: 2edb9e1)`
-- [kg015] Engine `pending` Expose catalog/schema introspection in the public API
+- [kg015] Engine `done` Expose catalog/schema introspection in the public API `(commit: <pending>)`
 - [kg022] Engine `pending` Add explicit SMALLINT / INT / BIGINT integer widths
 - [kg023] Engine `pending` Enforce a bounded indexable TEXT size
 - [dx001] Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc
@@ -44,7 +44,7 @@ Expected direction:
 
 - document and/or refine string comparison semantics so text predicates match the intended SQL behavior and user expectations
 
-### `pending` Expose catalog/schema introspection in the public API [kg015]
+### `done` Expose catalog/schema introspection in the public API [kg015] `(commit: <pending>)`
 
 Observed gap:
 

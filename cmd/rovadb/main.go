@@ -348,7 +348,7 @@ func handleTablesCommand(out io.Writer, errOut io.Writer, session *cliSession) e
 	if session.db == nil {
 		return writeResponse(out, "no database is open")
 	}
-	if err := printTables(out, session.path); err != nil {
+	if err := printTables(out, session.db); err != nil {
 		if writeErr := writeResponse(errOut, "tables error: %v", err); writeErr != nil {
 			return writeErr
 		}
@@ -364,7 +364,7 @@ func handleSchemaCommand(out io.Writer, errOut io.Writer, session *cliSession, i
 	if tableName == "" {
 		return writeResponse(out, "usage: schema <table>")
 	}
-	if err := printSchema(out, session.path, tableName); err != nil {
+	if err := printSchema(out, session.db, tableName); err != nil {
 		if writeErr := writeResponse(errOut, "schema error: %v", err); writeErr != nil {
 			return writeErr
 		}
@@ -550,12 +550,12 @@ func createSampleDatabase(session *cliSession, path string) error {
 		return err
 	}
 
-	catalog, err := loadCLICatalog(path)
+	tables, err := db.ListTables()
 	if err != nil {
 		_ = db.Close()
 		return err
 	}
-	if !catalog.isEmpty() {
+	if len(tables) != 0 {
 		_ = db.Close()
 		return fmt.Errorf("database is not empty: %s", path)
 	}
