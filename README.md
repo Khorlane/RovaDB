@@ -33,6 +33,8 @@ RovaDB is a Go-first embedded relational database engine designed for clarity, p
 
 - `CREATE TABLE`
 - `CREATE INDEX` / `CREATE UNIQUE INDEX`
+- `DROP INDEX`
+- `DROP TABLE`
 - `INSERT INTO ... VALUES`
 - `SELECT` with projection expressions, `WHERE`, `ORDER BY`, joins, and the current supported aggregate set
 - `UPDATE`
@@ -40,6 +42,7 @@ RovaDB is a Go-first embedded relational database engine designed for clarity, p
 - `ALTER TABLE ... ADD COLUMN`
 - positional args via `?` in `Exec`, `Query`, and `QueryRow`
 - public catalog introspection via `ListTables` and `GetTableSchema`
+- shared product version via `Version()`
 - strict value support for `INT`, `TEXT`, `BOOL`, `REAL`, and `NULL`
 
 ### Scope Discipline
@@ -54,6 +57,8 @@ Only the following SQL forms are supported today.
 
 - `CREATE TABLE`
 - `CREATE INDEX ...`
+- `DROP INDEX <name>`
+- `DROP TABLE <name>`
 - `ALTER TABLE <table> ADD COLUMN <column> <type>`
 - `INSERT INTO ... VALUES (...)`
 - `SELECT ...`
@@ -99,6 +104,7 @@ Parser-recognized but not executable today:
 - `(*DB).QueryRow(query string, args ...any) *Row`
 - `(*DB).ListTables() ([]TableInfo, error)`
 - `(*DB).GetTableSchema(table string) (TableInfo, error)`
+- `Version() string`
 
 ### Supported schema types
 

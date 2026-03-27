@@ -193,8 +193,11 @@ func TestRunHelpSQL(t *testing.T) {
 		"SQL examples:",
 		"SELECT * FROM users",
 		"INSERT INTO users VALUES (1, 'alice')",
+		"CREATE INDEX idx_users_name ON users (name)",
+		"DROP INDEX idx_users_name",
 		"UPDATE users SET name = 'alice' WHERE id = 1",
 		"DELETE FROM users WHERE id = 1",
+		"DROP TABLE users",
 		"ALTER TABLE users ADD COLUMN age INT",
 	} {
 		if !strings.Contains(output, want) {

@@ -94,3 +94,67 @@ func TestDropTableStateStaysGoneAcrossRepeatedReopen(t *testing.T) {
 		t.Fatalf("after second reopen db.tables[users] = %#v, want absent", db.tables["users"])
 	}
 }
+
+func TestInterruptedDropTableRecoveryPreservesUnrelatedObjects(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"CREATE TABLE teams (id INT, name TEXT)",
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO teams VALUES (1, 'ops')",
+		"CREATE INDEX idx_users_name ON users (name)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	db.afterDatabaseSyncHook = func() error {
+		return errors.New("boom after db sync")
+	}
+	if _, err := db.Exec("DROP TABLE users"); err == nil {
+		t.Fatal("Exec(drop table) error = nil, want interrupted commit failure")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	if db.tables["users"] == nil {
+		t.Fatal("db.tables[users] = nil, want restored table after recovery")
+	}
+	if db.tables["teams"] == nil {
+		t.Fatal("db.tables[teams] = nil, want unrelated table preserved after recovery")
+	}
+	if db.tables["users"].IndexDefinition("idx_users_name") == nil {
+		t.Fatalf("IndexDefinition(idx_users_name) = nil, want restored index (defs=%#v)", db.tables["users"].IndexDefs)
+	}
+
+	rows, err := db.Query("SELECT id, name FROM teams")
+	if err != nil {
+		t.Fatalf("Query(teams) error = %v", err)
+	}
+	defer rows.Close()
+
+	var id int
+	var name string
+	if !rows.Next() {
+		t.Fatal("rows.Next() = false, want true")
+	}
+	if err := rows.Scan(&id, &name); err != nil {
+		t.Fatalf("rows.Scan() error = %v", err)
+	}
+	if id != 1 || name != "ops" {
+		t.Fatalf("teams row = (%d,%q), want (1,\"ops\")", id, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err() = %v", err)
+	}
+}
