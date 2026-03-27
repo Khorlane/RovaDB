@@ -17,7 +17,7 @@ Status values:
 
 ## Summary
 
-- [kg002] Engine `pending` Review text comparison / collation behavior
+- [kg002] Engine `done` Review text comparison / collation behavior `(commit: 2edb9e1)`
 - [kg015] Engine `pending` Expose catalog/schema introspection in the public API
 - [kg022] Engine `pending` Add explicit SMALLINT / INT / BIGINT integer widths
 - [kg023] Engine `pending` Enforce a bounded indexable TEXT size
@@ -28,7 +28,7 @@ Status values:
 
 ## Engine
 
-### `pending` Review text comparison / collation behavior [kg002]
+### `done` Review text comparison / collation behavior [kg002] `(commit: 2edb9e1)`
 
 Observed gap:
 
