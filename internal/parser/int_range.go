@@ -5,7 +5,7 @@ const (
 	publicIntMax = 2147483647
 )
 
-func publicIntInRange(v int64) bool {
+func PublicIntInRange(v int64) bool {
 	return v >= publicIntMin && v <= publicIntMax
 }
 
@@ -14,7 +14,7 @@ func parsePublicIntLiteral(token string) (int64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	if !publicIntInRange(value) {
+	if !PublicIntInRange(value) {
 		return 0, false
 	}
 	return value, true

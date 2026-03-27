@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
@@ -281,6 +282,25 @@ func TestDecodeRowUnknownTag(t *testing.T) {
 
 func TestDecodeRowTruncatedInt(t *testing.T) {
 	data := []byte{1, 0, rowTypeInt64, 1, 2, 3}
+
+	if err := expectDecodeError(data); !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("DecodeRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestEncodeRowRejectsOutOfRangeInt(t *testing.T) {
+	_, err := EncodeRow([]parser.Value{parser.Int64Value(2147483648)})
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("EncodeRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestDecodeRowRejectsOutOfRangeInt(t *testing.T) {
+	data := make([]byte, 0, 11)
+	data = append(data, 1, 0, rowTypeInt64)
+	var raw [8]byte
+	binary.LittleEndian.PutUint64(raw[:], uint64(int64(math.MaxInt32)+1))
+	data = append(data, raw[:]...)
 
 	if err := expectDecodeError(data); !errors.Is(err, errInvalidRowData) {
 		t.Fatalf("DecodeRow() error = %v, want %v", err, errInvalidRowData)

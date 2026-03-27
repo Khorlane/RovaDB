@@ -25,6 +25,9 @@ func EncodeRow(values []parser.Value) ([]byte, error) {
 		case parser.ValueKindNull:
 			buf = append(buf, rowTypeNull)
 		case parser.ValueKindInt64:
+			if !parser.PublicIntInRange(value.I64) {
+				return nil, errCorruptedRowData
+			}
 			var raw [8]byte
 			buf = append(buf, rowTypeInt64)
 			binary.LittleEndian.PutUint64(raw[:], uint64(value.I64))
@@ -82,6 +85,9 @@ func DecodeRow(data []byte) ([]parser.Value, error) {
 				return nil, errCorruptedRowData
 			}
 			value := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+			if !parser.PublicIntInRange(value) {
+				return nil, errCorruptedRowData
+			}
 			offset += 8
 			values = append(values, parser.Int64Value(value))
 		case rowTypeString:
