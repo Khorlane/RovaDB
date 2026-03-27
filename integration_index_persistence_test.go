@@ -26,8 +26,8 @@ func TestIndexMetadataPersistsAcrossReopen(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -60,8 +60,8 @@ func TestCatalogRoundTripPreservesIndexMetadataForOpen(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if err := db.defineBasicIndex("users", "id"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if err := db.defineLegacyBasicIndex("users", "id"); err != nil {
+		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)

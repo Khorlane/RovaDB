@@ -38,10 +38,10 @@ func collectBindableValues(stmt any) []*Value {
 	case *SelectExpr:
 		values := make([]*Value, 0)
 		for _, join := range stmt.Joins {
-			values = append(values, collectPredicateValues(join.Predicate)...)
+			values = append(values, collectPredicatePlaceholderValues(join.Predicate)...)
 		}
 		if stmt.Predicate != nil {
-			return append(values, collectPredicateValues(stmt.Predicate)...)
+			return append(values, collectPredicatePlaceholderValues(stmt.Predicate)...)
 		}
 		return append(values, collectWhereValues(stmt.Where)...)
 	case *InsertStmt:
@@ -69,12 +69,12 @@ func collectBindableValues(stmt any) []*Value {
 			}
 		}
 		if stmt.Predicate != nil {
-			return append(values, collectPredicateValues(stmt.Predicate)...)
+			return append(values, collectPredicatePlaceholderValues(stmt.Predicate)...)
 		}
 		return append(values, collectWhereValues(stmt.Where)...)
 	case *DeleteStmt:
 		if stmt.Predicate != nil {
-			return collectPredicateValues(stmt.Predicate)
+			return collectPredicatePlaceholderValues(stmt.Predicate)
 		}
 		return collectWhereValues(stmt.Where)
 	default:
@@ -110,10 +110,10 @@ func collectAllValues(stmt any) []*Value {
 	case *SelectExpr:
 		values := make([]*Value, 0)
 		for _, join := range stmt.Joins {
-			values = append(values, collectPredValues(join.Predicate)...)
+			values = append(values, collectPredicateValues(join.Predicate)...)
 		}
 		if stmt.Predicate != nil {
-			return append(values, collectPredValues(stmt.Predicate)...)
+			return append(values, collectPredicateValues(stmt.Predicate)...)
 		}
 		return append(values, collectAllWhereValues(stmt.Where)...)
 	case *InsertStmt:
@@ -139,12 +139,12 @@ func collectAllValues(stmt any) []*Value {
 			}
 		}
 		if stmt.Predicate != nil {
-			return append(values, collectPredValues(stmt.Predicate)...)
+			return append(values, collectPredicateValues(stmt.Predicate)...)
 		}
 		return append(values, collectAllWhereValues(stmt.Where)...)
 	case *DeleteStmt:
 		if stmt.Predicate != nil {
-			return collectPredValues(stmt.Predicate)
+			return collectPredicateValues(stmt.Predicate)
 		}
 		return collectAllWhereValues(stmt.Where)
 	default:
@@ -152,7 +152,7 @@ func collectAllValues(stmt any) []*Value {
 	}
 }
 
-func collectPredicateValues(predicate *PredicateExpr) []*Value {
+func collectPredicatePlaceholderValues(predicate *PredicateExpr) []*Value {
 	if predicate == nil {
 		return nil
 	}
@@ -165,15 +165,15 @@ func collectPredicateValues(predicate *PredicateExpr) []*Value {
 			values = append(values, collectExprPlaceholders(predicate.Comparison.RightExpr)...)
 		}
 	case PredicateKindAnd, PredicateKindOr:
-		values = append(values, collectPredicateValues(predicate.Left)...)
-		values = append(values, collectPredicateValues(predicate.Right)...)
+		values = append(values, collectPredicatePlaceholderValues(predicate.Left)...)
+		values = append(values, collectPredicatePlaceholderValues(predicate.Right)...)
 	case PredicateKindNot:
-		values = append(values, collectPredicateValues(predicate.Inner)...)
+		values = append(values, collectPredicatePlaceholderValues(predicate.Inner)...)
 	}
 	return values
 }
 
-func collectPredValues(predicate *PredicateExpr) []*Value {
+func collectPredicateValues(predicate *PredicateExpr) []*Value {
 	if predicate == nil {
 		return nil
 	}
@@ -186,10 +186,10 @@ func collectPredValues(predicate *PredicateExpr) []*Value {
 			values = append(values, collectExprValues(predicate.Comparison.RightExpr)...)
 		}
 	case PredicateKindAnd, PredicateKindOr:
-		values = append(values, collectPredValues(predicate.Left)...)
-		values = append(values, collectPredValues(predicate.Right)...)
+		values = append(values, collectPredicateValues(predicate.Left)...)
+		values = append(values, collectPredicateValues(predicate.Right)...)
 	case PredicateKindNot:
-		values = append(values, collectPredValues(predicate.Inner)...)
+		values = append(values, collectPredicateValues(predicate.Inner)...)
 	}
 	return values
 }

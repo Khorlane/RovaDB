@@ -66,8 +66,8 @@ func TestQueryRejectsIndexTableMismatch(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 	}
 
 	db.tables["users"].Indexes["name"].Entries[planner.IndexKey("string:alice")] = []int{99}
@@ -101,8 +101,8 @@ func TestQueryRejectsLegacyIndexWithoutMatchingDefinition(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 	}
 
 	db.tables["users"].IndexDefs = nil

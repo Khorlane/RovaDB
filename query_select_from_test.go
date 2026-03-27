@@ -390,8 +390,8 @@ func TestQuerySelectWhereIndexedEquality(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 	}
 
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
@@ -416,8 +416,8 @@ func TestQuerySelectWhereIndexedEqualityNoMatch(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 	}
 
 	rows, err := db.Query("SELECT * FROM users WHERE name = 'bob'")
@@ -453,8 +453,8 @@ func TestQuerySelectWhereIndexedEqualityWithProjectionAndOrderBy(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 	}
 
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice' ORDER BY id DESC")
@@ -485,8 +485,8 @@ func TestQuerySelectCountStarWithIndexedEquality(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 	}
 
 	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE name = 'alice'")

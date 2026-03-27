@@ -32,14 +32,14 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 			value parser.Value
 		}{index: idx, expr: expr, value: assignment.Value})
 	}
-	if err := validatePredicateOrWhereColumns(stmt.Predicate, stmt.Where, table); err != nil {
+	if err := validateFilterColumns(stmt.Predicate, stmt.Where, table); err != nil {
 		return 0, err
 	}
 
 	var affected int64
 	updatedRows := cloneRows(table.Rows)
 	for _, row := range updatedRows {
-		match, err := evalPredicateOrWhere(row, table, stmt.Predicate, stmt.Where)
+		match, err := evalFilter(row, table, stmt.Predicate, stmt.Where)
 		if err != nil {
 			return 0, err
 		}

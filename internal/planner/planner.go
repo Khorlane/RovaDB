@@ -54,11 +54,11 @@ func chooseJoinScan(stmt *parser.SelectExpr) (*JoinScan, bool) {
 	if cond.Operator != "=" || cond.LeftExpr == nil || cond.RightExpr == nil {
 		return nil, false
 	}
-	_, leftName, ok := parserOperandShape(cond.LeftExpr)
+	_, leftName, ok := valueExprOperandShape(cond.LeftExpr)
 	if !ok || leftName == "" {
 		return nil, false
 	}
-	_, rightName, ok := parserOperandShape(cond.RightExpr)
+	_, rightName, ok := valueExprOperandShape(cond.RightExpr)
 	if !ok || rightName == "" {
 		return nil, false
 	}
@@ -141,12 +141,12 @@ func indexedEquality(stmt *parser.SelectExpr) (string, parser.Value, bool) {
 	}
 	tableRef := stmt.PrimaryTableRef()
 	if stmt.Predicate != nil {
-		return indexedEqualityFromPred(stmt.Predicate, tableRef)
+		return indexedEqualityFromPredicate(stmt.Predicate, tableRef)
 	}
 	return indexedEqualityFromWhere(stmt.Where, tableRef)
 }
 
-func indexedEqualityFromPred(predicate *parser.PredicateExpr, tableRef *parser.TableRef) (string, parser.Value, bool) {
+func indexedEqualityFromPredicate(predicate *parser.PredicateExpr, tableRef *parser.TableRef) (string, parser.Value, bool) {
 	if predicate == nil || predicate.Kind != parser.PredicateKindComparison || predicate.Comparison == nil {
 		return "", parser.Value{}, false
 	}
@@ -154,11 +154,11 @@ func indexedEqualityFromPred(predicate *parser.PredicateExpr, tableRef *parser.T
 		return "", parser.Value{}, false
 	}
 	if predicate.Comparison.LeftExpr != nil && predicate.Comparison.RightExpr != nil {
-		leftValue, leftColumn, ok := parserOperandShape(predicate.Comparison.LeftExpr)
+		leftValue, leftColumn, ok := valueExprOperandShape(predicate.Comparison.LeftExpr)
 		if !ok || leftColumn == "" || leftValue.Kind != parser.ValueKindInvalid {
 			return "", parser.Value{}, false
 		}
-		rightValue, rightColumn, ok := parserOperandShape(predicate.Comparison.RightExpr)
+		rightValue, rightColumn, ok := valueExprOperandShape(predicate.Comparison.RightExpr)
 		if !ok || rightColumn != "" {
 			return "", parser.Value{}, false
 		}
@@ -178,7 +178,7 @@ func indexedEqualityFromPred(predicate *parser.PredicateExpr, tableRef *parser.T
 	return normalized, predicate.Comparison.Right, true
 }
 
-func parserOperandShape(expr *parser.ValueExpr) (parser.Value, string, bool) {
+func valueExprOperandShape(expr *parser.ValueExpr) (parser.Value, string, bool) {
 	if expr == nil {
 		return parser.Value{}, "", false
 	}
@@ -192,7 +192,7 @@ func parserOperandShape(expr *parser.ValueExpr) (parser.Value, string, bool) {
 		}
 		return parser.Value{}, expr.Column, true
 	case parser.ValueExprKindParen:
-		return parserOperandShape(expr.Inner)
+		return valueExprOperandShape(expr.Inner)
 	default:
 		return parser.Value{}, "", false
 	}

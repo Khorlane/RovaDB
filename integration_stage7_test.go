@@ -30,8 +30,8 @@ func TestStage7IndexLifecycleAcrossReopen(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 	}
 	assertQueryIntRows(t, db, "SELECT id FROM users WHERE name = 'alice' ORDER BY id", 1, 3)
 	assertIndexConsistency(t, db.tables["users"])
@@ -62,8 +62,8 @@ func TestStage7MutationAndIndexCorrectness(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 	}
 	if _, err := db.Exec("UPDATE users SET name = 'alice' WHERE id = 2"); err != nil {
 		t.Fatalf("Exec(update) error = %v", err)
@@ -100,8 +100,8 @@ func TestStage7IndexedAndNonIndexedQueriesStayAligned(t *testing.T) {
 	nonIndexedBaseline := collectIntRows(t, db, "SELECT id FROM users WHERE id > 2 ORDER BY id")
 	fullBaseline := collectIntRows(t, db, "SELECT id FROM users ORDER BY id")
 
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 	}
 
 	if got := collectIntRows(t, db, "SELECT id FROM users WHERE name = 'alice' ORDER BY id"); !reflect.DeepEqual(got, indexableBaseline) {
@@ -134,8 +134,8 @@ func TestStage7IndexEdgeCases(t *testing.T) {
 				t.Fatalf("Exec(%q) error = %v", sql, err)
 			}
 		}
-		if err := db.defineBasicIndex("users", "name"); err != nil {
-			t.Fatalf("defineBasicIndex() error = %v", err)
+		if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+			t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 		}
 
 		assertQueryIntRows(t, db, "SELECT id FROM users WHERE name = NULL ORDER BY id", 1, 3)
@@ -152,8 +152,8 @@ func TestStage7IndexEdgeCases(t *testing.T) {
 		if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 			t.Fatalf("Exec(create) error = %v", err)
 		}
-		if err := db.defineBasicIndex("users", "name"); err != nil {
-			t.Fatalf("defineBasicIndex() error = %v", err)
+		if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+			t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 		}
 
 		assertQueryIntRows(t, db, "SELECT COUNT(*) FROM users WHERE name = 'alice'", 0)
@@ -173,8 +173,8 @@ func TestStage7IndexEdgeCases(t *testing.T) {
 		if _, err := db.Exec("INSERT INTO users VALUES (1, 'solo')"); err != nil {
 			t.Fatalf("Exec(insert) error = %v", err)
 		}
-		if err := db.defineBasicIndex("users", "name"); err != nil {
-			t.Fatalf("defineBasicIndex() error = %v", err)
+		if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+			t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 		}
 
 		assertQueryIntRows(t, db, "SELECT id FROM users WHERE name = 'solo'", 1)
@@ -196,8 +196,8 @@ func TestStage7IndexEdgeCases(t *testing.T) {
 				t.Fatalf("Exec(insert %d) error = %v", i, err)
 			}
 		}
-		if err := db.defineBasicIndex("users", "name"); err != nil {
-			t.Fatalf("defineBasicIndex() error = %v", err)
+		if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+			t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 		}
 
 		got := collectIntRows(t, db, "SELECT COUNT(*) FROM users WHERE name = 'same'")

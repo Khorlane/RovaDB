@@ -797,7 +797,7 @@ func cloneTable(table *executor.Table) *executor.Table {
 		Indexes:   cloneIndexes(table.Indexes),
 		IndexDefs: cloneIndexDefs(table.IndexDefs),
 	}
-	colNames := tableColNames(cloned)
+	colNames := columnNamesForTable(cloned)
 	for _, index := range cloned.Indexes {
 		if index == nil {
 			continue
@@ -937,7 +937,7 @@ func rebuildPersistedIndexes(tables map[string]*executor.Table) error {
 		if table == nil || len(table.Indexes) == 0 {
 			continue
 		}
-		colNames := tableColNames(table)
+		colNames := columnNamesForTable(table)
 		for columnName, index := range table.Indexes {
 			if index == nil {
 				table.Indexes[columnName] = planner.NewBasicIndex(table.Name, columnName)
@@ -951,7 +951,7 @@ func rebuildPersistedIndexes(tables map[string]*executor.Table) error {
 	return nil
 }
 
-func tableColNames(table *executor.Table) []string {
+func columnNamesForTable(table *executor.Table) []string {
 	if table == nil {
 		return nil
 	}
@@ -997,7 +997,7 @@ func executeCreateIndex(stmt *parser.CreateIndexStmt, tables map[string]*executo
 			table.Indexes = make(map[string]*planner.BasicIndex)
 		}
 		index := planner.NewBasicIndex(table.Name, columnName)
-		if err := index.Rebuild(tableColNames(table), table.Rows); err != nil {
+		if err := index.Rebuild(columnNamesForTable(table), table.Rows); err != nil {
 			return 0, nil, err
 		}
 		table.Indexes[columnName] = index
@@ -1083,7 +1083,7 @@ func executeDropTable(stmt *parser.DropTableStmt, tables map[string]*executor.Ta
 	return 0, tables, nil
 }
 
-func (db *DB) defineBasicIndex(tableName, columnName string) error {
+func (db *DB) defineLegacyBasicIndex(tableName, columnName string) error {
 	if db == nil {
 		return ErrInvalidArgument
 	}
@@ -1095,7 +1095,7 @@ func (db *DB) defineBasicIndex(tableName, columnName string) error {
 		if table == nil {
 			return newExecError("table not found")
 		}
-		colNames := tableColNames(table)
+		colNames := columnNamesForTable(table)
 		found := false
 		for _, column := range table.Columns {
 			if column.Name == columnName {
@@ -1294,7 +1294,7 @@ func validateIndexConsistency(table *executor.Table) error {
 		return nil
 	}
 
-	colNames := tableColNames(table)
+	colNames := columnNamesForTable(table)
 	for columnName, index := range table.Indexes {
 		if index == nil {
 			return newExecError("index/table mismatch")

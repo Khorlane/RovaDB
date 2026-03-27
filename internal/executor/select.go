@@ -64,7 +64,7 @@ func executeIndexSelect(plan *planner.SelectPlan, table *Table) ([][]parser.Valu
 }
 
 func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
-	if err := validateFilterCols(sel, table); err != nil {
+	if err := validateSelectFilterColumns(sel, table); err != nil {
 		return nil, err
 	}
 	if err := validateProjectionExprs(sel, table); err != nil {
@@ -76,7 +76,7 @@ func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]p
 		}
 		count := int64(0)
 		for _, row := range candidateRows {
-			match, err := evalSelectPredicateOrWhere(row, sel, table)
+			match, err := evalSelectFilter(row, sel, table)
 			if err != nil {
 				return nil, err
 			}
@@ -92,7 +92,7 @@ func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]p
 	}
 	baseRows := make([][]parser.Value, 0, len(candidateRows))
 	for _, row := range candidateRows {
-		match, err := evalSelectPredicateOrWhere(row, sel, table)
+		match, err := evalSelectFilter(row, sel, table)
 		if err != nil {
 			return nil, err
 		}
@@ -135,7 +135,7 @@ func hasAggregateProjection(sel *parser.SelectExpr) bool {
 	return false
 }
 
-func validateAggProjShape(sel *parser.SelectExpr) error {
+func validateAggregateProjectionShape(sel *parser.SelectExpr) error {
 	if sel == nil {
 		return nil
 	}
@@ -157,7 +157,7 @@ func validateAggProjShape(sel *parser.SelectExpr) error {
 }
 
 func executeAggregateSelectRows(sel *parser.SelectExpr, table *Table, rows [][]parser.Value) ([][]parser.Value, error) {
-	if err := validateAggProjShape(sel); err != nil {
+	if err := validateAggregateProjectionShape(sel); err != nil {
 		return nil, err
 	}
 	if sel.IsCountStar {
@@ -315,7 +315,7 @@ func resolveSelectColumns(sel *parser.SelectExpr, table *Table) ([]int, error) {
 }
 
 func resolveColumnIndex(name string, table *Table) (int, error) {
-	baseName, err := normalizeQualColName(name, table)
+	baseName, err := normalizeQualifiedColumnName(name, table)
 	if err != nil {
 		return -1, err
 	}
@@ -328,7 +328,7 @@ func resolveColumnIndex(name string, table *Table) (int, error) {
 	return -1, errColumnDoesNotExist
 }
 
-func normalizeQualColName(name string, table *Table) (string, error) {
+func normalizeQualifiedColumnName(name string, table *Table) (string, error) {
 	if !strings.Contains(name, ".") {
 		return name, nil
 	}
@@ -343,7 +343,7 @@ func normalizeQualColName(name string, table *Table) (string, error) {
 }
 
 func resolveSelectColumnIndex(sel *parser.SelectExpr, name string, table *Table) (int, error) {
-	baseName, err := normalizeSelectQualColName(sel, name, table)
+	baseName, err := normalizeSelectQualifiedColumnName(sel, name, table)
 	if err != nil {
 		return -1, err
 	}
@@ -355,7 +355,7 @@ func resolveSelectColumnIndex(sel *parser.SelectExpr, name string, table *Table)
 	return -1, errColumnDoesNotExist
 }
 
-func normalizeSelectQualColName(sel *parser.SelectExpr, name string, table *Table) (string, error) {
+func normalizeSelectQualifiedColumnName(sel *parser.SelectExpr, name string, table *Table) (string, error) {
 	if !strings.Contains(name, ".") {
 		return name, nil
 	}
@@ -410,14 +410,14 @@ func evalWhere(row []parser.Value, table *Table, where *parser.WhereClause) (boo
 	return current, nil
 }
 
-func evalPredicateOrWhere(row []parser.Value, table *Table, predicate *parser.PredicateExpr, where *parser.WhereClause) (bool, error) {
+func evalFilter(row []parser.Value, table *Table, predicate *parser.PredicateExpr, where *parser.WhereClause) (bool, error) {
 	if predicate != nil {
 		return evalPredicate(row, table, predicate)
 	}
 	return evalWhere(row, table, where)
 }
 
-func evalSelectPredicateOrWhere(row []parser.Value, sel *parser.SelectExpr, table *Table) (bool, error) {
+func evalSelectFilter(row []parser.Value, sel *parser.SelectExpr, table *Table) (bool, error) {
 	if sel != nil && sel.Predicate != nil {
 		return evalSelectPredicate(row, sel, table, sel.Predicate)
 	}
@@ -624,14 +624,14 @@ func validateWhereColumns(where *parser.WhereClause, table *Table) error {
 	return nil
 }
 
-func validatePredicateOrWhereColumns(predicate *parser.PredicateExpr, where *parser.WhereClause, table *Table) error {
+func validateFilterColumns(predicate *parser.PredicateExpr, where *parser.WhereClause, table *Table) error {
 	if predicate != nil {
 		return validatePredicateColumns(predicate, table)
 	}
 	return validateWhereColumns(where, table)
 }
 
-func validateFilterCols(sel *parser.SelectExpr, table *Table) error {
+func validateSelectFilterColumns(sel *parser.SelectExpr, table *Table) error {
 	if sel != nil && sel.Predicate != nil {
 		return validateSelectPredicateColumns(sel, sel.Predicate, table)
 	}

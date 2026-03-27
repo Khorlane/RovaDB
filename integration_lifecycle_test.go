@@ -203,8 +203,8 @@ func TestLifecycleIndexedQueryAfterReopenRemainsCorrect(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineBasicIndex() error = %v", err)
+	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
+		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 	}
 
 	assertQueryIntRows(t, db, "SELECT id FROM users WHERE name = 'alice' ORDER BY id", 1, 3)

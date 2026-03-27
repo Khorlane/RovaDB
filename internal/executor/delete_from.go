@@ -16,14 +16,14 @@ func executeDelete(stmt *parser.DeleteStmt, tables map[string]*Table) (int64, er
 		}
 		return affected, nil
 	}
-	if err := validatePredicateOrWhereColumns(stmt.Predicate, stmt.Where, table); err != nil {
+	if err := validateFilterColumns(stmt.Predicate, stmt.Where, table); err != nil {
 		return 0, err
 	}
 
 	kept := make([][]parser.Value, 0, len(table.Rows))
 	var affected int64
 	for _, row := range table.Rows {
-		match, err := evalPredicateOrWhere(row, table, stmt.Predicate, stmt.Where)
+		match, err := evalFilter(row, table, stmt.Predicate, stmt.Where)
 		if err != nil {
 			return 0, err
 		}
