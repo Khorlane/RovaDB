@@ -22,7 +22,7 @@ Status values:
 - [kg024] Engine `pending` Make `CREATE INDEX` executable and durable
 - [kg025] Engine `pending` Make `DROP INDEX` executable and durable
 - [kg026] Engine `pending` Make `DROP TABLE` executable and durable
-- [kg022] Engine `pending` Realign `INT` semantics to 32-bit
+- [kg022] Engine `done` Realign `INT` semantics to 32-bit
 - [kg023] Engine `pending` Enforce a bounded indexable TEXT size
 - [dx001] Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc
 - [dx002] Explore planner usage for multi-column indexes
@@ -101,19 +101,14 @@ Expected direction:
 - preserve reopen and recovery correctness
 - follow `docs/dev/SCHEMA_LIFECYCLE_design.md`
 
-### `pending` Realign `INT` semantics to 32-bit [kg022]
+### `done` Realign `INT` semantics to 32-bit [kg022]
 
-Observed gap:
+Resolved direction:
 
-- RovaDB currently exposes a single `INT` schema type
-- current engine/storage behavior effectively treats that `INT` path as `int64`
-
-Expected direction:
-
-- keep `INT` as the only public integer schema type for now
-- realign `INT` semantics to 32-bit behavior consistently across parser, runtime, storage, comparison, and scan paths
-- treat the current wider `int64` behavior as a compatibility-sensitive mismatch that should be corrected intentionally
-- preserve future direction to add explicit multi-width integer types later:
+- `INT` remains the only public integer schema type for now
+- `INT` now follows signed 32-bit semantics consistently across parser, runtime, storage, comparison, and scan paths
+- out-of-range values fail deterministically rather than widening silently
+- future direction remains to add explicit multi-width integer types later:
   - `SMALLINT`
   - `INT`
   - `BIGINT`

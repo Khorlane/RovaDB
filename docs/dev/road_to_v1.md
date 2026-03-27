@@ -182,13 +182,10 @@ Use `v0.x.0` milestone releases until the project is intentionally judged ready 
 
 Current baseline:
 
-- `v0.11.x`
+- `v0.12.x`
 
 Compressed milestone plan:
 
-- `v0.12.0`
-  - complete `kg022`
-  - realign `INT` semantics to signed 32-bit behavior
 - `v0.13.0`
   - complete `kg024`
   - make `CREATE INDEX` and `CREATE UNIQUE INDEX` executable and durable

@@ -179,6 +179,18 @@ func TestRowsScanAnySupport(t *testing.T) {
 			t.Fatalf("Scan() got %#v, want 3.14", got)
 		}
 	})
+
+	t.Run("int boundary", func(t *testing.T) {
+		rows := newRows(nil, [][]any{{2147483647}})
+		rows.Next()
+		var got any
+		if err := rows.Scan(&got); err != nil {
+			t.Fatalf("Scan() error = %v", err)
+		}
+		if got != 2147483647 {
+			t.Fatalf("Scan() got %#v, want 2147483647", got)
+		}
+	})
 }
 
 func TestRowsScanUnsupportedDestinations(t *testing.T) {
