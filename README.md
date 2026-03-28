@@ -6,6 +6,52 @@ RovaDB is a Go-first embedded relational database engine designed for clarity, p
 
 > **Status:** Pre-release. The current `v0.16.x` line reflects a practical, durable baseline with a small public API and focused SQL support.
 
+## Quick Start
+
+If you already have Go installed, you can try RovaDB without cloning the repo:
+
+```powershell
+go install github.com/Khorlane/RovaDB/cmd/rovadb@latest
+rovadb
+```
+
+Then create and open the sample database:
+
+```text
+rovadb> sample demo.db
+  created sample database demo.db
+  sample tables: customers, orders
+```
+
+Run this query:
+
+```sql
+SELECT a.id, a.name, a.city, b.id, b.item, b.total
+FROM customers a
+INNER JOIN orders b ON a.id = b.customer_id
+ORDER BY a.name DESC, b.total;
+```
+
+Or copy/paste this one-line form directly into the CLI:
+
+```text
+SELECT a.id, a.name, a.city, b.id, b.item, b.total FROM customers a INNER JOIN orders b ON a.id = b.customer_id ORDER BY a.name DESC, b.total;
+```
+
+You should see:
+
+```text
+rovadb> SELECT a.id, a.name, a.city, b.id, b.item, b.total FROM customers a INNER JOIN orders b ON a.id = b.customer_id ORDER BY a.name DESC, b.total;
+  a.id | a.name         | a.city  | b.id | b.item   | b.total
+  -----|----------------|---------|------|----------|--------
+  3    | Charlie Market | Denver  | 4    | Notebook | 6.75
+  2    | Bravo Shop     | Chicago | 3    | Stapler  | 15
+  1    | Alice Co       | Boston  | 2    | Pens     | 8.25
+  1    | Alice Co       | Boston  | 1    | Paper    | 12.5
+```
+
+If you want to embed RovaDB in a Go program instead, see `examples/basic_usage/main.go`.
+
 ## Product Boundary
 
 ### Intended Use
@@ -70,6 +116,8 @@ Parser-recognized but not executable today:
 - `COMMIT`
 - `ROLLBACK`
 
+Transaction control remains internal-only in the current public product surface.
+
 ### SELECT support
 
 - literal selects such as `SELECT 1`, `SELECT 'hello'`, `SELECT TRUE`, `SELECT FALSE`, and arithmetic expressions with `+` and `-`
@@ -91,6 +139,7 @@ Parser-recognized but not executable today:
 - non-`INNER` joins
 - non-equality join predicates
 - comma-style multi-table `FROM` queries at runtime
+- qualified star projection such as `a.*` or `b.*`
 - mixed aggregate and non-aggregate projections
 - public `COMMIT` / `ROLLBACK` SQL
 - schema changes other than `ALTER TABLE ... ADD COLUMN`
@@ -106,7 +155,7 @@ Parser-recognized but not executable today:
 - `(*DB).GetTableSchema(table string) (TableInfo, error)`
 - `Version() string`
 
-### Supported schema types
+### Supported data types
 
 - `INT`
 - `TEXT`
@@ -231,7 +280,7 @@ if err := db.QueryRow("SELECT name, active FROM users WHERE id = ?", 2).Scan(&na
 fmt.Println(name, active)
 ```
 
-See [examples/basic_usage/main.go](/c:/Projects/RovaDB/examples/basic_usage/main.go) for a complete open -> write -> close -> reopen -> query flow.
+See `examples/basic_usage/main.go` for a complete open -> write -> close -> reopen -> query flow.
 
 ## Why RovaDB exists
 
@@ -325,9 +374,13 @@ Current documentation in the repository includes:
 
 - `README.md`
 - `docs/dev/BOOL_design.md`
+- `docs/dev/CREATE_INDEX_design.md`
+- `docs/dev/INTEGER_design.md`
 - `docs/dev/known_gaps.md`
 - `docs/dev/REAL_design.md`
 - `docs/dev/RovaDB_SQL_Language_Spec.md`
+- `docs/dev/SCHEMA_LIFECYCLE_design.md`
+- `docs/dev/road_to_v1.md`
 - `docs/dev/workflows.md`
 - `examples/basic_usage/main.go`
 
