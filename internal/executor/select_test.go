@@ -990,8 +990,9 @@ func TestSelectAggregateProjectionRejectsMixedAggregateAndNonAggregate(t *testin
 
 func TestSelectMissingTable(t *testing.T) {
 	_, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users"}), map[string]*Table{})
-	if err != errTableDoesNotExist {
-		t.Fatalf("Select() error = %v, want %v", err, errTableDoesNotExist)
+	want := newTableNotFoundError("users")
+	if err == nil || err.Error() != want.Error() {
+		t.Fatalf("Select() error = %v, want %v", err, want)
 	}
 }
 

@@ -28,8 +28,11 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 
 	leftTable := tables[plan.JoinScan.LeftTableName]
 	rightTable := tables[plan.JoinScan.RightTableName]
-	if leftTable == nil || rightTable == nil {
-		return nil, errTableDoesNotExist
+	if leftTable == nil {
+		return nil, newTableNotFoundError(plan.JoinScan.LeftTableName)
+	}
+	if rightTable == nil {
+		return nil, newTableNotFoundError(plan.JoinScan.RightTableName)
 	}
 
 	resolver := newJoinSelectResolver(plan.Stmt, leftTable, rightTable)
@@ -136,8 +139,11 @@ func ProjectedColumnNamesForPlan(plan *planner.SelectPlan, tables map[string]*Ta
 	}
 	leftTable := tables[plan.JoinScan.LeftTableName]
 	rightTable := tables[plan.JoinScan.RightTableName]
-	if leftTable == nil || rightTable == nil {
-		return nil, errTableDoesNotExist
+	if leftTable == nil {
+		return nil, newTableNotFoundError(plan.JoinScan.LeftTableName)
+	}
+	if rightTable == nil {
+		return nil, newTableNotFoundError(plan.JoinScan.RightTableName)
 	}
 	resolver := newJoinSelectResolver(plan.Stmt, leftTable, rightTable)
 

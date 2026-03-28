@@ -972,7 +972,7 @@ func executeCreateIndex(stmt *parser.CreateIndexStmt, tables map[string]*executo
 
 	table := tables[stmt.TableName]
 	if table == nil {
-		return 0, nil, newExecError("table not found")
+		return 0, nil, newExecError("table not found: " + stmt.TableName)
 	}
 
 	indexDef, err := indexDefinitionFromStmt(table, stmt)
@@ -1077,7 +1077,7 @@ func executeDropTable(stmt *parser.DropTableStmt, tables map[string]*executor.Ta
 		return 0, nil, newExecError("unsupported query form")
 	}
 	if _, ok := tables[stmt.Name]; !ok {
-		return 0, nil, newExecError("table not found")
+		return 0, nil, newExecError("table not found: " + stmt.Name)
 	}
 	delete(tables, stmt.Name)
 	return 0, tables, nil

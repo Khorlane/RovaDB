@@ -5,7 +5,7 @@ import "github.com/Khorlane/RovaDB/internal/parser"
 func executeAlterTableAddColumn(stmt *parser.AlterTableAddColumnStmt, tables map[string]*Table) (int64, error) {
 	table, ok := tables[stmt.TableName]
 	if !ok {
-		return 0, errTableDoesNotExist
+		return 0, newTableNotFoundError(stmt.TableName)
 	}
 
 	for _, column := range table.Columns {

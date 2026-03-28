@@ -39,8 +39,8 @@ func TestExecAPIDropTableRemovesTableAndDependentIndexes(t *testing.T) {
 	if rows.Next() {
 		t.Fatal("rows.Next() = true, want false")
 	}
-	if rows.Err() == nil || rows.Err().Error() != "execution: table not found" {
-		t.Fatalf("rows.Err() = %v, want %q", rows.Err(), "execution: table not found")
+	if rows.Err() == nil || rows.Err().Error() != "execution: table not found: users" {
+		t.Fatalf("rows.Err() = %v, want %q", rows.Err(), "execution: table not found: users")
 	}
 
 	if err := db.Close(); err != nil {
@@ -60,8 +60,8 @@ func TestExecAPIDropTableRemovesTableAndDependentIndexes(t *testing.T) {
 	if rows.Next() {
 		t.Fatal("rows.Next() after reopen = true, want false")
 	}
-	if rows.Err() == nil || rows.Err().Error() != "execution: table not found" {
-		t.Fatalf("rows.Err() after reopen = %v, want %q", rows.Err(), "execution: table not found")
+	if rows.Err() == nil || rows.Err().Error() != "execution: table not found: users" {
+		t.Fatalf("rows.Err() after reopen = %v, want %q", rows.Err(), "execution: table not found: users")
 	}
 }
 
@@ -72,8 +72,8 @@ func TestExecAPIDropTableMissingFails(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec("DROP TABLE users"); err == nil || err.Error() != "execution: table not found" {
-		t.Fatalf("Exec(drop missing table) error = %v, want %q", err, "execution: table not found")
+	if _, err := db.Exec("DROP TABLE users"); err == nil || err.Error() != "execution: table not found: users" {
+		t.Fatalf("Exec(drop missing table) error = %v, want %q", err, "execution: table not found: users")
 	}
 }
 

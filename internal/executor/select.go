@@ -27,13 +27,13 @@ func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Valu
 	case planner.ScanTypeTable:
 		table, ok := tables[sel.TableName]
 		if !ok {
-			return nil, errTableDoesNotExist
+			return nil, newTableNotFoundError(sel.TableName)
 		}
 		return executeSelectRows(sel, table, table.Rows)
 	case planner.ScanTypeIndex:
 		table, ok := tables[sel.TableName]
 		if !ok {
-			return nil, errTableDoesNotExist
+			return nil, newTableNotFoundError(sel.TableName)
 		}
 		return executeIndexSelect(plan, table)
 	default:

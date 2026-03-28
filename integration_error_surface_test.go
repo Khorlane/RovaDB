@@ -45,8 +45,8 @@ func TestStructuredExecutionErrorPrefix(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Select() error = nil, want non-nil")
 	}
-	if err.Error() != "execution: table not found" {
-		t.Fatalf("err.Error() = %q, want %q", err.Error(), "execution: table not found")
+	if err.Error() != "execution: table not found: missing" {
+		t.Fatalf("err.Error() = %q, want %q", err.Error(), "execution: table not found: missing")
 	}
 }
 

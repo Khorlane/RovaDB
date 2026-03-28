@@ -5,7 +5,7 @@ import "github.com/Khorlane/RovaDB/internal/parser"
 func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, error) {
 	table, ok := tables[stmt.TableName]
 	if !ok {
-		return 0, errTableDoesNotExist
+		return 0, newTableNotFoundError(stmt.TableName)
 	}
 
 	assignments := make([]struct {

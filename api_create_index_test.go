@@ -239,8 +239,8 @@ func TestExecAPICreateIndexRejectsMissingTableOrColumn(t *testing.T) {
 		t.Fatalf("Exec(create table) error = %v", err)
 	}
 
-	if _, err := db.Exec("CREATE INDEX idx_missing_table ON teams (name)"); err == nil || err.Error() != "execution: table not found" {
-		t.Fatalf("Exec(missing table) error = %v, want %q", err, "execution: table not found")
+	if _, err := db.Exec("CREATE INDEX idx_missing_table ON teams (name)"); err == nil || err.Error() != "execution: table not found: teams" {
+		t.Fatalf("Exec(missing table) error = %v, want %q", err, "execution: table not found: teams")
 	}
 	if _, err := db.Exec("CREATE INDEX idx_missing_column ON users (email)"); err == nil || err.Error() != "execution: column not found" {
 		t.Fatalf("Exec(missing column) error = %v, want %q", err, "execution: column not found")

@@ -116,8 +116,8 @@ func TestAPIErrorContractDeferredPassthrough(t *testing.T) {
 
 	row = db.QueryRow("SELECT * FROM users")
 	err = row.Scan(&i)
-	if err == nil || err.Error() != "execution: table not found" {
-		t.Fatalf("QueryRow(exec error).Scan() = %v, want %q", err, "execution: table not found")
+	if err == nil || err.Error() != "execution: table not found: users" {
+		t.Fatalf("QueryRow(exec error).Scan() = %v, want %q", err, "execution: table not found: users")
 	}
 	if errors.Is(err, ErrNoRows) {
 		t.Fatal("QueryRow(exec error).Scan() matched ErrNoRows, want passthrough execution error")
