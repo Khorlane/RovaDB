@@ -6,6 +6,17 @@ RovaDB is a Go-first embedded relational database engine designed for clarity, p
 
 > **Status:** Pre-release. The current `v0.16.x` line reflects a practical, durable baseline with a small public API and focused SQL support.
 
+## In Progress
+
+Current engineering focus is the next major storage evolution beyond the current `v0.16.x` baseline.
+
+The direction under active exploration is:
+- moving from the current single-page table layout toward a fuller page-based storage engine
+- strengthening durability and recovery beyond the current rollback-journal model
+- expanding on-disk indexing and transaction foundations to support a more capable long-term engine
+
+This work is about deepening storage and transaction internals while preserving RovaDB's existing goals around clarity, determinism, and a small stable public API.
+
 ## Quick Start
 
 If you already have Go installed, you can try RovaDB without cloning the repo:
@@ -281,6 +292,10 @@ fmt.Println(name, active)
 ```
 
 See `examples/basic_usage/main.go` for a complete open -> write -> close -> reopen -> query flow.
+
+## Development Note
+
+This project is developed using AI-assisted tooling, with all design, architecture, and validation decisions owned and reviewed by the author.
 
 ## Why RovaDB exists
 
