@@ -1487,13 +1487,32 @@ func readCommittedPageData(pool *bufferpool.BufferPool, pageID storage.PageID) (
 	return pageData, nil
 }
 
+func (db *DB) fetchRowByLocator(table *executor.Table, locator storage.RowLocator) ([]parser.Value, error) {
+	if db == nil || table == nil {
+		return nil, ErrInvalidArgument
+	}
+	if locator.PageID == 0 || storage.PageID(locator.PageID) != table.RootPageID() {
+		return nil, newStorageError("corrupted table page")
+	}
+
+	pageData, err := readCommittedPageData(db.pool, storage.PageID(locator.PageID))
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+	if pageData == nil {
+		return nil, newStorageError("corrupted table page")
+	}
+
+	row, err := storage.ReadRowByLocatorFromTablePageData(pageData, locator, storageColumnTypes(table.Columns))
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+	return append([]parser.Value(nil), row...), nil
+}
+
 func decodePersistedTableRows(pageData []byte, columns []parser.ColumnDef) ([][]parser.Value, error) {
 	if storage.IsSlottedTablePage(pageData) {
-		columnTypes := make([]uint8, 0, len(columns))
-		for _, column := range columns {
-			columnTypes = append(columnTypes, catalogColumnType(column.Type))
-		}
-		return storage.ReadSlottedRowsFromTablePageData(pageData, columnTypes)
+		return storage.ReadSlottedRowsFromTablePageData(pageData, storageColumnTypes(columns))
 	}
 
 	payloads, err := storage.ReadRowsFromTablePageData(pageData)
@@ -1509,6 +1528,14 @@ func decodePersistedTableRows(pageData []byte, columns []parser.ColumnDef) ([][]
 		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+func storageColumnTypes(columns []parser.ColumnDef) []uint8 {
+	columnTypes := make([]uint8, 0, len(columns))
+	for _, column := range columns {
+		columnTypes = append(columnTypes, catalogColumnType(column.Type))
+	}
+	return columnTypes
 }
 
 func catalogColumnType(columnType string) uint8 {

@@ -250,3 +250,132 @@ func TestInsertMaintainsPersistedIndexLeafEntries(t *testing.T) {
 		t.Fatalf("LookupIndexExact(alice) = %#v, want [(%d,1), (%d,2)]", locators, tableRootPageID, tableRootPageID)
 	}
 }
+
+func TestFetchRowByLocatorReturnsPersistedBaseRow(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'bob')",
+		"INSERT INTO users VALUES (2, 'alice')",
+		"INSERT INTO users VALUES (3, 'cara')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil")
+	}
+	indexDef := table.IndexDefinition("idx_users_name")
+	if indexDef == nil {
+		t.Fatalf("IndexDefinition(idx_users_name) = nil, defs=%#v", table.IndexDefs)
+	}
+	rootPageData, err := readCommittedPageData(db.pool, storage.PageID(indexDef.RootPageID))
+	if err != nil {
+		t.Fatalf("readCommittedPageData(index root) error = %v", err)
+	}
+	records, err := storage.ReadIndexLeafRecords(rootPageData)
+	if err != nil {
+		t.Fatalf("ReadIndexLeafRecords() error = %v", err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("len(records) = %d, want 3", len(records))
+	}
+
+	row, err := db.fetchRowByLocator(table, records[0].Locator)
+	if err != nil {
+		t.Fatalf("fetchRowByLocator() error = %v", err)
+	}
+	want := []parser.Value{parser.Int64Value(2), parser.StringValue("alice")}
+	for i := range want {
+		if row[i] != want[i] {
+			t.Fatalf("row[%d] = %#v, want %#v", i, row[i], want[i])
+		}
+	}
+}
+
+func TestFetchRowByLocatorFromIndexLeafSurvivesReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'bob')",
+		"INSERT INTO users VALUES (2, 'alice')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil")
+	}
+	indexDef := table.IndexDefinition("idx_users_name")
+	if indexDef == nil {
+		t.Fatalf("IndexDefinition(idx_users_name) = nil, defs=%#v", table.IndexDefs)
+	}
+	rootPageData, err := readCommittedPageData(db.pool, storage.PageID(indexDef.RootPageID))
+	if err != nil {
+		t.Fatalf("readCommittedPageData(index root) error = %v", err)
+	}
+	records, err := storage.ReadIndexLeafRecords(rootPageData)
+	if err != nil {
+		t.Fatalf("ReadIndexLeafRecords() error = %v", err)
+	}
+	aliceKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue("alice")})
+	if err != nil {
+		t.Fatalf("EncodeIndexKey(alice) error = %v", err)
+	}
+	var locator storage.RowLocator
+	found := false
+	for _, record := range records {
+		if bytes.Equal(record.Key, aliceKey) {
+			locator = record.Locator
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("alice locator not found in index leaf records")
+	}
+
+	row, err := db.fetchRowByLocator(table, locator)
+	if err != nil {
+		t.Fatalf("fetchRowByLocator() error = %v", err)
+	}
+	want := []parser.Value{parser.Int64Value(2), parser.StringValue("alice")}
+	for i := range want {
+		if row[i] != want[i] {
+			t.Fatalf("row[%d] = %#v, want %#v", i, row[i], want[i])
+		}
+	}
+}

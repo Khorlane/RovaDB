@@ -357,23 +357,32 @@ func ReadSlottedRowsWithLocators(page []byte, pageID uint32, columnTypes []uint8
 
 	rows := make([][]parser.Value, 0, len(payloads))
 	for _, payload := range payloads {
-		if len(payload) < 2 {
-			return nil, nil, errInvalidRowData
-		}
-		encodedColumnCount := int(binary.LittleEndian.Uint16(payload[0:2]))
-		if encodedColumnCount > len(columnTypes) {
-			return nil, nil, errInvalidRowData
-		}
-		row, err := DecodeSlottedRow(payload, columnTypes[:encodedColumnCount])
+		row, err := decodeSlottedRowPayload(payload, columnTypes)
 		if err != nil {
 			return nil, nil, err
-		}
-		for len(row) < len(columnTypes) {
-			row = append(row, parser.NullValue())
 		}
 		rows = append(rows, row)
 	}
 	return locators, rows, nil
+}
+
+func ReadRowBySlotFromTablePageData(page []byte, slotID uint16, columnTypes []uint8) ([]parser.Value, error) {
+	if err := validateSlottedTablePage(page); err != nil {
+		return nil, err
+	}
+	payload, err := ExtractSlottedRowPayload(page, int(slotID))
+	if err != nil {
+		return nil, err
+	}
+	return decodeSlottedRowPayload(payload, columnTypes)
+}
+
+func ReadRowByLocatorFromTablePageData(page []byte, locator RowLocator, columnTypes []uint8) ([]parser.Value, error) {
+	pageID := binary.LittleEndian.Uint32(page[tablePageHeaderOffsetPageID : tablePageHeaderOffsetPageID+4])
+	if pageID != locator.PageID {
+		return nil, errCorruptedTablePage
+	}
+	return ReadRowBySlotFromTablePageData(page, locator.SlotID, columnTypes)
 }
 
 func readSlottedRowPayloads(page []byte) ([][]byte, error) {
@@ -391,6 +400,24 @@ func readSlottedRowPayloads(page []byte) ([][]byte, error) {
 		rows = append(rows, payload)
 	}
 	return rows, nil
+}
+
+func decodeSlottedRowPayload(payload []byte, columnTypes []uint8) ([]parser.Value, error) {
+	if len(payload) < 2 {
+		return nil, errInvalidRowData
+	}
+	encodedColumnCount := int(binary.LittleEndian.Uint16(payload[0:2]))
+	if encodedColumnCount > len(columnTypes) {
+		return nil, errInvalidRowData
+	}
+	row, err := DecodeSlottedRow(payload, columnTypes[:encodedColumnCount])
+	if err != nil {
+		return nil, err
+	}
+	for len(row) < len(columnTypes) {
+		row = append(row, parser.NullValue())
+	}
+	return row, nil
 }
 
 func BuildSlottedTablePageData(pageID uint32, rows [][]parser.Value) ([]byte, error) {
