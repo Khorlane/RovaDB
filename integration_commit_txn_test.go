@@ -332,6 +332,9 @@ func TestApplyErrorTriggersRollback(t *testing.T) {
 
 	err = db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
+		if err := db.loadRowsIntoTables(stagedTables, "t"); err != nil {
+			return err
+		}
 		table := stagedTables["t"]
 		table.Rows = append(table.Rows, []parser.Value{parser.Int64Value(2)})
 		table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
@@ -437,6 +440,9 @@ func TestRollbackAfterFailedCommitRestoresState(t *testing.T) {
 
 	err = db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
+		if err := db.loadRowsIntoTables(stagedTables, "t"); err != nil {
+			return err
+		}
 		table := stagedTables["t"]
 		table.Rows[0][0] = parser.Int64Value(99)
 		if err := db.applyStagedTableRewrite(stagedTables, "t"); err != nil {
@@ -567,6 +573,9 @@ func TestSuccessfulRollbackLeavesNoTxnAndNoTracking(t *testing.T) {
 
 	err = db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
+		if err := db.loadRowsIntoTables(stagedTables, "t"); err != nil {
+			return err
+		}
 		table := stagedTables["t"]
 		table.Rows[0][0] = parser.Int64Value(2)
 		if err := db.applyStagedTableRewrite(stagedTables, "t"); err != nil {
@@ -605,6 +614,9 @@ func TestBoolRollbackCloseReopenKeepsCommittedState(t *testing.T) {
 
 	err = db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
+		if err := db.loadRowsIntoTables(stagedTables, "flags"); err != nil {
+			return err
+		}
 		table := stagedTables["flags"]
 		table.Rows[0][2] = parser.BoolValue(false)
 		table.Rows[1][2] = parser.BoolValue(true)
@@ -658,6 +670,9 @@ func TestRealRollbackCloseReopenKeepsCommittedState(t *testing.T) {
 
 	err = db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
+		if err := db.loadRowsIntoTables(stagedTables, "measurements"); err != nil {
+			return err
+		}
 		table := stagedTables["measurements"]
 		table.Rows[0][2] = parser.RealValue(1.25)
 		table.Rows[1][2] = parser.RealValue(-2.5)

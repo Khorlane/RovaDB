@@ -21,7 +21,7 @@ var (
 type Table struct {
 	Name              string
 	Columns           []parser.ColumnDef
-	Rows              [][]parser.Value
+	Rows              [][]parser.Value // transient operation rows; persisted storage is authoritative
 	Indexes           map[string]*planner.BasicIndex
 	IndexDefs         []storage.CatalogIndex
 	rootPageID        storage.PageID

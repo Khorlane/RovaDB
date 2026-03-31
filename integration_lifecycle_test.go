@@ -115,6 +115,9 @@ func TestLifecycleRollbackCloseReopenKeepsCommittedState(t *testing.T) {
 
 	err = db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
+		if err := db.loadRowsIntoTables(stagedTables, "users"); err != nil {
+			return err
+		}
 		table := stagedTables["users"]
 		table.Rows[0][1] = parser.StringValue("rolled-back")
 		if err := db.applyStagedTableRewrite(stagedTables, "users"); err != nil {

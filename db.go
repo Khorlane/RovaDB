@@ -97,6 +97,7 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
+	clearLoadedRows(tables)
 
 	return &DB{
 		path:   path,
@@ -185,6 +186,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		if err := validateTables(committedTables, false); err != nil {
 			return Result{}, err
 		}
+		clearLoadedRows(committedTables)
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.InsertStmt:
@@ -192,6 +194,9 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		var committedTables map[string]*executor.Table
 		err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
+			if err := db.loadRowsIntoTables(stagedTables, stmt.TableName); err != nil {
+				return err
+			}
 
 			var err error
 			rowsAffected, err = executor.Execute(stmt, stagedTables)
@@ -211,6 +216,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		if err := validateTables(committedTables, false); err != nil {
 			return Result{}, err
 		}
+		clearLoadedRows(committedTables)
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.AlterTableAddColumnStmt:
@@ -218,6 +224,9 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		var committedTables map[string]*executor.Table
 		err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
+			if err := db.loadRowsIntoTables(stagedTables, stmt.TableName); err != nil {
+				return err
+			}
 
 			var err error
 			rowsAffected, err = executor.Execute(stmt, stagedTables)
@@ -237,6 +246,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		if err := validateTables(committedTables, false); err != nil {
 			return Result{}, err
 		}
+		clearLoadedRows(committedTables)
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.CreateIndexStmt:
@@ -244,6 +254,9 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		var committedTables map[string]*executor.Table
 		err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
+			if err := db.loadRowsIntoTables(stagedTables, stmt.TableName); err != nil {
+				return err
+			}
 
 			var err error
 			rowsAffected, committedTables, err = executeCreateIndex(stmt, stagedTables)
@@ -262,6 +275,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		if err := validateTables(committedTables, false); err != nil {
 			return Result{}, err
 		}
+		clearLoadedRows(committedTables)
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.DropIndexStmt:
@@ -287,6 +301,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		if err := validateTables(committedTables, false); err != nil {
 			return Result{}, err
 		}
+		clearLoadedRows(committedTables)
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.DropTableStmt:
@@ -312,6 +327,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		if err := validateTables(committedTables, false); err != nil {
 			return Result{}, err
 		}
+		clearLoadedRows(committedTables)
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.UpdateStmt:
@@ -319,6 +335,9 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		var committedTables map[string]*executor.Table
 		err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
+			if err := db.loadRowsIntoTables(stagedTables, stmt.TableName); err != nil {
+				return err
+			}
 
 			var err error
 			rowsAffected, err = executor.Execute(stmt, stagedTables)
@@ -338,6 +357,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		if err := validateTables(committedTables, false); err != nil {
 			return Result{}, err
 		}
+		clearLoadedRows(committedTables)
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.DeleteStmt:
@@ -345,6 +365,9 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		var committedTables map[string]*executor.Table
 		err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
+			if err := db.loadRowsIntoTables(stagedTables, stmt.TableName); err != nil {
+				return err
+			}
 
 			var err error
 			rowsAffected, err = executor.Execute(stmt, stagedTables)
@@ -364,6 +387,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		if err := validateTables(committedTables, false); err != nil {
 			return Result{}, err
 		}
+		clearLoadedRows(committedTables)
 		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	default:
@@ -417,6 +441,9 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
+		if err := validateTables(execTables, false); err != nil {
+			return &Rows{err: err, idx: -1}, nil
+		}
 		rows, err := executor.Select(plan, execTables)
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
@@ -460,25 +487,32 @@ func materializeRows(rows [][]parser.Value) [][]any {
 }
 
 func (db *DB) tablesForSelect(plan *planner.SelectPlan) (map[string]*executor.Table, error) {
-	if plan == nil || plan.Stmt == nil || plan.ScanType != planner.ScanTypeTable {
+	if plan == nil || plan.Stmt == nil || plan.Stmt.TableName == "" {
 		return db.tables, nil
-	}
-
-	table := db.tables[plan.Stmt.TableName]
-	if table == nil {
-		return nil, newExecError("table not found: " + plan.Stmt.TableName)
-	}
-
-	rows, err := db.scanTableRows(table)
-	if err != nil {
-		return nil, err
 	}
 
 	execTables := make(map[string]*executor.Table, len(db.tables))
 	for name, existing := range db.tables {
 		execTables[name] = existing
 	}
-	execTables[table.Name] = cloneTableWithRows(table, rows)
+	for _, tableName := range tableNamesForSelect(plan) {
+		table := db.tables[tableName]
+		if table == nil {
+			return nil, newExecError("table not found: " + tableName)
+		}
+		rows, err := db.scanTableRows(table)
+		if err != nil {
+			return nil, err
+		}
+		execTables[table.Name] = &executor.Table{
+			Name:      table.Name,
+			Columns:   append([]parser.ColumnDef(nil), table.Columns...),
+			Rows:      rows,
+			Indexes:   table.Indexes,
+			IndexDefs: cloneIndexDefs(table.IndexDefs),
+		}
+		execTables[table.Name].SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
+	}
 	return execTables, nil
 }
 
@@ -502,6 +536,23 @@ func (db *DB) scanTableRows(table *executor.Table) ([][]parser.Value, error) {
 		return nil, newStorageError("row count mismatch")
 	}
 	return cloneRows(rows), nil
+}
+
+func tableNamesForSelect(plan *planner.SelectPlan) []string {
+	if plan == nil || plan.Stmt == nil {
+		return nil
+	}
+	switch plan.ScanType {
+	case planner.ScanTypeJoin:
+		if plan.JoinScan == nil {
+			return nil
+		}
+		return []string{plan.JoinScan.LeftTableName, plan.JoinScan.RightTableName}
+	case planner.ScanTypeTable, planner.ScanTypeIndex:
+		return []string{plan.Stmt.TableName}
+	default:
+		return nil
+	}
 }
 
 func apiValue(value parser.Value) any {
@@ -857,22 +908,6 @@ func cloneTable(table *executor.Table) *executor.Table {
 	return cloned
 }
 
-func cloneTableWithRows(table *executor.Table, rows [][]parser.Value) *executor.Table {
-	if table == nil {
-		return nil
-	}
-
-	cloned := &executor.Table{
-		Name:      table.Name,
-		Columns:   append([]parser.ColumnDef(nil), table.Columns...),
-		Rows:      cloneRows(rows),
-		Indexes:   table.Indexes,
-		IndexDefs: cloneIndexDefs(table.IndexDefs),
-	}
-	cloned.SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
-	return cloned
-}
-
 func cloneIndexes(indexes map[string]*planner.BasicIndex) map[string]*planner.BasicIndex {
 	if len(indexes) == 0 {
 		return nil
@@ -910,6 +945,53 @@ func cloneRows(rows [][]parser.Value) [][]parser.Value {
 		cloned = append(cloned, append([]parser.Value(nil), row...))
 	}
 	return cloned
+}
+
+func (db *DB) loadRowsIntoTables(tables map[string]*executor.Table, tableNames ...string) error {
+	if db == nil {
+		return ErrInvalidArgument
+	}
+
+	seen := make(map[string]struct{}, len(tableNames))
+	for _, tableName := range tableNames {
+		if tableName == "" {
+			continue
+		}
+		if _, ok := seen[tableName]; ok {
+			continue
+		}
+		seen[tableName] = struct{}{}
+
+		table := tables[tableName]
+		if table == nil {
+			return newExecError("table not found: " + tableName)
+		}
+		rows, err := db.scanTableRows(table)
+		if err != nil {
+			return err
+		}
+		table.Rows = rows
+		colNames := columnNamesForTable(table)
+		for columnName, index := range table.Indexes {
+			if index == nil {
+				table.Indexes[columnName] = planner.NewBasicIndex(table.Name, columnName)
+				index = table.Indexes[columnName]
+			}
+			if err := index.Rebuild(colNames, table.Rows); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func clearLoadedRows(tables map[string]*executor.Table) {
+	for _, table := range tables {
+		if table == nil {
+			continue
+		}
+		table.Rows = nil
+	}
 }
 
 func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
@@ -1156,6 +1238,9 @@ func (db *DB) defineLegacyBasicIndex(tableName, columnName string) error {
 	var committedTables map[string]*executor.Table
 	err := db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
+		if err := db.loadRowsIntoTables(stagedTables, tableName); err != nil {
+			return err
+		}
 		table := stagedTables[tableName]
 		if table == nil {
 			return newExecError("table not found")
@@ -1210,6 +1295,7 @@ func (db *DB) defineLegacyBasicIndex(tableName, columnName string) error {
 		return err
 	}
 	if committedTables != nil {
+		clearLoadedRows(committedTables)
 		db.tables = committedTables
 	}
 	return nil
@@ -1359,27 +1445,11 @@ func padRowToSchema(row []parser.Value, width int) []parser.Value {
 
 func validateTables(tables map[string]*executor.Table, storageBoundary bool) error {
 	for _, table := range tables {
-		if err := validateTableRowCount(table, storageBoundary); err != nil {
-			return err
-		}
 		if err := validateIndexConsistency(table); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func validateTableRowCount(table *executor.Table, storageBoundary bool) error {
-	if table == nil {
-		return nil
-	}
-	if uint32(len(table.Rows)) == table.PersistedRowCount() {
-		return nil
-	}
-	if storageBoundary {
-		return newStorageError("row count mismatch")
-	}
-	return newExecError("row count mismatch")
 }
 
 func validateIndexConsistency(table *executor.Table) error {
@@ -1418,6 +1488,9 @@ func validateIndexConsistency(table *executor.Table) error {
 		}
 		if index.TableName != table.Name || index.ColumnName != columnName {
 			return newExecError("index/table mismatch")
+		}
+		if len(table.Rows) == 0 && table.PersistedRowCount() != 0 {
+			continue
 		}
 
 		expected := planner.NewBasicIndex(table.Name, columnName)
