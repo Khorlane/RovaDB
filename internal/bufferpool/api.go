@@ -9,13 +9,13 @@ func (bp *BufferPool) getOrLoadCommittedFrame(pageID PageID) (*Frame, error) {
 		return nil, nil
 	}
 	if f, ok := bp.getCommittedFrame(pageID); ok {
-		return f, nil
+		return bp.pinAndReturn(f), nil
 	}
 	frame, err := bp.loadCommittedFrame(pageID)
 	if err != nil {
 		return nil, err
 	}
-	return bp.trackCommittedFrame(frame), nil
+	return bp.pinAndReturn(bp.trackCommittedFrame(frame)), nil
 }
 
 func (bp *BufferPool) GetPage(pageID PageID) (*Frame, error) {
@@ -29,6 +29,11 @@ func (bp *BufferPool) PutPage(f *Frame) {
 	if f.FrameType == FrameCommitted {
 		bp.trackCommittedFrame(f)
 	}
+}
+
+func (bp *BufferPool) pinAndReturn(f *Frame) *Frame {
+	bp.Pin(f)
+	return f
 }
 
 func (bp *BufferPool) Pin(f *Frame) {

@@ -57,6 +57,9 @@ func TestGetCommittedPageLoadsViaLoader(t *testing.T) {
 	if !bytes.Equal(frame.Data[:], loader.pages[7]) {
 		t.Fatal("frame.Data mismatch")
 	}
+	if got := frame.PinCount; got != 1 {
+		t.Fatalf("frame.PinCount = %d, want 1", got)
+	}
 	if got := pool.committedFrameCount(); got != 1 {
 		t.Fatalf("committedFrameCount() = %d, want 1", got)
 	}
@@ -67,6 +70,9 @@ func TestGetCommittedPageLoadsViaLoader(t *testing.T) {
 	}
 	if again != frame {
 		t.Fatal("second GetCommittedPage() returned different frame")
+	}
+	if got := frame.PinCount; got != 2 {
+		t.Fatalf("frame.PinCount after second read = %d, want 2", got)
 	}
 	if got := loader.reads[7]; got != 1 {
 		t.Fatalf("loader reads = %d, want 1", got)
@@ -106,6 +112,12 @@ func TestGetCommittedPageLoadsDistinctPagesSeparately(t *testing.T) {
 
 	if frame1 == frame2 {
 		t.Fatal("distinct page reads returned same frame pointer")
+	}
+	if got := frame1.PinCount; got != 1 {
+		t.Fatalf("frame1.PinCount = %d, want 1", got)
+	}
+	if got := frame2.PinCount; got != 1 {
+		t.Fatalf("frame2.PinCount = %d, want 1", got)
 	}
 	if got := loader.reads[1]; got != 1 {
 		t.Fatalf("loader reads for page 1 = %d, want 1", got)
@@ -197,6 +209,9 @@ func TestGetCommittedPageRetryAfterFailedLoadCanPopulateCache(t *testing.T) {
 	if got := pool.committedFrameCount(); got != 1 {
 		t.Fatalf("committedFrameCount() after retry = %d, want 1", got)
 	}
+	if got := frame.PinCount; got != 1 {
+		t.Fatalf("frame.PinCount after retry = %d, want 1", got)
+	}
 
 	again, err := pool.GetCommittedPage(6)
 	if err != nil {
@@ -207,6 +222,9 @@ func TestGetCommittedPageRetryAfterFailedLoadCanPopulateCache(t *testing.T) {
 	}
 	if got := loader.reads[6]; got != 2 {
 		t.Fatalf("loader reads after cache hit = %d, want 2", got)
+	}
+	if got := frame.PinCount; got != 2 {
+		t.Fatalf("frame.PinCount after cache hit = %d, want 2", got)
 	}
 }
 
@@ -232,4 +250,43 @@ func TestGetCommittedPageCopiesDataIntoFrame(t *testing.T) {
 	if frame.Data[1] != 0xCD {
 		t.Fatalf("frame.Data[1] = 0x%02x, want 0xCD", frame.Data[1])
 	}
+}
+
+func TestUnpinDecrementsButNeverGoesNegative(t *testing.T) {
+	pool := New(1, &stubLoader{
+		pages: map[PageID][]byte{
+			4: bytes.Repeat([]byte{0x44}, PageSize),
+		},
+	})
+
+	frame, err := pool.GetCommittedPage(4)
+	if err != nil {
+		t.Fatalf("GetCommittedPage() error = %v", err)
+	}
+	if _, err := pool.GetCommittedPage(4); err != nil {
+		t.Fatalf("second GetCommittedPage() error = %v", err)
+	}
+	if got := frame.PinCount; got != 2 {
+		t.Fatalf("frame.PinCount = %d, want 2", got)
+	}
+
+	pool.Unpin(frame)
+	if got := frame.PinCount; got != 1 {
+		t.Fatalf("frame.PinCount after first Unpin() = %d, want 1", got)
+	}
+	pool.Unpin(frame)
+	if got := frame.PinCount; got != 0 {
+		t.Fatalf("frame.PinCount after second Unpin() = %d, want 0", got)
+	}
+	pool.Unpin(frame)
+	if got := frame.PinCount; got != 0 {
+		t.Fatalf("frame.PinCount after extra Unpin() = %d, want 0", got)
+	}
+}
+
+func TestPinAndUnpinNilAreNoOps(t *testing.T) {
+	pool := New(1, nil)
+
+	pool.Pin(nil)
+	pool.Unpin(nil)
 }
