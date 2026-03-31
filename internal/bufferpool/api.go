@@ -4,25 +4,14 @@ func (bp *BufferPool) GetCommittedPage(pageID PageID) (*Frame, error) {
 	if bp == nil {
 		return nil, nil
 	}
-	if f, ok := bp.frames[pageID]; ok {
+	if f, ok := bp.getCommittedFrame(pageID); ok {
 		return f, nil
 	}
-	if bp.loader == nil {
-		return nil, nil
-	}
-
-	data, err := bp.loader.ReadPage(pageID)
+	frame, err := bp.loadCommittedFrame(pageID)
 	if err != nil {
 		return nil, err
 	}
-
-	frame := &Frame{
-		PageID:    pageID,
-		FrameType: FrameCommitted,
-	}
-	copy(frame.Data[:], data)
-	bp.frames[pageID] = frame
-	return frame, nil
+	return bp.trackCommittedFrame(frame), nil
 }
 
 func (bp *BufferPool) GetPage(pageID PageID) (*Frame, error) {
@@ -33,7 +22,9 @@ func (bp *BufferPool) PutPage(f *Frame) {
 	if bp == nil || f == nil {
 		return
 	}
-	bp.frames[f.PageID] = f
+	if f.FrameType == FrameCommitted {
+		bp.trackCommittedFrame(f)
+	}
 }
 
 func (bp *BufferPool) Pin(f *Frame) {
