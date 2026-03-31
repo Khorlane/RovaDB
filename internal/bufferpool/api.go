@@ -1,6 +1,10 @@
 package bufferpool
 
 func (bp *BufferPool) GetCommittedPage(pageID PageID) (*Frame, error) {
+	return bp.getOrLoadCommittedFrame(pageID)
+}
+
+func (bp *BufferPool) getOrLoadCommittedFrame(pageID PageID) (*Frame, error) {
 	if bp == nil {
 		return nil, nil
 	}

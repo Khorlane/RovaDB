@@ -10,11 +10,21 @@ type stubLoader struct {
 	pages map[PageID][]byte
 	reads map[PageID]int
 	err   error
+	errs  map[PageID]error
 }
 
 func (l *stubLoader) ReadPage(pageID PageID) ([]byte, error) {
 	if l.err != nil {
 		return nil, l.err
+	}
+	if l.errs != nil {
+		if err := l.errs[pageID]; err != nil {
+			if l.reads == nil {
+				l.reads = make(map[PageID]int)
+			}
+			l.reads[pageID]++
+			return nil, err
+		}
 	}
 	if l.reads == nil {
 		l.reads = make(map[PageID]int)
@@ -76,6 +86,38 @@ func TestGetCommittedPagePropagatesLoaderError(t *testing.T) {
 	}
 }
 
+func TestGetCommittedPageLoadsDistinctPagesSeparately(t *testing.T) {
+	loader := &stubLoader{
+		pages: map[PageID][]byte{
+			1: bytes.Repeat([]byte{0x11}, PageSize),
+			2: bytes.Repeat([]byte{0x22}, PageSize),
+		},
+	}
+	pool := New(1, loader)
+
+	frame1, err := pool.GetCommittedPage(1)
+	if err != nil {
+		t.Fatalf("GetCommittedPage(1) error = %v", err)
+	}
+	frame2, err := pool.GetCommittedPage(2)
+	if err != nil {
+		t.Fatalf("GetCommittedPage(2) error = %v", err)
+	}
+
+	if frame1 == frame2 {
+		t.Fatal("distinct page reads returned same frame pointer")
+	}
+	if got := loader.reads[1]; got != 1 {
+		t.Fatalf("loader reads for page 1 = %d, want 1", got)
+	}
+	if got := loader.reads[2]; got != 1 {
+		t.Fatalf("loader reads for page 2 = %d, want 1", got)
+	}
+	if got := pool.committedFrameCount(); got != 2 {
+		t.Fatalf("committedFrameCount() = %d, want 2", got)
+	}
+}
+
 func TestGetCommittedPageRejectsInvalidPageSize(t *testing.T) {
 	pool := New(1, &stubLoader{
 		pages: map[PageID][]byte{
@@ -89,6 +131,82 @@ func TestGetCommittedPageRejectsInvalidPageSize(t *testing.T) {
 	}
 	if got := pool.committedFrameCount(); got != 0 {
 		t.Fatalf("committedFrameCount() = %d, want 0", got)
+	}
+}
+
+func TestGetCommittedPageFailedLoadDoesNotPopulateCache(t *testing.T) {
+	want := errors.New("load failed")
+	loader := &stubLoader{
+		errs: map[PageID]error{
+			5: want,
+		},
+	}
+	pool := New(1, loader)
+
+	_, err := pool.GetCommittedPage(5)
+	if !errors.Is(err, want) {
+		t.Fatalf("GetCommittedPage() error = %v, want %v", err, want)
+	}
+	if got := loader.reads[5]; got != 1 {
+		t.Fatalf("loader reads = %d, want 1", got)
+	}
+	if got := pool.committedFrameCount(); got != 0 {
+		t.Fatalf("committedFrameCount() = %d, want 0", got)
+	}
+
+	_, err = pool.GetCommittedPage(5)
+	if !errors.Is(err, want) {
+		t.Fatalf("second GetCommittedPage() error = %v, want %v", err, want)
+	}
+	if got := loader.reads[5]; got != 2 {
+		t.Fatalf("loader reads after second miss = %d, want 2", got)
+	}
+	if got := pool.committedFrameCount(); got != 0 {
+		t.Fatalf("committedFrameCount() after second miss = %d, want 0", got)
+	}
+}
+
+func TestGetCommittedPageRetryAfterFailedLoadCanPopulateCache(t *testing.T) {
+	want := errors.New("load failed")
+	loader := &stubLoader{
+		pages: map[PageID][]byte{
+			6: bytes.Repeat([]byte{0x66}, PageSize),
+		},
+		errs: map[PageID]error{
+			6: want,
+		},
+	}
+	pool := New(1, loader)
+
+	_, err := pool.GetCommittedPage(6)
+	if !errors.Is(err, want) {
+		t.Fatalf("GetCommittedPage() error = %v, want %v", err, want)
+	}
+	delete(loader.errs, 6)
+
+	frame, err := pool.GetCommittedPage(6)
+	if err != nil {
+		t.Fatalf("retry GetCommittedPage() error = %v", err)
+	}
+	if frame == nil {
+		t.Fatal("retry GetCommittedPage() = nil, want frame")
+	}
+	if got := loader.reads[6]; got != 2 {
+		t.Fatalf("loader reads after retry = %d, want 2", got)
+	}
+	if got := pool.committedFrameCount(); got != 1 {
+		t.Fatalf("committedFrameCount() after retry = %d, want 1", got)
+	}
+
+	again, err := pool.GetCommittedPage(6)
+	if err != nil {
+		t.Fatalf("cached GetCommittedPage() error = %v", err)
+	}
+	if again != frame {
+		t.Fatal("cached GetCommittedPage() returned different frame")
+	}
+	if got := loader.reads[6]; got != 2 {
+		t.Fatalf("loader reads after cache hit = %d, want 2", got)
 	}
 }
 
