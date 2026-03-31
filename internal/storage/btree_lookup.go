@@ -69,31 +69,62 @@ func LookupIndexExact(pageReader IndexPageReader, rootPageID uint32, searchKey [
 	if err != nil {
 		return nil, err
 	}
-	return LookupIndexLeafExact(leafPage, searchKey)
+
+	matches := make([]RowLocator, 0)
+	currentPage := leafPage
+	for {
+		currentMatches, err := LookupIndexLeafExact(currentPage, searchKey)
+		if err != nil {
+			return nil, err
+		}
+		matches = append(matches, currentMatches...)
+
+		rightSibling, err := IndexLeafRightSibling(currentPage)
+		if err != nil {
+			return nil, err
+		}
+		if rightSibling == 0 {
+			break
+		}
+
+		nextPage, err := pageReader(rightSibling)
+		if err != nil {
+			return nil, err
+		}
+		records, err := ReadAllIndexLeafRecords(nextPage)
+		if err != nil {
+			return nil, err
+		}
+		if len(records) == 0 {
+			break
+		}
+		cmp, err := CompareIndexKeys(records[0].Key, searchKey)
+		if err != nil || cmp != 0 {
+			break
+		}
+		currentPage = nextPage
+	}
+	return matches, nil
 }
 
 func chooseIndexChildPage(page []byte, searchKey []byte) (uint32, error) {
-	entryCount, err := IndexPageEntryCount(page)
+	records, err := ReadAllIndexInternalRecords(page)
 	if err != nil {
 		return 0, err
 	}
-	if entryCount == 0 {
+	if len(records) == 0 {
 		return 0, errCorruptedIndexPage
 	}
 
 	var rightmostChildPageID uint32
-	for entryID := 0; entryID < entryCount; entryID++ {
-		key, childPageID, err := IndexInternalEntry(page, entryID)
-		if err != nil {
-			return 0, err
-		}
-		rightmostChildPageID = childPageID
-		cmp, err := CompareIndexKeys(searchKey, key)
+	for _, record := range records {
+		rightmostChildPageID = record.ChildPageID
+		cmp, err := CompareIndexKeys(searchKey, record.Key)
 		if err != nil {
 			return 0, err
 		}
 		if cmp < 0 {
-			return childPageID, nil
+			return record.ChildPageID, nil
 		}
 	}
 	if rightmostChildPageID == 0 {

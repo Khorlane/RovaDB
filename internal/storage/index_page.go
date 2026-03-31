@@ -229,7 +229,12 @@ type IndexLeafRecord struct {
 	Locator RowLocator
 }
 
-func ReadIndexLeafRecords(page []byte) ([]IndexLeafRecord, error) {
+type IndexInternalRecord struct {
+	Key         []byte
+	ChildPageID uint32
+}
+
+func ReadAllIndexLeafRecords(page []byte) ([]IndexLeafRecord, error) {
 	if err := validateLeafIndexPage(page); err != nil {
 		return nil, err
 	}
@@ -253,40 +258,38 @@ func ReadIndexLeafRecords(page []byte) ([]IndexLeafRecord, error) {
 	return records, nil
 }
 
-func InsertIndexLeafRecordSorted(page []byte, key []byte, locator RowLocator) ([]byte, error) {
-	if err := validateLeafIndexPage(page); err != nil {
+func ReadIndexLeafRecords(page []byte) ([]IndexLeafRecord, error) {
+	return ReadAllIndexLeafRecords(page)
+}
+
+func ReadAllIndexInternalRecords(page []byte) ([]IndexInternalRecord, error) {
+	if err := validateInternalIndexPage(page); err != nil {
 		return nil, err
 	}
 
-	records, err := ReadIndexLeafRecords(page)
+	entryCount, err := IndexPageEntryCount(page)
 	if err != nil {
 		return nil, err
 	}
-	records = append(records, IndexLeafRecord{
-		Key:     append([]byte(nil), key...),
-		Locator: locator,
-	})
-	for i := 1; i < len(records); i++ {
-		for j := i; j > 0; j-- {
-			cmp, err := CompareIndexKeys(records[j-1].Key, records[j].Key)
-			if err != nil {
-				return nil, err
-			}
-			if cmp <= 0 {
-				break
-			}
-			records[j-1], records[j] = records[j], records[j-1]
+
+	records := make([]IndexInternalRecord, 0, entryCount)
+	for entryID := 0; entryID < entryCount; entryID++ {
+		key, childPageID, err := IndexInternalEntry(page, entryID)
+		if err != nil {
+			return nil, err
 		}
+		records = append(records, IndexInternalRecord{
+			Key:         key,
+			ChildPageID: childPageID,
+		})
 	}
+	return records, nil
+}
 
-	pageID := binary.LittleEndian.Uint32(page[indexPageHeaderOffsetPageID : indexPageHeaderOffsetPageID+4])
-	sibling, err := IndexLeafRightSibling(page)
-	if err != nil {
-		return nil, err
-	}
-	rebuilt := InitIndexLeafPage(pageID)
-	if sibling != 0 {
-		if err := SetIndexLeafRightSibling(rebuilt, sibling); err != nil {
+func BuildIndexLeafPageData(pageID uint32, records []IndexLeafRecord, rightSibling uint32) ([]byte, error) {
+	page := InitIndexLeafPage(pageID)
+	if rightSibling != 0 {
+		if err := SetIndexLeafRightSibling(page, rightSibling); err != nil {
 			return nil, err
 		}
 	}
@@ -295,11 +298,114 @@ func InsertIndexLeafRecordSorted(page []byte, key []byte, locator RowLocator) ([
 		if err != nil {
 			return nil, err
 		}
-		if _, err := InsertIndexEntry(rebuilt, payload); err != nil {
+		if _, err := InsertIndexEntry(page, payload); err != nil {
 			return nil, err
 		}
 	}
-	return rebuilt, nil
+	return page, nil
+}
+
+func BuildIndexInternalPageData(pageID uint32, records []IndexInternalRecord) ([]byte, error) {
+	page := InitIndexInternalPage(pageID)
+	for _, record := range records {
+		payload, err := EncodeIndexInternalEntry(record.Key, record.ChildPageID)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := InsertIndexEntry(page, payload); err != nil {
+			return nil, err
+		}
+	}
+	return page, nil
+}
+
+func SplitIndexLeafRecords(records []IndexLeafRecord) (left []IndexLeafRecord, right []IndexLeafRecord, separatorKey []byte, err error) {
+	if len(records) < 2 {
+		return nil, nil, nil, errCorruptedIndexPage
+	}
+	mid := len(records) / 2
+	left = cloneIndexLeafRecords(records[:mid])
+	right = cloneIndexLeafRecords(records[mid:])
+	if len(right) == 0 {
+		return nil, nil, nil, errCorruptedIndexPage
+	}
+	separatorKey = append([]byte(nil), right[0].Key...)
+	return left, right, separatorKey, nil
+}
+
+func SplitIndexInternalRecords(records []IndexInternalRecord) (left []IndexInternalRecord, right []IndexInternalRecord, separatorKey []byte, err error) {
+	if len(records) < 2 {
+		return nil, nil, nil, errCorruptedIndexPage
+	}
+	mid := len(records) / 2
+	left = cloneIndexInternalRecords(records[:mid])
+	right = cloneIndexInternalRecords(records[mid:])
+	if len(right) == 0 {
+		return nil, nil, nil, errCorruptedIndexPage
+	}
+	separatorKey = append([]byte(nil), right[0].Key...)
+	return left, right, separatorKey, nil
+}
+
+func InsertIndexLeafRecordSorted(page []byte, key []byte, locator RowLocator) ([]byte, error) {
+	if err := validateLeafIndexPage(page); err != nil {
+		return nil, err
+	}
+
+	records, err := ReadAllIndexLeafRecords(page)
+	if err != nil {
+		return nil, err
+	}
+	records = InsertSortedIndexLeafRecords(records, IndexLeafRecord{
+		Key:     append([]byte(nil), key...),
+		Locator: locator,
+	})
+
+	pageID := binary.LittleEndian.Uint32(page[indexPageHeaderOffsetPageID : indexPageHeaderOffsetPageID+4])
+	sibling, err := IndexLeafRightSibling(page)
+	if err != nil {
+		return nil, err
+	}
+	return BuildIndexLeafPageData(pageID, records, sibling)
+}
+
+func InsertSortedIndexLeafRecords(records []IndexLeafRecord, record IndexLeafRecord) []IndexLeafRecord {
+	records = append(records, IndexLeafRecord{
+		Key:     append([]byte(nil), record.Key...),
+		Locator: record.Locator,
+	})
+	for i := 1; i < len(records); i++ {
+		for j := i; j > 0; j-- {
+			cmp, err := CompareIndexKeys(records[j-1].Key, records[j].Key)
+			if err != nil || cmp <= 0 {
+				break
+			}
+			records[j-1], records[j] = records[j], records[j-1]
+		}
+	}
+	return records
+}
+
+func cloneIndexLeafRecords(records []IndexLeafRecord) []IndexLeafRecord {
+	cloned := make([]IndexLeafRecord, 0, len(records))
+	for _, record := range records {
+		cloned = append(cloned, IndexLeafRecord{
+			Key:     append([]byte(nil), record.Key...),
+			Locator: record.Locator,
+		})
+	}
+	return cloned
+}
+
+func cloneIndexInternalRecords(records []IndexInternalRecord) []IndexInternalRecord {
+	cloned := make([]IndexInternalRecord, 0, len(records))
+	for _, record := range records {
+		cloned = append(cloned, IndexInternalRecord{
+			Key:         append([]byte(nil), record.Key...),
+			ChildPageID: record.ChildPageID,
+		})
+	}
+	return cloned
 }
 
 func initIndexPage(pageID uint32, pageType PageType) []byte {

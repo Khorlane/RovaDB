@@ -1,6 +1,7 @@
 package rovadb
 
 import (
+	"encoding/binary"
 	"errors"
 	"os"
 	"reflect"
@@ -1016,38 +1017,71 @@ func cloneIndexDefs(indexDefs []storage.CatalogIndex) []storage.CatalogIndex {
 	return cloned
 }
 
+type indexPageStager struct {
+	pages    map[storage.PageID]stagedPage
+	order    []storage.PageID
+	nextPage storage.PageID
+}
+
+func newIndexPageStager(nextPage storage.PageID) *indexPageStager {
+	return &indexPageStager{
+		pages:    make(map[storage.PageID]stagedPage),
+		order:    nil,
+		nextPage: nextPage,
+	}
+}
+
+func (s *indexPageStager) stage(page stagedPage) {
+	if s == nil {
+		return
+	}
+	if _, exists := s.pages[page.id]; !exists {
+		s.order = append(s.order, page.id)
+	}
+	s.pages[page.id] = page
+}
+
+func (s *indexPageStager) allocatePageID() storage.PageID {
+	if s == nil {
+		return 0
+	}
+	pageID := s.nextPage
+	s.nextPage++
+	return pageID
+}
+
+func (s *indexPageStager) finalizedPages() []stagedPage {
+	if s == nil || len(s.order) == 0 {
+		return nil
+	}
+	pages := make([]stagedPage, 0, len(s.order))
+	for _, id := range s.order {
+		pages = append(pages, s.pages[id])
+	}
+	return pages
+}
+
 func (db *DB) buildInsertedIndexPages(table *executor.Table, row []parser.Value, locator storage.RowLocator) ([]stagedPage, error) {
 	if db == nil || table == nil || len(table.IndexDefs) == 0 {
 		return nil, nil
 	}
 
-	pages := make([]stagedPage, 0, len(table.IndexDefs))
-	for _, indexDef := range table.IndexDefs {
+	stager := newIndexPageStager(db.pager.NextPageID())
+	for i := range table.IndexDefs {
+		indexDef := &table.IndexDefs[i]
 		if indexDef.RootPageID == 0 {
 			continue
 		}
 
-		key, err := encodeIndexKeyForRow(row, table.Columns, indexDef)
+		key, err := encodeIndexKeyForRow(row, table.Columns, *indexDef)
 		if err != nil {
 			return nil, err
 		}
-		pageData, err := readCommittedPageData(db.pool, storage.PageID(indexDef.RootPageID))
-		if err != nil {
-			return nil, wrapStorageError(err)
+		if err := db.insertIndexRecord(table, indexDef, key, locator, stager); err != nil {
+			return nil, err
 		}
-		if pageData == nil {
-			return nil, newStorageError("corrupted index page")
-		}
-		updatedPageData, err := storage.InsertIndexLeafRecordSorted(pageData, key, locator)
-		if err != nil {
-			return nil, wrapStorageError(err)
-		}
-		pages = append(pages, stagedPage{
-			id:   storage.PageID(indexDef.RootPageID),
-			data: updatedPageData,
-		})
 	}
-	return pages, nil
+	return stager.finalizedPages(), nil
 }
 
 func encodeIndexKeyForRow(row []parser.Value, columns []parser.ColumnDef, indexDef storage.CatalogIndex) ([]byte, error) {
@@ -1065,6 +1099,229 @@ func encodeIndexKeyForRow(row []parser.Value, columns []parser.ColumnDef, indexD
 		values = append(values, row[position])
 	}
 	return storage.EncodeIndexKey(values)
+}
+
+type indexInsertPathEntry struct {
+	pageID     storage.PageID
+	childIndex int
+}
+
+func (db *DB) insertIndexRecord(table *executor.Table, indexDef *storage.CatalogIndex, key []byte, locator storage.RowLocator, stager *indexPageStager) error {
+	if db == nil || table == nil || indexDef == nil || indexDef.RootPageID == 0 {
+		return nil
+	}
+
+	rootPageID := storage.PageID(indexDef.RootPageID)
+	leafPageID, path, err := db.findIndexInsertPath(rootPageID, key, stager)
+	if err != nil {
+		return err
+	}
+
+	leafPageData, err := db.readIndexPageForInsert(leafPageID, stager)
+	if err != nil {
+		return err
+	}
+	leafRecords, err := storage.ReadAllIndexLeafRecords(leafPageData)
+	if err != nil {
+		return wrapStorageError(err)
+	}
+	leafRecords = storage.InsertSortedIndexLeafRecords(leafRecords, storage.IndexLeafRecord{
+		Key:     key,
+		Locator: locator,
+	})
+
+	rightSibling, err := storage.IndexLeafRightSibling(leafPageData)
+	if err != nil {
+		return wrapStorageError(err)
+	}
+	leftPageData, err := storage.BuildIndexLeafPageData(uint32(leafPageID), leafRecords, rightSibling)
+	if err == nil {
+		stager.stage(stagedPage{id: leafPageID, data: leftPageData})
+		return nil
+	}
+	var dbErr *DBError
+	if !errors.As(err, &dbErr) || dbErr.Kind != "storage" || dbErr.Message != "index page full" {
+		return wrapStorageError(err)
+	}
+
+	leftRecords, rightRecords, separatorKey, err := storage.SplitIndexLeafRecords(leafRecords)
+	if err != nil {
+		return wrapStorageError(err)
+	}
+	rightPageID := stager.allocatePageID()
+	leftPageData, err = storage.BuildIndexLeafPageData(uint32(leafPageID), leftRecords, uint32(rightPageID))
+	if err != nil {
+		return wrapStorageError(err)
+	}
+	rightPageData, err := storage.BuildIndexLeafPageData(uint32(rightPageID), rightRecords, rightSibling)
+	if err != nil {
+		return wrapStorageError(err)
+	}
+	stager.stage(stagedPage{id: leafPageID, data: leftPageData})
+	stager.stage(stagedPage{id: rightPageID, data: rightPageData, isNew: true})
+
+	return db.propagateIndexSplit(table, indexDef, path, leafPageID, rightPageID, separatorKey, stager)
+}
+
+func (db *DB) propagateIndexSplit(table *executor.Table, indexDef *storage.CatalogIndex, path []indexInsertPathEntry, leftPageID, rightPageID storage.PageID, separatorKey []byte, stager *indexPageStager) error {
+	for len(path) > 0 {
+		parent := path[len(path)-1]
+		path = path[:len(path)-1]
+
+		parentPageData, err := db.readIndexPageForInsert(parent.pageID, stager)
+		if err != nil {
+			return err
+		}
+		parentRecords, err := storage.ReadAllIndexInternalRecords(parentPageData)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		if parent.childIndex < 0 || parent.childIndex >= len(parentRecords) {
+			return newStorageError("corrupted index page")
+		}
+
+		oldKey := append([]byte(nil), parentRecords[parent.childIndex].Key...)
+		parentRecords[parent.childIndex].Key = append([]byte(nil), separatorKey...)
+		parentRecords[parent.childIndex].ChildPageID = uint32(leftPageID)
+
+		insertRecord := storage.IndexInternalRecord{ChildPageID: uint32(rightPageID)}
+		if parent.childIndex == len(parentRecords)-1 {
+			insertRecord.Key = append([]byte(nil), separatorKey...)
+		} else {
+			insertRecord.Key = oldKey
+		}
+		parentRecords = insertIndexInternalRecord(parentRecords, parent.childIndex+1, insertRecord)
+
+		parentPageRebuilt, err := storage.BuildIndexInternalPageData(uint32(parent.pageID), parentRecords)
+		if err == nil {
+			stager.stage(stagedPage{id: parent.pageID, data: parentPageRebuilt})
+			return nil
+		}
+		var dbErr *DBError
+		if !errors.As(err, &dbErr) || dbErr.Kind != "storage" || dbErr.Message != "index page full" {
+			return wrapStorageError(err)
+		}
+
+		leftRecords, rightRecords, nextSeparatorKey, err := storage.SplitIndexInternalRecords(parentRecords)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		newRightPageID := stager.allocatePageID()
+		leftPageData, err := storage.BuildIndexInternalPageData(uint32(parent.pageID), leftRecords)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		rightPageData, err := storage.BuildIndexInternalPageData(uint32(newRightPageID), rightRecords)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		stager.stage(stagedPage{id: parent.pageID, data: leftPageData})
+		stager.stage(stagedPage{id: newRightPageID, data: rightPageData, isNew: true})
+
+		leftPageID = parent.pageID
+		rightPageID = newRightPageID
+		separatorKey = nextSeparatorKey
+	}
+
+	newRootPageID := stager.allocatePageID()
+	newRootRecords := []storage.IndexInternalRecord{
+		{Key: append([]byte(nil), separatorKey...), ChildPageID: uint32(leftPageID)},
+		{Key: append([]byte(nil), separatorKey...), ChildPageID: uint32(rightPageID)},
+	}
+	newRootPageData, err := storage.BuildIndexInternalPageData(uint32(newRootPageID), newRootRecords)
+	if err != nil {
+		return wrapStorageError(err)
+	}
+	stager.stage(stagedPage{id: newRootPageID, data: newRootPageData, isNew: true})
+	indexDef.RootPageID = uint32(newRootPageID)
+	if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok {
+		if index := table.Indexes[columnName]; index != nil {
+			index.RootPageID = indexDef.RootPageID
+		}
+	}
+	return nil
+}
+
+func (db *DB) readIndexPageForInsert(pageID storage.PageID, stager *indexPageStager) ([]byte, error) {
+	if stager != nil {
+		if staged, ok := stager.pages[pageID]; ok {
+			return append([]byte(nil), staged.data...), nil
+		}
+	}
+	pageData, err := readCommittedPageData(db.pool, pageID)
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+	if pageData == nil {
+		return nil, newStorageError("corrupted index page")
+	}
+	return pageData, nil
+}
+
+func (db *DB) findIndexInsertPath(rootPageID storage.PageID, key []byte, stager *indexPageStager) (storage.PageID, []indexInsertPathEntry, error) {
+	if rootPageID == 0 {
+		return 0, nil, newStorageError("corrupted index page")
+	}
+
+	currentPageID := rootPageID
+	path := make([]indexInsertPathEntry, 0)
+	for {
+		pageData, err := db.readIndexPageForInsert(currentPageID, stager)
+		if err != nil {
+			return 0, nil, err
+		}
+		pageType := storage.PageType(binary.LittleEndian.Uint16(pageData[4:6]))
+		switch pageType {
+		case storage.PageTypeIndexLeaf:
+			return currentPageID, path, nil
+		case storage.PageTypeIndexInternal:
+			records, err := storage.ReadAllIndexInternalRecords(pageData)
+			if err != nil {
+				return 0, nil, wrapStorageError(err)
+			}
+			childIndex, childPageID, err := chooseIndexChildRecord(records, key)
+			if err != nil {
+				return 0, nil, wrapStorageError(err)
+			}
+			path = append(path, indexInsertPathEntry{pageID: currentPageID, childIndex: childIndex})
+			currentPageID = storage.PageID(childPageID)
+		default:
+			return 0, nil, newStorageError("corrupted index page")
+		}
+	}
+}
+
+func chooseIndexChildRecord(records []storage.IndexInternalRecord, key []byte) (int, uint32, error) {
+	if len(records) == 0 {
+		return 0, 0, newStorageError("corrupted index page")
+	}
+	rightmostIndex := len(records) - 1
+	for i, record := range records {
+		cmp, err := storage.CompareIndexKeys(key, record.Key)
+		if err != nil {
+			return 0, 0, err
+		}
+		if cmp < 0 {
+			return i, record.ChildPageID, nil
+		}
+	}
+	return rightmostIndex, records[rightmostIndex].ChildPageID, nil
+}
+
+func insertIndexInternalRecord(records []storage.IndexInternalRecord, index int, record storage.IndexInternalRecord) []storage.IndexInternalRecord {
+	if index < 0 {
+		index = 0
+	}
+	if index > len(records) {
+		index = len(records)
+	}
+	records = append(records, storage.IndexInternalRecord{})
+	copy(records[index+1:], records[index:])
+	records[index] = storage.IndexInternalRecord{
+		Key:         append([]byte(nil), record.Key...),
+		ChildPageID: record.ChildPageID,
+	}
+	return records
 }
 
 func cloneRows(rows [][]parser.Value) [][]parser.Value {

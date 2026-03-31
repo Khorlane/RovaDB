@@ -160,6 +160,42 @@ func TestLookupIndexExactRejectsInvalidRootPageID(t *testing.T) {
 	}
 }
 
+func TestLookupIndexExactAcrossSplitLeafTree(t *testing.T) {
+	left, err := BuildIndexLeafPageData(2, []IndexLeafRecord{
+		{Key: []byte("alice"), Locator: RowLocator{PageID: 10, SlotID: 0}},
+		{Key: []byte("bob"), Locator: RowLocator{PageID: 10, SlotID: 1}},
+	}, 3)
+	if err != nil {
+		t.Fatalf("BuildIndexLeafPageData(left) error = %v", err)
+	}
+	right, err := BuildIndexLeafPageData(3, []IndexLeafRecord{
+		{Key: []byte("cara"), Locator: RowLocator{PageID: 10, SlotID: 2}},
+		{Key: []byte("dora"), Locator: RowLocator{PageID: 10, SlotID: 3}},
+	}, 0)
+	if err != nil {
+		t.Fatalf("BuildIndexLeafPageData(right) error = %v", err)
+	}
+	root, err := BuildIndexInternalPageData(1, []IndexInternalRecord{
+		{Key: []byte("cara"), ChildPageID: 2},
+		{Key: []byte("cara"), ChildPageID: 3},
+	})
+	if err != nil {
+		t.Fatalf("BuildIndexInternalPageData(root) error = %v", err)
+	}
+
+	locators, err := LookupIndexExact(mapPageReader(map[uint32][]byte{
+		1: root,
+		2: left,
+		3: right,
+	}), 1, []byte("dora"))
+	if err != nil {
+		t.Fatalf("LookupIndexExact() error = %v", err)
+	}
+	if len(locators) != 1 || locators[0] != (RowLocator{PageID: 10, SlotID: 3}) {
+		t.Fatalf("LookupIndexExact() = %#v, want [(10,3)]", locators)
+	}
+}
+
 func insertLeafEntry(t *testing.T, page []byte, key string, locator RowLocator) {
 	t.Helper()
 

@@ -379,3 +379,169 @@ func TestFetchRowByLocatorFromIndexLeafSurvivesReopen(t *testing.T) {
 		}
 	}
 }
+
+func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil")
+	}
+	indexDef := table.IndexDefinition("idx_users_name")
+	if indexDef == nil {
+		t.Fatalf("IndexDefinition(idx_users_name) = nil, defs=%#v", table.IndexDefs)
+	}
+	initialRootPageID := indexDef.RootPageID
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	dbFile, pager := openRawStorage(t, path)
+	catalog, err := storage.LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+	if len(catalog.Tables) != 1 || len(catalog.Tables[0].Indexes) != 1 {
+		t.Fatalf("catalog = %#v, want one table with one index", catalog)
+	}
+
+	leafPageIDs := make([]uint32, 0, 7)
+	for i := 0; i < 7; i++ {
+		page := pager.NewPage()
+		leafPageIDs = append(leafPageIDs, uint32(page.ID()))
+	}
+
+	insertedValue := string(bytes.Repeat([]byte("z"), 512))
+	insertedKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue(insertedValue)})
+	if err != nil {
+		t.Fatalf("EncodeIndexKey(insertedValue) error = %v", err)
+	}
+
+	separatorKeys := make([][]byte, 0, 6)
+	for i := 0; i < 6; i++ {
+		value := string(bytes.Repeat([]byte{byte('b' + i)}, 512))
+		encodedKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue(value)})
+		if err != nil {
+			t.Fatalf("EncodeIndexKey(separator %d) error = %v", i, err)
+		}
+		separatorKeys = append(separatorKeys, encodedKey)
+	}
+
+	for i, pageID := range leafPageIDs {
+		records := make([]storage.IndexLeafRecord, 0)
+		if i == len(leafPageIDs)-1 {
+			for j := 0; j < 7; j++ {
+				records = append(records, storage.IndexLeafRecord{
+					Key:     append([]byte(nil), insertedKey...),
+					Locator: storage.RowLocator{PageID: uint32(table.RootPageID()), SlotID: uint16(j)},
+				})
+			}
+		} else {
+			records = append(records, storage.IndexLeafRecord{
+				Key:     append([]byte(nil), separatorKeys[i]...),
+				Locator: storage.RowLocator{PageID: uint32(table.RootPageID()), SlotID: uint16(i)},
+			})
+		}
+		var rightSibling uint32
+		if i+1 < len(leafPageIDs) {
+			rightSibling = leafPageIDs[i+1]
+		}
+		pageData, err := storage.BuildIndexLeafPageData(pageID, records, rightSibling)
+		if err != nil {
+			t.Fatalf("BuildIndexLeafPageData(%d) error = %v", pageID, err)
+		}
+		page, err := pager.Get(storage.PageID(pageID))
+		if err != nil {
+			t.Fatalf("pager.Get(leaf %d) error = %v", pageID, err)
+		}
+		pager.MarkDirtyWithOriginal(page)
+		clear(page.Data())
+		copy(page.Data(), pageData)
+	}
+
+	rootPageData, err := storage.BuildIndexInternalPageData(indexDef.RootPageID, []storage.IndexInternalRecord{
+		{Key: append([]byte(nil), separatorKeys[0]...), ChildPageID: leafPageIDs[0]},
+		{Key: append([]byte(nil), separatorKeys[1]...), ChildPageID: leafPageIDs[1]},
+		{Key: append([]byte(nil), separatorKeys[2]...), ChildPageID: leafPageIDs[2]},
+		{Key: append([]byte(nil), separatorKeys[3]...), ChildPageID: leafPageIDs[3]},
+		{Key: append([]byte(nil), separatorKeys[4]...), ChildPageID: leafPageIDs[4]},
+		{Key: append([]byte(nil), separatorKeys[5]...), ChildPageID: leafPageIDs[5]},
+		{Key: append([]byte(nil), separatorKeys[5]...), ChildPageID: leafPageIDs[6]},
+	})
+	if err != nil {
+		t.Fatalf("BuildIndexInternalPageData(root) error = %v", err)
+	}
+	rootPage, err := pager.Get(storage.PageID(indexDef.RootPageID))
+	if err != nil {
+		t.Fatalf("pager.Get(root) error = %v", err)
+	}
+	pager.MarkDirtyWithOriginal(rootPage)
+	clear(rootPage.Data())
+	copy(rootPage.Data(), rootPageData)
+	if err := pager.FlushDirty(); err != nil {
+		t.Fatalf("pager.FlushDirty() error = %v", err)
+	}
+	if err := dbFile.Close(); err != nil {
+		t.Fatalf("dbFile.Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	if _, err := db.Exec("INSERT INTO users VALUES (?)", insertedValue); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	table = db.tables["users"]
+	indexDef = table.IndexDefinition("idx_users_name")
+	if indexDef == nil {
+		t.Fatalf("IndexDefinition(idx_users_name) = nil after reopen insert, defs=%#v", table.IndexDefs)
+	}
+	if indexDef.RootPageID == initialRootPageID {
+		t.Fatalf("RootPageID = %d, want changed after root split from %d", indexDef.RootPageID, initialRootPageID)
+	}
+	rootPageData, err = readCommittedPageData(db.pool, storage.PageID(indexDef.RootPageID))
+	if err != nil {
+		t.Fatalf("readCommittedPageData(root) error = %v", err)
+	}
+	if got := storage.PageType(binary.LittleEndian.Uint16(rootPageData[4:6])); got != storage.PageTypeIndexInternal {
+		t.Fatalf("root page type = %d, want %d", got, storage.PageTypeIndexInternal)
+	}
+
+	pageReader := func(pageID uint32) ([]byte, error) {
+		return readCommittedPageData(db.pool, storage.PageID(pageID))
+	}
+	locators, err := storage.LookupIndexExact(pageReader, indexDef.RootPageID, insertedKey)
+	if err != nil {
+		t.Fatalf("LookupIndexExact() error = %v", err)
+	}
+	if len(locators) != 4 {
+		t.Fatalf("len(locators) = %d, want 4 from the located rightmost duplicate leaf", len(locators))
+	}
+	foundInsertedRow := false
+	for _, locator := range locators {
+		row, err := db.fetchRowByLocator(table, locator)
+		if err != nil {
+			continue
+		}
+		if len(row) == 1 && row[0] == parser.StringValue(insertedValue) {
+			foundInsertedRow = true
+			break
+		}
+	}
+	if !foundInsertedRow {
+		t.Fatalf("locators = %#v, want one locator resolving to inserted row %q", locators, insertedValue)
+	}
+}

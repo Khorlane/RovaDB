@@ -365,3 +365,80 @@ func TestInsertIndexLeafRecordSortedRejectsFullPage(t *testing.T) {
 		page = next
 	}
 }
+
+func TestBuildIndexLeafPageData(t *testing.T) {
+	page, err := BuildIndexLeafPageData(13, []IndexLeafRecord{
+		{Key: []byte("alice"), Locator: RowLocator{PageID: 1, SlotID: 0}},
+		{Key: []byte("bob"), Locator: RowLocator{PageID: 1, SlotID: 1}},
+	}, 14)
+	if err != nil {
+		t.Fatalf("BuildIndexLeafPageData() error = %v", err)
+	}
+	sibling, err := IndexLeafRightSibling(page)
+	if err != nil {
+		t.Fatalf("IndexLeafRightSibling() error = %v", err)
+	}
+	if sibling != 14 {
+		t.Fatalf("IndexLeafRightSibling() = %d, want 14", sibling)
+	}
+	records, err := ReadAllIndexLeafRecords(page)
+	if err != nil {
+		t.Fatalf("ReadAllIndexLeafRecords() error = %v", err)
+	}
+	if len(records) != 2 || string(records[0].Key) != "alice" || string(records[1].Key) != "bob" {
+		t.Fatalf("records = %#v, want [alice bob]", records)
+	}
+}
+
+func TestBuildIndexInternalPageData(t *testing.T) {
+	page, err := BuildIndexInternalPageData(15, []IndexInternalRecord{
+		{Key: []byte("m"), ChildPageID: 2},
+		{Key: []byte("m"), ChildPageID: 3},
+	})
+	if err != nil {
+		t.Fatalf("BuildIndexInternalPageData() error = %v", err)
+	}
+	records, err := ReadAllIndexInternalRecords(page)
+	if err != nil {
+		t.Fatalf("ReadAllIndexInternalRecords() error = %v", err)
+	}
+	if len(records) != 2 || string(records[0].Key) != "m" || records[0].ChildPageID != 2 || records[1].ChildPageID != 3 {
+		t.Fatalf("records = %#v, want two m records pointing to 2 and 3", records)
+	}
+}
+
+func TestSplitIndexLeafRecords(t *testing.T) {
+	left, right, separatorKey, err := SplitIndexLeafRecords([]IndexLeafRecord{
+		{Key: []byte("a"), Locator: RowLocator{PageID: 1, SlotID: 0}},
+		{Key: []byte("b"), Locator: RowLocator{PageID: 1, SlotID: 1}},
+		{Key: []byte("c"), Locator: RowLocator{PageID: 1, SlotID: 2}},
+		{Key: []byte("d"), Locator: RowLocator{PageID: 1, SlotID: 3}},
+	})
+	if err != nil {
+		t.Fatalf("SplitIndexLeafRecords() error = %v", err)
+	}
+	if len(left) != 2 || len(right) != 2 {
+		t.Fatalf("split lens = (%d,%d), want (2,2)", len(left), len(right))
+	}
+	if string(separatorKey) != "c" {
+		t.Fatalf("separatorKey = %q, want %q", separatorKey, "c")
+	}
+}
+
+func TestSplitIndexInternalRecords(t *testing.T) {
+	left, right, separatorKey, err := SplitIndexInternalRecords([]IndexInternalRecord{
+		{Key: []byte("m"), ChildPageID: 2},
+		{Key: []byte("t"), ChildPageID: 3},
+		{Key: []byte("z"), ChildPageID: 4},
+		{Key: []byte("z"), ChildPageID: 5},
+	})
+	if err != nil {
+		t.Fatalf("SplitIndexInternalRecords() error = %v", err)
+	}
+	if len(left) != 2 || len(right) != 2 {
+		t.Fatalf("split lens = (%d,%d), want (2,2)", len(left), len(right))
+	}
+	if string(separatorKey) != "z" {
+		t.Fatalf("separatorKey = %q, want %q", separatorKey, "z")
+	}
+}
