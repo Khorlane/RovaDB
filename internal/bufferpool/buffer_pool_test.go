@@ -3,7 +3,9 @@ package bufferpool
 import (
 	"bytes"
 	"errors"
+	"runtime"
 	"testing"
+	"time"
 )
 
 type stubLoader struct {
@@ -63,6 +65,7 @@ func TestGetCommittedPageLoadsViaLoader(t *testing.T) {
 	if got := pool.committedFrameCount(); got != 1 {
 		t.Fatalf("committedFrameCount() = %d, want 1", got)
 	}
+	pool.UnlatchShared(frame)
 
 	again, err := pool.GetCommittedPage(7)
 	if err != nil {
@@ -80,6 +83,7 @@ func TestGetCommittedPageLoadsViaLoader(t *testing.T) {
 	if got := pool.committedFrameCount(); got != 1 {
 		t.Fatalf("committedFrameCount() after second read = %d, want 1", got)
 	}
+	pool.UnlatchShared(frame)
 }
 
 func TestGetCommittedPagePropagatesLoaderError(t *testing.T) {
@@ -128,6 +132,8 @@ func TestGetCommittedPageLoadsDistinctPagesSeparately(t *testing.T) {
 	if got := pool.committedFrameCount(); got != 2 {
 		t.Fatalf("committedFrameCount() = %d, want 2", got)
 	}
+	pool.UnlatchShared(frame1)
+	pool.UnlatchShared(frame2)
 }
 
 func TestGetCommittedPageRejectsInvalidPageSize(t *testing.T) {
@@ -226,6 +232,8 @@ func TestGetCommittedPageRetryAfterFailedLoadCanPopulateCache(t *testing.T) {
 	if got := frame.PinCount; got != 2 {
 		t.Fatalf("frame.PinCount after cache hit = %d, want 2", got)
 	}
+	pool.UnlatchShared(frame)
+	pool.UnlatchShared(frame)
 }
 
 func TestGetCommittedPageCopiesDataIntoFrame(t *testing.T) {
@@ -250,6 +258,7 @@ func TestGetCommittedPageCopiesDataIntoFrame(t *testing.T) {
 	if frame.Data[1] != 0xCD {
 		t.Fatalf("frame.Data[1] = 0x%02x, want 0xCD", frame.Data[1])
 	}
+	pool.UnlatchShared(frame)
 }
 
 func TestUnpinDecrementsButNeverGoesNegative(t *testing.T) {
@@ -282,6 +291,8 @@ func TestUnpinDecrementsButNeverGoesNegative(t *testing.T) {
 	if got := frame.PinCount; got != 0 {
 		t.Fatalf("frame.PinCount after extra Unpin() = %d, want 0", got)
 	}
+	pool.UnlatchShared(frame)
+	pool.UnlatchShared(frame)
 }
 
 func TestPinAndUnpinNilAreNoOps(t *testing.T) {
@@ -289,4 +300,116 @@ func TestPinAndUnpinNilAreNoOps(t *testing.T) {
 
 	pool.Pin(nil)
 	pool.Unpin(nil)
+}
+
+func TestGetCommittedPageReturnsSharedLatchedFrame(t *testing.T) {
+	pool := New(1, &stubLoader{
+		pages: map[PageID][]byte{
+			8: bytes.Repeat([]byte{0x88}, PageSize),
+		},
+	})
+
+	frame, err := pool.GetCommittedPage(8)
+	if err != nil {
+		t.Fatalf("GetCommittedPage() error = %v", err)
+	}
+	if got := frame.PinCount; got != 1 {
+		t.Fatalf("frame.PinCount = %d, want 1", got)
+	}
+
+	started := make(chan struct{})
+	acquired := make(chan struct{})
+	go func() {
+		close(started)
+		pool.LatchExclusive(frame)
+		close(acquired)
+		pool.UnlatchExclusive(frame)
+	}()
+
+	<-started
+	runtime.Gosched()
+	select {
+	case <-acquired:
+		t.Fatal("exclusive latch acquired before shared latch release")
+	default:
+	}
+
+	pool.UnlatchShared(frame)
+
+	select {
+	case <-acquired:
+	case <-time.After(time.Second):
+		t.Fatal("exclusive latch not acquired after shared latch release")
+	}
+}
+
+func TestRepeatedGetCommittedPageReturnsSharedLatchedFrame(t *testing.T) {
+	pool := New(1, &stubLoader{
+		pages: map[PageID][]byte{
+			10: bytes.Repeat([]byte{0xAA}, PageSize),
+		},
+	})
+
+	frame, err := pool.GetCommittedPage(10)
+	if err != nil {
+		t.Fatalf("first GetCommittedPage() error = %v", err)
+	}
+	again, err := pool.GetCommittedPage(10)
+	if err != nil {
+		t.Fatalf("second GetCommittedPage() error = %v", err)
+	}
+	if again != frame {
+		t.Fatal("second GetCommittedPage() returned different frame")
+	}
+
+	pool.UnlatchShared(frame)
+	pool.UnlatchShared(frame)
+}
+
+func TestUnpinDoesNotReleaseLatch(t *testing.T) {
+	pool := New(1, &stubLoader{
+		pages: map[PageID][]byte{
+			11: bytes.Repeat([]byte{0xBB}, PageSize),
+		},
+	})
+
+	frame, err := pool.GetCommittedPage(11)
+	if err != nil {
+		t.Fatalf("GetCommittedPage() error = %v", err)
+	}
+	pool.Unpin(frame)
+	if got := frame.PinCount; got != 0 {
+		t.Fatalf("frame.PinCount after Unpin() = %d, want 0", got)
+	}
+
+	started := make(chan struct{})
+	acquired := make(chan struct{})
+	go func() {
+		close(started)
+		pool.LatchExclusive(frame)
+		close(acquired)
+		pool.UnlatchExclusive(frame)
+	}()
+
+	<-started
+	runtime.Gosched()
+	select {
+	case <-acquired:
+		t.Fatal("exclusive latch acquired while shared latch should still be held")
+	default:
+	}
+
+	pool.UnlatchShared(frame)
+
+	select {
+	case <-acquired:
+	case <-time.After(time.Second):
+		t.Fatal("exclusive latch not acquired after shared latch release")
+	}
+}
+
+func TestUnlatchSharedNilIsNoOp(t *testing.T) {
+	pool := New(1, nil)
+
+	pool.UnlatchShared(nil)
 }

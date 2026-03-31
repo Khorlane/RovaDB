@@ -9,13 +9,13 @@ func (bp *BufferPool) getOrLoadCommittedFrame(pageID PageID) (*Frame, error) {
 		return nil, nil
 	}
 	if f, ok := bp.getCommittedFrame(pageID); ok {
-		return bp.pinAndReturn(f), nil
+		return bp.pinLatchAndReturn(f), nil
 	}
 	frame, err := bp.loadCommittedFrame(pageID)
 	if err != nil {
 		return nil, err
 	}
-	return bp.pinAndReturn(bp.trackCommittedFrame(frame)), nil
+	return bp.pinLatchAndReturn(bp.trackCommittedFrame(frame)), nil
 }
 
 func (bp *BufferPool) GetPage(pageID PageID) (*Frame, error) {
@@ -31,8 +31,9 @@ func (bp *BufferPool) PutPage(f *Frame) {
 	}
 }
 
-func (bp *BufferPool) pinAndReturn(f *Frame) *Frame {
+func (bp *BufferPool) pinLatchAndReturn(f *Frame) *Frame {
 	bp.Pin(f)
+	bp.LatchShared(f)
 	return f
 }
 
@@ -50,4 +51,32 @@ func (bp *BufferPool) Unpin(f *Frame) {
 	if f.PinCount > 0 {
 		f.PinCount--
 	}
+}
+
+func (bp *BufferPool) LatchShared(f *Frame) {
+	if f == nil {
+		return
+	}
+	f.latch.RLock()
+}
+
+func (bp *BufferPool) UnlatchShared(f *Frame) {
+	if f == nil {
+		return
+	}
+	f.latch.RUnlock()
+}
+
+func (bp *BufferPool) LatchExclusive(f *Frame) {
+	if f == nil {
+		return
+	}
+	f.latch.Lock()
+}
+
+func (bp *BufferPool) UnlatchExclusive(f *Frame) {
+	if f == nil {
+		return
+	}
+	f.latch.Unlock()
 }

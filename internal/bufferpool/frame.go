@@ -1,6 +1,9 @@
 package bufferpool
 
-import "errors"
+import (
+	"errors"
+	"sync"
+)
 
 var errInvalidPageSize = errors.New("bufferpool: invalid page size")
 
@@ -17,6 +20,8 @@ type Frame struct {
 	PinCount int
 
 	FrameType FrameType
+
+	latch sync.RWMutex
 }
 
 func newCommittedFrame(pageID PageID, data []byte) (*Frame, error) {
