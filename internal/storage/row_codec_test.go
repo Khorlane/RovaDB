@@ -436,3 +436,263 @@ func assertRowValuesEqual(t *testing.T, got, want []parser.Value) {
 		}
 	}
 }
+
+func TestEncodeDecodeSlottedRowSingleInt(t *testing.T) {
+	values := []parser.Value{parser.Int64Value(42)}
+
+	encoded, err := EncodeSlottedRow(values)
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+	decoded, err := DecodeSlottedRow(encoded, []uint8{CatalogColumnTypeInt})
+	if err != nil {
+		t.Fatalf("DecodeSlottedRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+}
+
+func TestEncodeDecodeSlottedRowSingleBool(t *testing.T) {
+	values := []parser.Value{parser.BoolValue(true)}
+
+	encoded, err := EncodeSlottedRow(values)
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+	decoded, err := DecodeSlottedRow(encoded, []uint8{CatalogColumnTypeBool})
+	if err != nil {
+		t.Fatalf("DecodeSlottedRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+}
+
+func TestEncodeDecodeSlottedRowSingleReal(t *testing.T) {
+	values := []parser.Value{parser.RealValue(3.14)}
+
+	encoded, err := EncodeSlottedRow(values)
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+	decoded, err := DecodeSlottedRow(encoded, []uint8{CatalogColumnTypeReal})
+	if err != nil {
+		t.Fatalf("DecodeSlottedRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+}
+
+func TestEncodeDecodeSlottedRowSingleText(t *testing.T) {
+	values := []parser.Value{parser.StringValue("hello")}
+
+	encoded, err := EncodeSlottedRow(values)
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+	decoded, err := DecodeSlottedRow(encoded, []uint8{CatalogColumnTypeText})
+	if err != nil {
+		t.Fatalf("DecodeSlottedRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+}
+
+func TestEncodeDecodeSlottedRowMixed(t *testing.T) {
+	values := []parser.Value{
+		parser.Int64Value(7),
+		parser.BoolValue(true),
+		parser.RealValue(10.25),
+		parser.StringValue("alice"),
+	}
+	columnTypes := []uint8{
+		CatalogColumnTypeInt,
+		CatalogColumnTypeBool,
+		CatalogColumnTypeReal,
+		CatalogColumnTypeText,
+	}
+
+	encoded, err := EncodeSlottedRow(values)
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+	decoded, err := DecodeSlottedRow(encoded, columnTypes)
+	if err != nil {
+		t.Fatalf("DecodeSlottedRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+}
+
+func TestEncodeDecodeSlottedRowWithNulls(t *testing.T) {
+	values := []parser.Value{
+		parser.NullValue(),
+		parser.StringValue("name"),
+		parser.NullValue(),
+		parser.BoolValue(false),
+	}
+	columnTypes := []uint8{
+		CatalogColumnTypeInt,
+		CatalogColumnTypeText,
+		CatalogColumnTypeReal,
+		CatalogColumnTypeBool,
+	}
+
+	encoded, err := EncodeSlottedRow(values)
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+	if got := binary.LittleEndian.Uint16(encoded[0:2]); got != uint16(len(values)) {
+		t.Fatalf("column count = %d, want %d", got, len(values))
+	}
+	if got := binary.LittleEndian.Uint16(encoded[2:4]); got != 1 {
+		t.Fatalf("null bitmap byte count = %d, want 1", got)
+	}
+	if encoded[4] != 0b00000101 {
+		t.Fatalf("null bitmap = %08b, want 00000101", encoded[4])
+	}
+
+	decoded, err := DecodeSlottedRow(encoded, columnTypes)
+	if err != nil {
+		t.Fatalf("DecodeSlottedRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+}
+
+func TestEncodeDecodeSlottedRowIntBoundaries(t *testing.T) {
+	values := []parser.Value{
+		parser.Int64Value(math.MinInt32),
+		parser.Int64Value(math.MaxInt32),
+	}
+
+	encoded, err := EncodeSlottedRow(values)
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+	decoded, err := DecodeSlottedRow(encoded, []uint8{CatalogColumnTypeInt, CatalogColumnTypeInt})
+	if err != nil {
+		t.Fatalf("DecodeSlottedRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+}
+
+func TestDecodeSlottedRowRejectsInvalidBoolByte(t *testing.T) {
+	data := []byte{1, 0, 1, 0, 0, 2}
+
+	_, err := DecodeSlottedRow(data, []uint8{CatalogColumnTypeBool})
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("DecodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestDecodeSlottedRowRejectsTruncatedInt(t *testing.T) {
+	data := []byte{1, 0, 1, 0, 0, 1, 2, 3}
+
+	_, err := DecodeSlottedRow(data, []uint8{CatalogColumnTypeInt})
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("DecodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestDecodeSlottedRowRejectsTruncatedReal(t *testing.T) {
+	data := []byte{1, 0, 1, 0, 0, 1, 2, 3}
+
+	_, err := DecodeSlottedRow(data, []uint8{CatalogColumnTypeReal})
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("DecodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestDecodeSlottedRowRejectsTruncatedTextLength(t *testing.T) {
+	data := []byte{1, 0, 1, 0, 0, 1}
+
+	_, err := DecodeSlottedRow(data, []uint8{CatalogColumnTypeText})
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("DecodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestDecodeSlottedRowRejectsTruncatedTextPayload(t *testing.T) {
+	data := []byte{1, 0, 1, 0, 0, 5, 0, 'h', 'i'}
+
+	_, err := DecodeSlottedRow(data, []uint8{CatalogColumnTypeText})
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("DecodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestDecodeSlottedRowRejectsColumnCountMismatch(t *testing.T) {
+	encoded, err := EncodeSlottedRow([]parser.Value{parser.Int64Value(1)})
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+
+	_, err = DecodeSlottedRow(encoded, []uint8{CatalogColumnTypeInt, CatalogColumnTypeText})
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("DecodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestDecodeSlottedRowRejectsUnsupportedType(t *testing.T) {
+	encoded, err := EncodeSlottedRow([]parser.Value{parser.Int64Value(1)})
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+
+	_, err = DecodeSlottedRow(encoded, []uint8{99})
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("DecodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestEncodeSlottedRowRejectsTextLengthOverflow(t *testing.T) {
+	values := []parser.Value{parser.StringValue(string(make([]byte, math.MaxUint16+1)))}
+
+	_, err := EncodeSlottedRow(values)
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("EncodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestEncodeSlottedRowRejectsOutOfRangeInt(t *testing.T) {
+	_, err := EncodeSlottedRow([]parser.Value{parser.Int64Value(math.MaxInt32 + 1)})
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("EncodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestEncodeInsertDecodeSlottedRowRoundTrip(t *testing.T) {
+	values := []parser.Value{
+		parser.Int64Value(5),
+		parser.StringValue("slot"),
+		parser.BoolValue(true),
+		parser.RealValue(1.5),
+	}
+	columnTypes := []uint8{
+		CatalogColumnTypeInt,
+		CatalogColumnTypeText,
+		CatalogColumnTypeBool,
+		CatalogColumnTypeReal,
+	}
+
+	row, err := EncodeSlottedRow(values)
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+	page := InitializeTablePage(1)
+	slotID, err := InsertRowIntoTablePage(page, row)
+	if err != nil {
+		t.Fatalf("InsertRowIntoTablePage() error = %v", err)
+	}
+	offset, length, err := TablePageSlot(page, slotID)
+	if err != nil {
+		t.Fatalf("TablePageSlot() error = %v", err)
+	}
+	decoded, err := DecodeSlottedRow(page[offset:offset+length], columnTypes)
+	if err != nil {
+		t.Fatalf("DecodeSlottedRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+}
