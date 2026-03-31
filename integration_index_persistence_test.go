@@ -1,6 +1,7 @@
 package rovadb
 
 import (
+	"bytes"
 	"encoding/binary"
 	"testing"
 
@@ -166,5 +167,86 @@ func TestOpenRetainsUnsupportedIndexDefinitionsWithoutActivatingBasicIndex(t *te
 	}
 	if len(table.Indexes) != 0 {
 		t.Fatalf("table.Indexes = %#v, want no active BasicIndex for unsupported definition", table.Indexes)
+	}
+}
+
+func TestInsertMaintainsPersistedIndexLeafEntries(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'bob')",
+		"INSERT INTO users VALUES (2, 'alice')",
+		"INSERT INTO users VALUES (3, 'alice')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil")
+	}
+	indexDef := table.IndexDefinition("idx_users_name")
+	if indexDef == nil {
+		t.Fatalf("IndexDefinition(idx_users_name) = nil, defs=%#v", table.IndexDefs)
+	}
+	rootPageID := indexDef.RootPageID
+	tableRootPageID := uint32(table.RootPageID())
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	dbFile, pager := openRawStorage(t, path)
+	defer dbFile.Close()
+
+	indexPage, err := pager.Get(storage.PageID(rootPageID))
+	if err != nil {
+		t.Fatalf("pager.Get(index root) error = %v", err)
+	}
+	records, err := storage.ReadIndexLeafRecords(indexPage.Data())
+	if err != nil {
+		t.Fatalf("ReadIndexLeafRecords() error = %v", err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("len(records) = %d, want 3", len(records))
+	}
+	aliceKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue("alice")})
+	if err != nil {
+		t.Fatalf("EncodeIndexKey(alice) error = %v", err)
+	}
+	bobKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue("bob")})
+	if err != nil {
+		t.Fatalf("EncodeIndexKey(bob) error = %v", err)
+	}
+	if !bytes.Equal(records[0].Key, aliceKey) || records[0].Locator != (storage.RowLocator{PageID: tableRootPageID, SlotID: 1}) {
+		t.Fatalf("records[0] = %#v, want alice -> (%d,1)", records[0], tableRootPageID)
+	}
+	if !bytes.Equal(records[1].Key, aliceKey) || records[1].Locator != (storage.RowLocator{PageID: tableRootPageID, SlotID: 2}) {
+		t.Fatalf("records[1] = %#v, want alice -> (%d,2)", records[1], tableRootPageID)
+	}
+	if !bytes.Equal(records[2].Key, bobKey) || records[2].Locator != (storage.RowLocator{PageID: tableRootPageID, SlotID: 0}) {
+		t.Fatalf("records[2] = %#v, want bob -> (%d,0)", records[2], tableRootPageID)
+	}
+
+	pageReader := func(pageID uint32) ([]byte, error) {
+		return pager.ReadPage(storage.PageID(pageID))
+	}
+	locators, err := storage.LookupIndexExact(pageReader, rootPageID, aliceKey)
+	if err != nil {
+		t.Fatalf("LookupIndexExact(alice) error = %v", err)
+	}
+	if len(locators) != 2 || locators[0] != (storage.RowLocator{PageID: tableRootPageID, SlotID: 1}) || locators[1] != (storage.RowLocator{PageID: tableRootPageID, SlotID: 2}) {
+		t.Fatalf("LookupIndexExact(alice) = %#v, want [(%d,1), (%d,2)]", locators, tableRootPageID, tableRootPageID)
 	}
 }

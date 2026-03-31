@@ -204,7 +204,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 				return err
 			}
 
-			if err := db.applyStagedTableRewrite(stagedTables, stmt.TableName); err != nil {
+			if err := db.applyStagedInsert(stagedTables, stmt.TableName); err != nil {
 				return err
 			}
 			committedTables = stagedTables
@@ -818,6 +818,43 @@ func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, t
 	return nil
 }
 
+func (db *DB) applyStagedInsert(stagedTables map[string]*executor.Table, tableName string) error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+
+	table := stagedTables[tableName]
+	if table == nil {
+		return nil
+	}
+
+	table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
+	tablePageData, locators, err := storage.BuildSlottedTablePageDataWithLocators(uint32(table.RootPageID()), table.Rows)
+	if err != nil {
+		return wrapStorageError(err)
+	}
+	if len(table.Rows) == 0 || len(locators) != len(table.Rows) {
+		return newStorageError("row locator mismatch")
+	}
+
+	pages := []stagedPage{{
+		id:   table.RootPageID(),
+		data: tablePageData,
+	}}
+
+	indexPages, err := db.buildInsertedIndexPages(table, table.Rows[len(table.Rows)-1], locators[len(locators)-1])
+	if err != nil {
+		return err
+	}
+	pages = append(pages, indexPages...)
+
+	catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
+	if err != nil {
+		return wrapStorageError(err)
+	}
+	return db.stageDirtyState(catalogData, pages)
+}
+
 func (db *DB) applyStagedCatalogOnly(stagedTables map[string]*executor.Table) error {
 	if db == nil || db.pager == nil {
 		return nil
@@ -977,6 +1014,57 @@ func cloneIndexDefs(indexDefs []storage.CatalogIndex) []storage.CatalogIndex {
 		})
 	}
 	return cloned
+}
+
+func (db *DB) buildInsertedIndexPages(table *executor.Table, row []parser.Value, locator storage.RowLocator) ([]stagedPage, error) {
+	if db == nil || table == nil || len(table.IndexDefs) == 0 {
+		return nil, nil
+	}
+
+	pages := make([]stagedPage, 0, len(table.IndexDefs))
+	for _, indexDef := range table.IndexDefs {
+		if indexDef.RootPageID == 0 {
+			continue
+		}
+
+		key, err := encodeIndexKeyForRow(row, table.Columns, indexDef)
+		if err != nil {
+			return nil, err
+		}
+		pageData, err := readCommittedPageData(db.pool, storage.PageID(indexDef.RootPageID))
+		if err != nil {
+			return nil, wrapStorageError(err)
+		}
+		if pageData == nil {
+			return nil, newStorageError("corrupted index page")
+		}
+		updatedPageData, err := storage.InsertIndexLeafRecordSorted(pageData, key, locator)
+		if err != nil {
+			return nil, wrapStorageError(err)
+		}
+		pages = append(pages, stagedPage{
+			id:   storage.PageID(indexDef.RootPageID),
+			data: updatedPageData,
+		})
+	}
+	return pages, nil
+}
+
+func encodeIndexKeyForRow(row []parser.Value, columns []parser.ColumnDef, indexDef storage.CatalogIndex) ([]byte, error) {
+	columnPositions := make(map[string]int, len(columns))
+	for i, column := range columns {
+		columnPositions[column.Name] = i
+	}
+
+	values := make([]parser.Value, 0, len(indexDef.Columns))
+	for _, indexColumn := range indexDef.Columns {
+		position, ok := columnPositions[indexColumn.Name]
+		if !ok || position >= len(row) {
+			return nil, newExecError("index/table mismatch")
+		}
+		values = append(values, row[position])
+	}
+	return storage.EncodeIndexKey(values)
 }
 
 func cloneRows(rows [][]parser.Value) [][]parser.Value {

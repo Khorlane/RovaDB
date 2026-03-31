@@ -17,5 +17,6 @@ var (
 
 	errCatalogTooLarge = dberr.NewStorage("catalog too large")
 	errTablePageFull   = errors.New("storage: table page full")
+	errIndexPageFull   = dberr.NewStorage("index page full")
 	errInvalidRowData  = errCorruptedRowData
 )

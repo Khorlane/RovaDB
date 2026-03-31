@@ -394,17 +394,28 @@ func readSlottedRowPayloads(page []byte) ([][]byte, error) {
 }
 
 func BuildSlottedTablePageData(pageID uint32, rows [][]parser.Value) ([]byte, error) {
+	page, _, err := BuildSlottedTablePageDataWithLocators(pageID, rows)
+	if err != nil {
+		return nil, err
+	}
+	return page, nil
+}
+
+func BuildSlottedTablePageDataWithLocators(pageID uint32, rows [][]parser.Value) ([]byte, []RowLocator, error) {
 	page := InitializeTablePage(pageID)
+	locators := make([]RowLocator, 0, len(rows))
 	for _, row := range rows {
 		encoded, err := EncodeSlottedRow(row)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if _, err := InsertRowIntoTablePage(page, encoded); err != nil {
-			return nil, err
+		slotID, err := InsertRowIntoTablePage(page, encoded)
+		if err != nil {
+			return nil, nil, err
 		}
+		locators = append(locators, RowLocator{PageID: pageID, SlotID: uint16(slotID)})
 	}
-	return page, nil
+	return page, locators, nil
 }
 
 func validateSlottedTablePage(page []byte) error {

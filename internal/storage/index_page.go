@@ -196,7 +196,7 @@ func InsertIndexEntry(page []byte, payload []byte) (entryID int, err error) {
 		return 0, err
 	}
 	if freeSpace < len(payload)+indexPageEntrySize {
-		return 0, errTablePageFull
+		return 0, errIndexPageFull
 	}
 
 	entryCount, err := IndexPageEntryCount(page)
@@ -222,6 +222,84 @@ func InsertIndexEntry(page []byte, payload []byte) (entryID int, err error) {
 	binary.LittleEndian.PutUint16(page[indexPageBodyOffsetFreeStart:indexPageBodyOffsetFreeStart+2], uint16(freeStart+indexPageEntrySize))
 	binary.LittleEndian.PutUint16(page[indexPageBodyOffsetFreeEnd:indexPageBodyOffsetFreeEnd+2], uint16(payloadOffset))
 	return entryCount, nil
+}
+
+type IndexLeafRecord struct {
+	Key     []byte
+	Locator RowLocator
+}
+
+func ReadIndexLeafRecords(page []byte) ([]IndexLeafRecord, error) {
+	if err := validateLeafIndexPage(page); err != nil {
+		return nil, err
+	}
+
+	entryCount, err := IndexPageEntryCount(page)
+	if err != nil {
+		return nil, err
+	}
+
+	records := make([]IndexLeafRecord, 0, entryCount)
+	for entryID := 0; entryID < entryCount; entryID++ {
+		key, locator, err := IndexLeafEntry(page, entryID)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, IndexLeafRecord{
+			Key:     key,
+			Locator: locator,
+		})
+	}
+	return records, nil
+}
+
+func InsertIndexLeafRecordSorted(page []byte, key []byte, locator RowLocator) ([]byte, error) {
+	if err := validateLeafIndexPage(page); err != nil {
+		return nil, err
+	}
+
+	records, err := ReadIndexLeafRecords(page)
+	if err != nil {
+		return nil, err
+	}
+	records = append(records, IndexLeafRecord{
+		Key:     append([]byte(nil), key...),
+		Locator: locator,
+	})
+	for i := 1; i < len(records); i++ {
+		for j := i; j > 0; j-- {
+			cmp, err := CompareIndexKeys(records[j-1].Key, records[j].Key)
+			if err != nil {
+				return nil, err
+			}
+			if cmp <= 0 {
+				break
+			}
+			records[j-1], records[j] = records[j], records[j-1]
+		}
+	}
+
+	pageID := binary.LittleEndian.Uint32(page[indexPageHeaderOffsetPageID : indexPageHeaderOffsetPageID+4])
+	sibling, err := IndexLeafRightSibling(page)
+	if err != nil {
+		return nil, err
+	}
+	rebuilt := InitIndexLeafPage(pageID)
+	if sibling != 0 {
+		if err := SetIndexLeafRightSibling(rebuilt, sibling); err != nil {
+			return nil, err
+		}
+	}
+	for _, record := range records {
+		payload, err := EncodeIndexLeafEntry(record.Key, record.Locator)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := InsertIndexEntry(rebuilt, payload); err != nil {
+			return nil, err
+		}
+	}
+	return rebuilt, nil
 }
 
 func initIndexPage(pageID uint32, pageType PageType) []byte {

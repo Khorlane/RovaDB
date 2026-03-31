@@ -199,8 +199,8 @@ func TestInsertIndexEntryRejectsInsufficientSpace(t *testing.T) {
 	payload := bytes.Repeat([]byte("x"), PageSize)
 
 	_, err := InsertIndexEntry(page, payload)
-	if !errors.Is(err, errTablePageFull) {
-		t.Fatalf("InsertIndexEntry() error = %v, want %v", err, errTablePageFull)
+	if !errors.Is(err, errIndexPageFull) {
+		t.Fatalf("InsertIndexEntry() error = %v, want %v", err, errIndexPageFull)
 	}
 }
 
@@ -309,5 +309,59 @@ func TestDecodeIndexEntriesRejectMalformedPayload(t *testing.T) {
 	}
 	if _, _, err := DecodeIndexLeafEntry([]byte{1}); !errors.Is(err, errCorruptedIndexPage) {
 		t.Fatalf("DecodeIndexLeafEntry() error = %v, want %v", err, errCorruptedIndexPage)
+	}
+}
+
+func TestInsertIndexLeafRecordSortedMaintainsOrder(t *testing.T) {
+	page := InitIndexLeafPage(11)
+
+	var err error
+	page, err = InsertIndexLeafRecordSorted(page, []byte("bob"), RowLocator{PageID: 1, SlotID: 1})
+	if err != nil {
+		t.Fatalf("InsertIndexLeafRecordSorted(bob) error = %v", err)
+	}
+	page, err = InsertIndexLeafRecordSorted(page, []byte("alice"), RowLocator{PageID: 1, SlotID: 0})
+	if err != nil {
+		t.Fatalf("InsertIndexLeafRecordSorted(alice) error = %v", err)
+	}
+	page, err = InsertIndexLeafRecordSorted(page, []byte("alice"), RowLocator{PageID: 1, SlotID: 2})
+	if err != nil {
+		t.Fatalf("InsertIndexLeafRecordSorted(alice duplicate) error = %v", err)
+	}
+
+	records, err := ReadIndexLeafRecords(page)
+	if err != nil {
+		t.Fatalf("ReadIndexLeafRecords() error = %v", err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("len(records) = %d, want 3", len(records))
+	}
+	if string(records[0].Key) != "alice" || records[0].Locator != (RowLocator{PageID: 1, SlotID: 0}) {
+		t.Fatalf("records[0] = %#v, want alice -> (1,0)", records[0])
+	}
+	if string(records[1].Key) != "alice" || records[1].Locator != (RowLocator{PageID: 1, SlotID: 2}) {
+		t.Fatalf("records[1] = %#v, want alice -> (1,2)", records[1])
+	}
+	if string(records[2].Key) != "bob" || records[2].Locator != (RowLocator{PageID: 1, SlotID: 1}) {
+		t.Fatalf("records[2] = %#v, want bob -> (1,1)", records[2])
+	}
+}
+
+func TestInsertIndexLeafRecordSortedRejectsFullPage(t *testing.T) {
+	page := InitIndexLeafPage(12)
+	largeKey := make([]byte, 512)
+	for i := range largeKey {
+		largeKey[i] = 'x'
+	}
+
+	for {
+		next, err := InsertIndexLeafRecordSorted(page, largeKey, RowLocator{PageID: 1, SlotID: 1})
+		if errors.Is(err, errIndexPageFull) {
+			return
+		}
+		if err != nil {
+			t.Fatalf("InsertIndexLeafRecordSorted() error = %v, want %v", err, errIndexPageFull)
+		}
+		page = next
 	}
 }

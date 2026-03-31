@@ -1,6 +1,9 @@
 package storage
 
-import "bytes"
+import (
+	"bytes"
+	"encoding/binary"
+)
 
 type IndexPageReader func(pageID uint32) ([]byte, error)
 
@@ -19,7 +22,7 @@ func FindIndexLeafPage(pageReader IndexPageReader, rootPageID uint32, searchKey 
 			return 0, nil, err
 		}
 
-		pageType := PageType(bytesToUint16(page[indexPageHeaderOffsetPageType : indexPageHeaderOffsetPageType+2]))
+		pageType := PageType(binary.LittleEndian.Uint16(page[indexPageHeaderOffsetPageType : indexPageHeaderOffsetPageType+2]))
 		if pageType == PageTypeIndexLeaf {
 			return currentPageID, page, nil
 		}
@@ -85,7 +88,11 @@ func chooseIndexChildPage(page []byte, searchKey []byte) (uint32, error) {
 			return 0, err
 		}
 		rightmostChildPageID = childPageID
-		if bytes.Compare(searchKey, key) < 0 {
+		cmp, err := CompareIndexKeys(searchKey, key)
+		if err != nil {
+			return 0, err
+		}
+		if cmp < 0 {
 			return childPageID, nil
 		}
 	}
@@ -93,8 +100,4 @@ func chooseIndexChildPage(page []byte, searchKey []byte) (uint32, error) {
 		return 0, errCorruptedIndexPage
 	}
 	return rightmostChildPageID, nil
-}
-
-func bytesToUint16(data []byte) uint16 {
-	return uint16(data[0]) | uint16(data[1])<<8
 }
