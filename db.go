@@ -413,11 +413,15 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
-		rows, err := executor.Select(plan, db.tables)
+		execTables, err := db.tablesForSelect(plan)
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
-		columns, err := executor.ProjectedColumnNamesForPlan(plan, db.tables)
+		rows, err := executor.Select(plan, execTables)
+		if err != nil {
+			return &Rows{err: err, idx: -1}, nil
+		}
+		columns, err := executor.ProjectedColumnNamesForPlan(plan, execTables)
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
@@ -453,6 +457,51 @@ func materializeRows(rows [][]parser.Value) [][]any {
 		materialized = append(materialized, values)
 	}
 	return materialized
+}
+
+func (db *DB) tablesForSelect(plan *planner.SelectPlan) (map[string]*executor.Table, error) {
+	if plan == nil || plan.Stmt == nil || plan.ScanType != planner.ScanTypeTable {
+		return db.tables, nil
+	}
+
+	table := db.tables[plan.Stmt.TableName]
+	if table == nil {
+		return nil, newExecError("table not found: " + plan.Stmt.TableName)
+	}
+
+	rows, err := db.scanTableRows(table)
+	if err != nil {
+		return nil, err
+	}
+
+	execTables := make(map[string]*executor.Table, len(db.tables))
+	for name, existing := range db.tables {
+		execTables[name] = existing
+	}
+	execTables[table.Name] = cloneTableWithRows(table, rows)
+	return execTables, nil
+}
+
+func (db *DB) scanTableRows(table *executor.Table) ([][]parser.Value, error) {
+	if db == nil || table == nil {
+		return nil, ErrInvalidArgument
+	}
+
+	pageData, err := readCommittedPageData(db.pool, table.RootPageID())
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+	if pageData == nil {
+		return nil, newStorageError("corrupted table page")
+	}
+	rows, err := decodePersistedTableRows(pageData, table.Columns)
+	if err != nil {
+		return nil, err
+	}
+	if uint32(len(rows)) != table.PersistedRowCount() {
+		return nil, newStorageError("row count mismatch")
+	}
+	return cloneRows(rows), nil
 }
 
 func apiValue(value parser.Value) any {
@@ -641,6 +690,7 @@ func (db *DB) commitTxn() error {
 		}
 		return err
 	}
+	db.refreshBufferPool()
 	return nil
 }
 
@@ -674,6 +724,14 @@ func (db *DB) applyStagedCreate(stagedTables map[string]*executor.Table, tableNa
 		return err
 	}
 	return nil
+}
+
+func (db *DB) refreshBufferPool() {
+	if db == nil || db.pager == nil {
+		return
+	}
+	poolSize := int(db.pager.NextPageID()) + 1
+	db.pool = bufferpool.New(poolSize, pagerPageLoader{pager: db.pager})
 }
 
 func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, tableName string) error {
@@ -794,6 +852,22 @@ func cloneTable(table *executor.Table) *executor.Table {
 			continue
 		}
 		_ = index.Rebuild(colNames, cloned.Rows)
+	}
+	cloned.SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
+	return cloned
+}
+
+func cloneTableWithRows(table *executor.Table, rows [][]parser.Value) *executor.Table {
+	if table == nil {
+		return nil
+	}
+
+	cloned := &executor.Table{
+		Name:      table.Name,
+		Columns:   append([]parser.ColumnDef(nil), table.Columns...),
+		Rows:      cloneRows(rows),
+		Indexes:   table.Indexes,
+		IndexDefs: cloneIndexDefs(table.IndexDefs),
 	}
 	cloned.SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
 	return cloned
