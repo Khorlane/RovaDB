@@ -11,6 +11,9 @@ func (bp *BufferPool) getOrLoadCommittedFrame(pageID PageID) (*Frame, error) {
 	if f, ok := bp.getCommittedFrame(pageID); ok {
 		return bp.pinLatchAndReturn(f), nil
 	}
+	if err := bp.ensureCapacity(); err != nil {
+		return nil, err
+	}
 	frame, err := bp.loadCommittedFrame(pageID)
 	if err != nil {
 		return nil, err

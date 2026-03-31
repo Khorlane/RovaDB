@@ -66,7 +66,8 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
-	pool := bufferpool.New(0, pagerPageLoader{pager: pager})
+	poolSize := int(pager.NextPageID()) + 1
+	pool := bufferpool.New(poolSize, pagerPageLoader{pager: pager})
 	catalog, err := storage.LoadCatalog(storage.PageReaderFunc(func(pageID storage.PageID) ([]byte, error) {
 		frame, err := pool.GetCommittedPage(bufferpool.PageID(pageID))
 		if err != nil {

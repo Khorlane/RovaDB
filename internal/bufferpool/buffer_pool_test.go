@@ -41,7 +41,7 @@ func TestGetCommittedPageLoadsViaLoader(t *testing.T) {
 			7: bytes.Repeat([]byte{0xAB}, PageSize),
 		},
 	}
-	pool := New(1, loader)
+	pool := New(2, loader)
 
 	frame, err := pool.GetCommittedPage(7)
 	if err != nil {
@@ -91,7 +91,7 @@ func TestGetCommittedPageLoadsViaLoader(t *testing.T) {
 
 func TestGetCommittedPagePropagatesLoaderError(t *testing.T) {
 	want := errors.New("boom")
-	pool := New(1, &stubLoader{err: want})
+	pool := New(2, &stubLoader{err: want})
 
 	_, err := pool.GetCommittedPage(1)
 	if !errors.Is(err, want) {
@@ -106,7 +106,7 @@ func TestGetCommittedPageLoadsDistinctPagesSeparately(t *testing.T) {
 			2: bytes.Repeat([]byte{0x22}, PageSize),
 		},
 	}
-	pool := New(1, loader)
+	pool := New(2, loader)
 
 	frame1, err := pool.GetCommittedPage(1)
 	if err != nil {
@@ -140,7 +140,7 @@ func TestGetCommittedPageLoadsDistinctPagesSeparately(t *testing.T) {
 }
 
 func TestGetCommittedPageRejectsInvalidPageSize(t *testing.T) {
-	pool := New(1, &stubLoader{
+	pool := New(2, &stubLoader{
 		pages: map[PageID][]byte{
 			3: []byte{0x01, 0x02},
 		},
@@ -162,7 +162,7 @@ func TestGetCommittedPageFailedLoadDoesNotPopulateCache(t *testing.T) {
 			5: want,
 		},
 	}
-	pool := New(1, loader)
+	pool := New(2, loader)
 
 	_, err := pool.GetCommittedPage(5)
 	if !errors.Is(err, want) {
@@ -197,7 +197,7 @@ func TestGetCommittedPageRetryAfterFailedLoadCanPopulateCache(t *testing.T) {
 			6: want,
 		},
 	}
-	pool := New(1, loader)
+	pool := New(2, loader)
 
 	_, err := pool.GetCommittedPage(6)
 	if !errors.Is(err, want) {
@@ -246,7 +246,7 @@ func TestGetCommittedPageCopiesDataIntoFrame(t *testing.T) {
 			9: pageData,
 		},
 	}
-	pool := New(1, loader)
+	pool := New(2, loader)
 
 	frame, err := pool.GetCommittedPage(9)
 	if err != nil {
@@ -265,7 +265,7 @@ func TestGetCommittedPageCopiesDataIntoFrame(t *testing.T) {
 }
 
 func TestUnpinDecrementsButNeverGoesNegative(t *testing.T) {
-	pool := New(1, &stubLoader{
+	pool := New(2, &stubLoader{
 		pages: map[PageID][]byte{
 			4: bytes.Repeat([]byte{0x44}, PageSize),
 		},
@@ -299,14 +299,14 @@ func TestUnpinDecrementsButNeverGoesNegative(t *testing.T) {
 }
 
 func TestPinAndUnpinNilAreNoOps(t *testing.T) {
-	pool := New(1, nil)
+	pool := New(2, nil)
 
 	pool.Pin(nil)
 	pool.Unpin(nil)
 }
 
 func TestGetCommittedPageReturnsSharedLatchedFrame(t *testing.T) {
-	pool := New(1, &stubLoader{
+	pool := New(2, &stubLoader{
 		pages: map[PageID][]byte{
 			8: bytes.Repeat([]byte{0x88}, PageSize),
 		},
@@ -347,7 +347,7 @@ func TestGetCommittedPageReturnsSharedLatchedFrame(t *testing.T) {
 }
 
 func TestRepeatedGetCommittedPageReturnsSharedLatchedFrame(t *testing.T) {
-	pool := New(1, &stubLoader{
+	pool := New(2, &stubLoader{
 		pages: map[PageID][]byte{
 			10: bytes.Repeat([]byte{0xAA}, PageSize),
 		},
@@ -370,7 +370,7 @@ func TestRepeatedGetCommittedPageReturnsSharedLatchedFrame(t *testing.T) {
 }
 
 func TestUnpinDoesNotReleaseLatch(t *testing.T) {
-	pool := New(1, &stubLoader{
+	pool := New(2, &stubLoader{
 		pages: map[PageID][]byte{
 			11: bytes.Repeat([]byte{0xBB}, PageSize),
 		},
@@ -412,13 +412,13 @@ func TestUnpinDoesNotReleaseLatch(t *testing.T) {
 }
 
 func TestUnlatchSharedNilIsNoOp(t *testing.T) {
-	pool := New(1, nil)
+	pool := New(2, nil)
 
 	pool.UnlatchShared(nil)
 }
 
 func TestMarkDirtyAndMarkCleanUpdateTrackedFrameState(t *testing.T) {
-	pool := New(1, &stubLoader{
+	pool := New(2, &stubLoader{
 		pages: map[PageID][]byte{
 			12: bytes.Repeat([]byte{0x12}, PageSize),
 		},
@@ -445,7 +445,7 @@ func TestMarkDirtyAndMarkCleanUpdateTrackedFrameState(t *testing.T) {
 }
 
 func TestDirtyHelpersAreNilSafe(t *testing.T) {
-	pool := New(1, nil)
+	pool := New(2, nil)
 
 	pool.MarkDirty(nil)
 	pool.MarkClean(nil)
@@ -455,7 +455,7 @@ func TestDirtyHelpersAreNilSafe(t *testing.T) {
 }
 
 func TestDirtyFramesReturnsOnlyTrackedDirtyFrames(t *testing.T) {
-	pool := New(1, &stubLoader{
+	pool := New(3, &stubLoader{
 		pages: map[PageID][]byte{
 			13: bytes.Repeat([]byte{0x13}, PageSize),
 			14: bytes.Repeat([]byte{0x14}, PageSize),
@@ -508,4 +508,148 @@ func TestDirtyFramesReturnsOnlyTrackedDirtyFrames(t *testing.T) {
 	pool.UnlatchShared(frame13)
 	pool.UnlatchShared(frame14)
 	pool.UnlatchShared(frame15)
+}
+
+func TestEvictsOldestCleanUnpinnedFrameAtCapacity(t *testing.T) {
+	loader := &stubLoader{
+		pages: map[PageID][]byte{
+			1: bytes.Repeat([]byte{0x01}, PageSize),
+			2: bytes.Repeat([]byte{0x02}, PageSize),
+		},
+	}
+	pool := New(1, loader)
+
+	frame1, err := pool.GetCommittedPage(1)
+	if err != nil {
+		t.Fatalf("GetCommittedPage(1) error = %v", err)
+	}
+	pool.UnlatchShared(frame1)
+	pool.Unpin(frame1)
+
+	frame2, err := pool.GetCommittedPage(2)
+	if err != nil {
+		t.Fatalf("GetCommittedPage(2) error = %v", err)
+	}
+	if frame2 == frame1 {
+		t.Fatal("GetCommittedPage(2) returned evicted frame1 pointer")
+	}
+	if got := pool.committedFrameCount(); got != 1 {
+		t.Fatalf("committedFrameCount() = %d, want 1", got)
+	}
+	if _, ok := pool.getCommittedFrame(1); ok {
+		t.Fatal("page 1 still tracked after eviction")
+	}
+	if got := loader.reads[1]; got != 1 {
+		t.Fatalf("loader reads for page 1 = %d, want 1", got)
+	}
+	if got := loader.reads[2]; got != 1 {
+		t.Fatalf("loader reads for page 2 = %d, want 1", got)
+	}
+	pool.UnlatchShared(frame2)
+	pool.Unpin(frame2)
+
+	reloaded1, err := pool.GetCommittedPage(1)
+	if err != nil {
+		t.Fatalf("GetCommittedPage(1) reload error = %v", err)
+	}
+	if reloaded1 == frame1 {
+		t.Fatal("reloaded page 1 reused evicted frame pointer")
+	}
+	if got := loader.reads[1]; got != 2 {
+		t.Fatalf("loader reads for page 1 after reload = %d, want 2", got)
+	}
+	pool.UnlatchShared(reloaded1)
+}
+
+func TestPinnedFrameIsNotEvictable(t *testing.T) {
+	loader := &stubLoader{
+		pages: map[PageID][]byte{
+			1: bytes.Repeat([]byte{0x01}, PageSize),
+			2: bytes.Repeat([]byte{0x02}, PageSize),
+		},
+	}
+	pool := New(1, loader)
+
+	frame1, err := pool.GetCommittedPage(1)
+	if err != nil {
+		t.Fatalf("GetCommittedPage(1) error = %v", err)
+	}
+	pool.UnlatchShared(frame1)
+
+	_, err = pool.GetCommittedPage(2)
+	if !errors.Is(err, errNoEvictableFrame) {
+		t.Fatalf("GetCommittedPage(2) error = %v, want %v", err, errNoEvictableFrame)
+	}
+	if got := loader.reads[2]; got != 0 {
+		t.Fatalf("loader reads for page 2 = %d, want 0", got)
+	}
+	if _, ok := pool.getCommittedFrame(1); !ok {
+		t.Fatal("page 1 missing after failed eviction")
+	}
+}
+
+func TestDirtyFrameIsNotEvictable(t *testing.T) {
+	loader := &stubLoader{
+		pages: map[PageID][]byte{
+			1: bytes.Repeat([]byte{0x01}, PageSize),
+			2: bytes.Repeat([]byte{0x02}, PageSize),
+		},
+	}
+	pool := New(1, loader)
+
+	frame1, err := pool.GetCommittedPage(1)
+	if err != nil {
+		t.Fatalf("GetCommittedPage(1) error = %v", err)
+	}
+	pool.MarkDirty(frame1)
+	pool.UnlatchShared(frame1)
+	pool.Unpin(frame1)
+
+	_, err = pool.GetCommittedPage(2)
+	if !errors.Is(err, errNoEvictableFrame) {
+		t.Fatalf("GetCommittedPage(2) error = %v, want %v", err, errNoEvictableFrame)
+	}
+	if got := loader.reads[2]; got != 0 {
+		t.Fatalf("loader reads for page 2 = %d, want 0", got)
+	}
+	if _, ok := pool.getCommittedFrame(1); !ok {
+		t.Fatal("page 1 missing after dirty eviction attempt")
+	}
+}
+
+func TestCacheHitDoesNotTriggerEviction(t *testing.T) {
+	loader := &stubLoader{
+		pages: map[PageID][]byte{
+			1: bytes.Repeat([]byte{0x01}, PageSize),
+		},
+	}
+	pool := New(1, loader)
+
+	frame1, err := pool.GetCommittedPage(1)
+	if err != nil {
+		t.Fatalf("GetCommittedPage(1) error = %v", err)
+	}
+	pool.UnlatchShared(frame1)
+
+	again, err := pool.GetCommittedPage(1)
+	if err != nil {
+		t.Fatalf("second GetCommittedPage(1) error = %v", err)
+	}
+	if again != frame1 {
+		t.Fatal("cache hit returned different frame")
+	}
+	if got := loader.reads[1]; got != 1 {
+		t.Fatalf("loader reads for page 1 = %d, want 1", got)
+	}
+	if len(pool.order) != 1 {
+		t.Fatalf("len(order) = %d, want 1", len(pool.order))
+	}
+	pool.UnlatchShared(frame1)
+}
+
+func TestCapacityNormalizesToAtLeastOne(t *testing.T) {
+	pool := New(0, nil)
+	if pool.capacity != 1 {
+		t.Fatalf("capacity = %d, want 1", pool.capacity)
+	}
 }
