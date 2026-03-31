@@ -11,6 +11,7 @@ var (
 	errCorruptedPageHeader     = dberr.NewStorage("corrupted page header")
 	errCorruptedCatalogPage    = dberr.NewStorage("corrupted catalog page")
 	errCorruptedTablePage      = dberr.NewStorage("corrupted table page")
+	errCorruptedIndexPage      = dberr.NewStorage("corrupted index page")
 	errCorruptedRowData        = dberr.NewStorage("corrupted row data")
 	errCorruptedIndexMetadata  = dberr.NewStorage("corrupted index metadata")
 

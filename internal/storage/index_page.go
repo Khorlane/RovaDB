@@ -8,6 +8,9 @@ const (
 	indexPageEntrySize        = 4
 	indexPageBodyStart        = indexPageCommonHeaderSize + indexPageBodyHeaderSize
 
+	indexInternalEntryHeaderSize = 2
+	indexLeafEntryHeaderSize     = 2
+
 	indexPageHeaderOffsetPageID   = 0
 	indexPageHeaderOffsetPageType = 4
 	indexPageHeaderOffsetPageLSN  = 8
@@ -85,16 +88,102 @@ func IndexPageEntry(page []byte, entryID int) (offset int, length int, err error
 		return 0, 0, err
 	}
 	if entryID < 0 || entryID >= entryCount {
-		return 0, 0, errCorruptedTablePage
+		return 0, 0, errCorruptedIndexPage
 	}
 
 	entryOffset := indexPageBodyStart + entryID*indexPageEntrySize
 	offset = int(binary.LittleEndian.Uint16(page[entryOffset : entryOffset+2]))
 	length = int(binary.LittleEndian.Uint16(page[entryOffset+2 : entryOffset+4]))
 	if offset < indexPageBodyStart || offset+length > PageSize {
-		return 0, 0, errCorruptedTablePage
+		return 0, 0, errCorruptedIndexPage
 	}
 	return offset, length, nil
+}
+
+func IndexPageEntryPayload(page []byte, entryID int) ([]byte, error) {
+	offset, length, err := IndexPageEntry(page, entryID)
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), page[offset:offset+length]...), nil
+}
+
+func EncodeIndexInternalEntry(key []byte, childPageID uint32) ([]byte, error) {
+	if len(key) > int(^uint16(0)) {
+		return nil, errCorruptedIndexPage
+	}
+
+	payload := make([]byte, indexInternalEntryHeaderSize+len(key)+4)
+	binary.LittleEndian.PutUint16(payload[0:2], uint16(len(key)))
+	copy(payload[2:2+len(key)], key)
+	binary.LittleEndian.PutUint32(payload[2+len(key):], childPageID)
+	return payload, nil
+}
+
+func DecodeIndexInternalEntry(payload []byte) (key []byte, childPageID uint32, err error) {
+	if len(payload) < indexInternalEntryHeaderSize+4 {
+		return nil, 0, errCorruptedIndexPage
+	}
+	keyLength := int(binary.LittleEndian.Uint16(payload[0:2]))
+	if len(payload) != indexInternalEntryHeaderSize+keyLength+4 {
+		return nil, 0, errCorruptedIndexPage
+	}
+
+	key = append([]byte(nil), payload[2:2+keyLength]...)
+	childPageID = binary.LittleEndian.Uint32(payload[2+keyLength:])
+	return key, childPageID, nil
+}
+
+func EncodeIndexLeafEntry(key []byte, locator RowLocator) ([]byte, error) {
+	if len(key) > int(^uint16(0)) {
+		return nil, errCorruptedIndexPage
+	}
+
+	payload := make([]byte, indexLeafEntryHeaderSize+len(key)+4+2)
+	binary.LittleEndian.PutUint16(payload[0:2], uint16(len(key)))
+	copy(payload[2:2+len(key)], key)
+	binary.LittleEndian.PutUint32(payload[2+len(key):2+len(key)+4], locator.PageID)
+	binary.LittleEndian.PutUint16(payload[2+len(key)+4:], locator.SlotID)
+	return payload, nil
+}
+
+func DecodeIndexLeafEntry(payload []byte) (key []byte, locator RowLocator, err error) {
+	if len(payload) < indexLeafEntryHeaderSize+4+2 {
+		return nil, RowLocator{}, errCorruptedIndexPage
+	}
+	keyLength := int(binary.LittleEndian.Uint16(payload[0:2]))
+	if len(payload) != indexLeafEntryHeaderSize+keyLength+4+2 {
+		return nil, RowLocator{}, errCorruptedIndexPage
+	}
+
+	key = append([]byte(nil), payload[2:2+keyLength]...)
+	locator = RowLocator{
+		PageID: binary.LittleEndian.Uint32(payload[2+keyLength : 2+keyLength+4]),
+		SlotID: binary.LittleEndian.Uint16(payload[2+keyLength+4:]),
+	}
+	return key, locator, nil
+}
+
+func IndexLeafEntry(page []byte, entryID int) (key []byte, locator RowLocator, err error) {
+	if err := validateLeafIndexPage(page); err != nil {
+		return nil, RowLocator{}, err
+	}
+	payload, err := IndexPageEntryPayload(page, entryID)
+	if err != nil {
+		return nil, RowLocator{}, err
+	}
+	return DecodeIndexLeafEntry(payload)
+}
+
+func IndexInternalEntry(page []byte, entryID int) (key []byte, childPageID uint32, err error) {
+	if err := validateInternalIndexPage(page); err != nil {
+		return nil, 0, err
+	}
+	payload, err := IndexPageEntryPayload(page, entryID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return DecodeIndexInternalEntry(payload)
 }
 
 func InsertIndexEntry(page []byte, payload []byte) (entryID int, err error) {
@@ -149,11 +238,11 @@ func initIndexPage(pageID uint32, pageType PageType) []byte {
 
 func validateIndexPage(page []byte) error {
 	if len(page) != PageSize {
-		return errCorruptedTablePage
+		return errCorruptedIndexPage
 	}
 	pageType := PageType(binary.LittleEndian.Uint16(page[indexPageHeaderOffsetPageType : indexPageHeaderOffsetPageType+2]))
 	if !IsIndexPageType(pageType) {
-		return errCorruptedTablePage
+		return errCorruptedIndexPage
 	}
 
 	entryCount := int(binary.LittleEndian.Uint16(page[indexPageBodyOffsetEntryCount : indexPageBodyOffsetEntryCount+2]))
@@ -162,10 +251,10 @@ func validateIndexPage(page []byte) error {
 	expectedFreeStart := indexPageBodyStart + entryCount*indexPageEntrySize
 
 	if freeStart < indexPageBodyStart || freeEnd < indexPageBodyStart || freeEnd > PageSize {
-		return errCorruptedTablePage
+		return errCorruptedIndexPage
 	}
 	if freeStart != expectedFreeStart || freeStart > freeEnd {
-		return errCorruptedTablePage
+		return errCorruptedIndexPage
 	}
 	return nil
 }
@@ -176,7 +265,18 @@ func validateLeafIndexPage(page []byte) error {
 	}
 	pageType := PageType(binary.LittleEndian.Uint16(page[indexPageHeaderOffsetPageType : indexPageHeaderOffsetPageType+2]))
 	if pageType != PageTypeIndexLeaf {
-		return errCorruptedTablePage
+		return errCorruptedIndexPage
+	}
+	return nil
+}
+
+func validateInternalIndexPage(page []byte) error {
+	if err := validateIndexPage(page); err != nil {
+		return err
+	}
+	pageType := PageType(binary.LittleEndian.Uint16(page[indexPageHeaderOffsetPageType : indexPageHeaderOffsetPageType+2]))
+	if pageType != PageTypeIndexInternal {
+		return errCorruptedIndexPage
 	}
 	return nil
 }

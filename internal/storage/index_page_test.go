@@ -162,35 +162,35 @@ func TestIndexLeafRightSibling(t *testing.T) {
 func TestIndexLeafSiblingHelpersRejectInternalPage(t *testing.T) {
 	page := InitIndexInternalPage(4)
 
-	if _, err := IndexLeafRightSibling(page); !errors.Is(err, errCorruptedTablePage) {
-		t.Fatalf("IndexLeafRightSibling() error = %v, want %v", err, errCorruptedTablePage)
+	if _, err := IndexLeafRightSibling(page); !errors.Is(err, errCorruptedIndexPage) {
+		t.Fatalf("IndexLeafRightSibling() error = %v, want %v", err, errCorruptedIndexPage)
 	}
-	if err := SetIndexLeafRightSibling(page, 5); !errors.Is(err, errCorruptedTablePage) {
-		t.Fatalf("SetIndexLeafRightSibling() error = %v, want %v", err, errCorruptedTablePage)
+	if err := SetIndexLeafRightSibling(page, 5); !errors.Is(err, errCorruptedIndexPage) {
+		t.Fatalf("SetIndexLeafRightSibling() error = %v, want %v", err, errCorruptedIndexPage)
 	}
 }
 
 func TestIndexPageRejectsWrongPageType(t *testing.T) {
 	page := InitializeTablePage(5)
 
-	if _, err := IndexPageEntryCount(page); !errors.Is(err, errCorruptedTablePage) {
-		t.Fatalf("IndexPageEntryCount() error = %v, want %v", err, errCorruptedTablePage)
+	if _, err := IndexPageEntryCount(page); !errors.Is(err, errCorruptedIndexPage) {
+		t.Fatalf("IndexPageEntryCount() error = %v, want %v", err, errCorruptedIndexPage)
 	}
 }
 
 func TestIndexPageRejectsInvalidPageSize(t *testing.T) {
 	page := make([]byte, PageSize-1)
 
-	if _, err := IndexPageEntryCount(page); !errors.Is(err, errCorruptedTablePage) {
-		t.Fatalf("IndexPageEntryCount() error = %v, want %v", err, errCorruptedTablePage)
+	if _, err := IndexPageEntryCount(page); !errors.Is(err, errCorruptedIndexPage) {
+		t.Fatalf("IndexPageEntryCount() error = %v, want %v", err, errCorruptedIndexPage)
 	}
 }
 
 func TestIndexPageEntryRejectsOutOfRange(t *testing.T) {
 	page := InitIndexLeafPage(6)
 
-	if _, _, err := IndexPageEntry(page, 0); !errors.Is(err, errCorruptedTablePage) {
-		t.Fatalf("IndexPageEntry() error = %v, want %v", err, errCorruptedTablePage)
+	if _, _, err := IndexPageEntry(page, 0); !errors.Is(err, errCorruptedIndexPage) {
+		t.Fatalf("IndexPageEntry() error = %v, want %v", err, errCorruptedIndexPage)
 	}
 }
 
@@ -201,5 +201,113 @@ func TestInsertIndexEntryRejectsInsufficientSpace(t *testing.T) {
 	_, err := InsertIndexEntry(page, payload)
 	if !errors.Is(err, errTablePageFull) {
 		t.Fatalf("InsertIndexEntry() error = %v, want %v", err, errTablePageFull)
+	}
+}
+
+func TestEncodeDecodeIndexInternalEntry(t *testing.T) {
+	payload, err := EncodeIndexInternalEntry([]byte("m"), 42)
+	if err != nil {
+		t.Fatalf("EncodeIndexInternalEntry() error = %v", err)
+	}
+
+	key, childPageID, err := DecodeIndexInternalEntry(payload)
+	if err != nil {
+		t.Fatalf("DecodeIndexInternalEntry() error = %v", err)
+	}
+	if string(key) != "m" {
+		t.Fatalf("key = %q, want %q", key, "m")
+	}
+	if childPageID != 42 {
+		t.Fatalf("childPageID = %d, want 42", childPageID)
+	}
+}
+
+func TestEncodeDecodeIndexLeafEntry(t *testing.T) {
+	payload, err := EncodeIndexLeafEntry([]byte("alice"), RowLocator{PageID: 7, SlotID: 3})
+	if err != nil {
+		t.Fatalf("EncodeIndexLeafEntry() error = %v", err)
+	}
+
+	key, locator, err := DecodeIndexLeafEntry(payload)
+	if err != nil {
+		t.Fatalf("DecodeIndexLeafEntry() error = %v", err)
+	}
+	if string(key) != "alice" {
+		t.Fatalf("key = %q, want %q", key, "alice")
+	}
+	if locator != (RowLocator{PageID: 7, SlotID: 3}) {
+		t.Fatalf("locator = %#v, want (7,3)", locator)
+	}
+}
+
+func TestIndexPageEntryPayload(t *testing.T) {
+	page := InitIndexLeafPage(8)
+	payload, err := EncodeIndexLeafEntry([]byte("a"), RowLocator{PageID: 1, SlotID: 2})
+	if err != nil {
+		t.Fatalf("EncodeIndexLeafEntry() error = %v", err)
+	}
+	if _, err := InsertIndexEntry(page, payload); err != nil {
+		t.Fatalf("InsertIndexEntry() error = %v", err)
+	}
+
+	got, err := IndexPageEntryPayload(page, 0)
+	if err != nil {
+		t.Fatalf("IndexPageEntryPayload() error = %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("IndexPageEntryPayload() = %#v, want %#v", got, payload)
+	}
+}
+
+func TestIndexLeafEntry(t *testing.T) {
+	page := InitIndexLeafPage(9)
+	payload, err := EncodeIndexLeafEntry([]byte("alice"), RowLocator{PageID: 5, SlotID: 1})
+	if err != nil {
+		t.Fatalf("EncodeIndexLeafEntry() error = %v", err)
+	}
+	if _, err := InsertIndexEntry(page, payload); err != nil {
+		t.Fatalf("InsertIndexEntry() error = %v", err)
+	}
+
+	key, locator, err := IndexLeafEntry(page, 0)
+	if err != nil {
+		t.Fatalf("IndexLeafEntry() error = %v", err)
+	}
+	if string(key) != "alice" {
+		t.Fatalf("key = %q, want %q", key, "alice")
+	}
+	if locator != (RowLocator{PageID: 5, SlotID: 1}) {
+		t.Fatalf("locator = %#v, want (5,1)", locator)
+	}
+}
+
+func TestIndexInternalEntry(t *testing.T) {
+	page := InitIndexInternalPage(10)
+	payload, err := EncodeIndexInternalEntry([]byte("m"), 11)
+	if err != nil {
+		t.Fatalf("EncodeIndexInternalEntry() error = %v", err)
+	}
+	if _, err := InsertIndexEntry(page, payload); err != nil {
+		t.Fatalf("InsertIndexEntry() error = %v", err)
+	}
+
+	key, childPageID, err := IndexInternalEntry(page, 0)
+	if err != nil {
+		t.Fatalf("IndexInternalEntry() error = %v", err)
+	}
+	if string(key) != "m" {
+		t.Fatalf("key = %q, want %q", key, "m")
+	}
+	if childPageID != 11 {
+		t.Fatalf("childPageID = %d, want 11", childPageID)
+	}
+}
+
+func TestDecodeIndexEntriesRejectMalformedPayload(t *testing.T) {
+	if _, _, err := DecodeIndexInternalEntry([]byte{1}); !errors.Is(err, errCorruptedIndexPage) {
+		t.Fatalf("DecodeIndexInternalEntry() error = %v, want %v", err, errCorruptedIndexPage)
+	}
+	if _, _, err := DecodeIndexLeafEntry([]byte{1}); !errors.Is(err, errCorruptedIndexPage) {
+		t.Fatalf("DecodeIndexLeafEntry() error = %v, want %v", err, errCorruptedIndexPage)
 	}
 }
