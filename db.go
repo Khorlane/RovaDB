@@ -83,6 +83,11 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
+	if err := validatePersistedIndexRoots(pool, tables); err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, err
+	}
 	if err := loadPersistedRows(pool, tables); err != nil {
 		_ = pager.Close()
 		_ = file.Close()
@@ -1777,6 +1782,31 @@ func loadPersistedRows(pool *bufferpool.BufferPool, tables map[string]*executor.
 		}
 	}
 
+	return nil
+}
+
+func validatePersistedIndexRoots(pool *bufferpool.BufferPool, tables map[string]*executor.Table) error {
+	for _, table := range tables {
+		if table == nil {
+			continue
+		}
+		for _, indexDef := range table.IndexDefs {
+			if indexDef.RootPageID == 0 {
+				continue
+			}
+
+			pageData, err := readCommittedPageData(pool, storage.PageID(indexDef.RootPageID))
+			if err != nil {
+				return wrapStorageError(err)
+			}
+			if pageData == nil {
+				return newStorageError("corrupted index page")
+			}
+			if _, err := storage.IndexPageEntryCount(pageData); err != nil {
+				return wrapStorageError(err)
+			}
+		}
+	}
 	return nil
 }
 

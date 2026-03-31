@@ -671,6 +671,178 @@ func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
 	}
 }
 
+func TestSplitIndexLookupSurvivesReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	for _, value := range []string{"alice", "zoe"} {
+		if _, err := db.Exec("INSERT INTO users VALUES (?)", value); err != nil {
+			t.Fatalf("Exec(insert %q) error = %v", value, err)
+		}
+	}
+
+	indexDef := db.tables["users"].IndexDefinition("idx_users_name")
+	if indexDef == nil {
+		t.Fatalf("IndexDefinition(idx_users_name) = nil, defs=%#v", db.tables["users"].IndexDefs)
+	}
+	tableRootPageID := uint32(db.tables["users"].RootPageID())
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	dbFile, pager := openRawStorage(t, path)
+	leftLeafPage := pager.NewPage()
+	rightLeafPage := pager.NewPage()
+
+	aliceKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue("alice")})
+	if err != nil {
+		t.Fatalf("EncodeIndexKey(alice) error = %v", err)
+	}
+	zoeKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue("zoe")})
+	if err != nil {
+		t.Fatalf("EncodeIndexKey(zoe) error = %v", err)
+	}
+	leftLeafData, err := storage.BuildIndexLeafPageData(uint32(leftLeafPage.ID()), []storage.IndexLeafRecord{
+		{Key: aliceKey, Locator: storage.RowLocator{PageID: tableRootPageID, SlotID: 0}},
+	}, uint32(rightLeafPage.ID()))
+	if err != nil {
+		t.Fatalf("BuildIndexLeafPageData(left) error = %v", err)
+	}
+	rightLeafData, err := storage.BuildIndexLeafPageData(uint32(rightLeafPage.ID()), []storage.IndexLeafRecord{
+		{Key: zoeKey, Locator: storage.RowLocator{PageID: tableRootPageID, SlotID: 1}},
+	}, 0)
+	if err != nil {
+		t.Fatalf("BuildIndexLeafPageData(right) error = %v", err)
+	}
+	rootPageData, err := storage.BuildIndexInternalPageData(indexDef.RootPageID, []storage.IndexInternalRecord{
+		{Key: zoeKey, ChildPageID: uint32(leftLeafPage.ID())},
+		{Key: zoeKey, ChildPageID: uint32(rightLeafPage.ID())},
+	})
+	if err != nil {
+		t.Fatalf("BuildIndexInternalPageData(root) error = %v", err)
+	}
+	for _, staged := range []struct {
+		id   storage.PageID
+		data []byte
+	}{
+		{id: leftLeafPage.ID(), data: leftLeafData},
+		{id: rightLeafPage.ID(), data: rightLeafData},
+		{id: storage.PageID(indexDef.RootPageID), data: rootPageData},
+	} {
+		page, err := pager.Get(staged.id)
+		if err != nil {
+			t.Fatalf("pager.Get(%d) error = %v", staged.id, err)
+		}
+		pager.MarkDirtyWithOriginal(page)
+		clear(page.Data())
+		copy(page.Data(), staged.data)
+	}
+	if err := pager.FlushDirty(); err != nil {
+		t.Fatalf("pager.FlushDirty() error = %v", err)
+	}
+	if err := dbFile.Close(); err != nil {
+		t.Fatalf("dbFile.Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	table := db.tables["users"]
+	indexDef = table.IndexDefinition("idx_users_name")
+	if indexDef == nil {
+		t.Fatalf("IndexDefinition(idx_users_name) = nil after reopen, defs=%#v", table.IndexDefs)
+	}
+	rootPageData, err = readCommittedPageData(db.pool, storage.PageID(indexDef.RootPageID))
+	if err != nil {
+		t.Fatalf("readCommittedPageData(root after reopen) error = %v", err)
+	}
+	if got := storage.PageType(binary.LittleEndian.Uint16(rootPageData[4:6])); got != storage.PageTypeIndexInternal {
+		t.Fatalf("root page type after reopen = %d, want %d", got, storage.PageTypeIndexInternal)
+	}
+
+	pageReader := func(pageID uint32) ([]byte, error) {
+		return readCommittedPageData(db.pool, storage.PageID(pageID))
+	}
+	for _, searchValue := range []string{"alice", "zoe"} {
+		searchKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue(searchValue)})
+		if err != nil {
+			t.Fatalf("EncodeIndexKey(%q) error = %v", searchValue, err)
+		}
+		locators, err := storage.LookupIndexExact(pageReader, indexDef.RootPageID, searchKey)
+		if err != nil {
+			t.Fatalf("LookupIndexExact(%q) error = %v", searchValue, err)
+		}
+		if len(locators) != 1 {
+			t.Fatalf("len(locators) for %q = %d, want 1", searchValue, len(locators))
+		}
+		row, err := db.fetchRowByLocator(table, locators[0])
+		if err != nil {
+			t.Fatalf("fetchRowByLocator(%q) error = %v", searchValue, err)
+		}
+		if len(row) != 1 || row[0] != parser.StringValue(searchValue) {
+			t.Fatalf("row for %q = %#v, want [%#v]", searchValue, row, parser.StringValue(searchValue))
+		}
+	}
+}
+
+func TestOpenFailsWhenPersistedIndexRootHasWrongPageType(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	dbFile, pager := openRawStorage(t, path)
+	catalog, err := storage.LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+	rootPageID := storage.PageID(catalog.Tables[0].Indexes[0].RootPageID)
+	rootPage, err := pager.Get(rootPageID)
+	if err != nil {
+		t.Fatalf("pager.Get(index root) error = %v", err)
+	}
+	pager.MarkDirtyWithOriginal(rootPage)
+	wrongPage := storage.InitializeTablePage(uint32(rootPageID))
+	clear(rootPage.Data())
+	copy(rootPage.Data(), wrongPage)
+	if err := pager.FlushDirty(); err != nil {
+		t.Fatalf("pager.FlushDirty() error = %v", err)
+	}
+	if err := dbFile.Close(); err != nil {
+		t.Fatalf("dbFile.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		db.Close()
+		t.Fatal("Open() error = nil, want corrupted index page")
+	}
+	if err.Error() != "storage: corrupted index page" {
+		t.Fatalf("Open() error = %q, want %q", err.Error(), "storage: corrupted index page")
+	}
+}
+
 func assertIndexedRowLookup(t *testing.T, db *DB, tableName, indexName string, keyValues []parser.Value, wantRows [][]parser.Value) [][]parser.Value {
 	t.Helper()
 
