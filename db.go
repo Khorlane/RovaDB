@@ -1,6 +1,7 @@
 package rovadb
 
 import (
+	"encoding/binary"
 	"errors"
 	"os"
 	"reflect"
@@ -661,7 +662,7 @@ func (db *DB) applyStagedCreate(stagedTables map[string]*executor.Table, tableNa
 	if err != nil {
 		return wrapStorageError(err)
 	}
-	rootPageData, err := storage.BuildTablePageData(nil)
+	rootPageData, err := storage.BuildSlottedTablePageData(uint32(rootPageID), nil)
 	if err != nil {
 		return wrapStorageError(err)
 	}
@@ -691,11 +692,7 @@ func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, t
 	// planner/executor cannot use a narrower persistence strategy.
 	table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
 
-	encodedRows, err := encodeRows(table.Rows)
-	if err != nil {
-		return err
-	}
-	tablePageData, err := storage.BuildTablePageData(encodedRows)
+	tablePageData, err := storage.BuildSlottedTablePageData(uint32(table.RootPageID()), table.Rows)
 	if err != nil {
 		return wrapStorageError(err)
 	}
@@ -767,18 +764,6 @@ func (db *DB) stageDirtyState(catalogData []byte, pages []stagedPage) error {
 	// Page mutation requires explicit dirty marking; commit-oriented flush
 	// eligibility is driven by dirty tracking.
 	return nil
-}
-
-func encodeRows(rows [][]parser.Value) ([][]byte, error) {
-	encodedRows := make([][]byte, 0, len(rows))
-	for _, row := range rows {
-		encoded, err := storage.EncodeRow(row)
-		if err != nil {
-			return nil, wrapStorageError(err)
-		}
-		encodedRows = append(encodedRows, encoded)
-	}
-	return encodedRows, nil
 }
 
 func cloneTables(tables map[string]*executor.Table) map[string]*executor.Table {
@@ -1181,20 +1166,16 @@ func loadPersistedRows(pool *bufferpool.BufferPool, tables map[string]*executor.
 		if pageData == nil {
 			return newStorageError("corrupted table page")
 		}
-		payloads, err := storage.ReadRowsFromTablePageData(pageData)
+		rows, err := decodePersistedTableRows(pageData, table.Columns)
 		if err != nil {
-			return wrapStorageError(err)
+			return err
 		}
-		if uint32(len(payloads)) != table.PersistedRowCount() {
+		if uint32(len(rows)) != table.PersistedRowCount() {
 			return newStorageError("row count mismatch")
 		}
 
 		table.Rows = table.Rows[:0]
-		for _, payload := range payloads {
-			row, err := storage.DecodeRow(payload)
-			if err != nil {
-				return wrapStorageError(err)
-			}
+		for _, row := range rows {
 			if len(row) > len(table.Columns) {
 				return newStorageError("row width mismatch")
 			}
@@ -1218,6 +1199,52 @@ func readCommittedPageData(pool *bufferpool.BufferPool, pageID storage.PageID) (
 	pool.UnlatchShared(frame)
 	pool.Unpin(frame)
 	return pageData, nil
+}
+
+func decodePersistedTableRows(pageData []byte, columns []parser.ColumnDef) ([][]parser.Value, error) {
+	if storage.IsSlottedTablePage(pageData) {
+		payloads, err := storage.ReadSlottedRowsFromTablePageData(pageData)
+		if err != nil {
+			return nil, wrapStorageError(err)
+		}
+		columnTypes := make([]uint8, 0, len(columns))
+		for _, column := range columns {
+			columnTypes = append(columnTypes, catalogColumnType(column.Type))
+		}
+		rows := make([][]parser.Value, 0, len(payloads))
+		for _, payload := range payloads {
+			if len(payload) < 2 {
+				return nil, newStorageError("corrupted row data")
+			}
+			encodedColumnCount := int(binary.LittleEndian.Uint16(payload[0:2]))
+			if encodedColumnCount > len(columnTypes) {
+				return nil, newStorageError("corrupted row data")
+			}
+			row, err := storage.DecodeSlottedRow(payload, columnTypes[:encodedColumnCount])
+			if err != nil {
+				return nil, wrapStorageError(err)
+			}
+			for len(row) < len(columnTypes) {
+				row = append(row, parser.NullValue())
+			}
+			rows = append(rows, row)
+		}
+		return rows, nil
+	}
+
+	payloads, err := storage.ReadRowsFromTablePageData(pageData)
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+	rows := make([][]parser.Value, 0, len(payloads))
+	for _, payload := range payloads {
+		row, err := storage.DecodeRow(payload)
+		if err != nil {
+			return nil, wrapStorageError(err)
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
 
 func catalogColumnType(columnType string) uint8 {

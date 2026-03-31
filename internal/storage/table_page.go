@@ -2,6 +2,8 @@ package storage
 
 import (
 	"encoding/binary"
+
+	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
 const tablePageHeaderSize = 8
@@ -73,6 +75,13 @@ func TablePageRowCount(page *Page) uint32 {
 	if page == nil || len(page.data) < tablePageHeaderSize {
 		return 0
 	}
+	if IsSlottedTablePage(page.data) {
+		slotCount, err := TablePageSlotCount(page.data)
+		if err != nil {
+			return 0
+		}
+		return uint32(slotCount)
+	}
 	return binary.LittleEndian.Uint32(page.data[0:4])
 }
 
@@ -80,6 +89,9 @@ func TablePageRowCount(page *Page) uint32 {
 func ReadRowsFromTablePage(page *Page) ([][]byte, error) {
 	if page == nil {
 		return nil, errCorruptedTablePage
+	}
+	if IsSlottedTablePage(page.data) {
+		return ReadSlottedRowsFromTablePageData(page.data)
 	}
 	return ReadRowsFromTablePageData(page.data)
 }
@@ -229,6 +241,10 @@ func TablePageSlot(page []byte, slotID int) (offset int, length int, err error) 
 	return offset, length, nil
 }
 
+func IsSlottedTablePage(page []byte) bool {
+	return len(page) == PageSize && binary.LittleEndian.Uint16(page[tablePageHeaderOffsetPageType:tablePageHeaderOffsetPageType+2]) == tablePageType
+}
+
 func CanFitRow(page []byte, rowLen int) (bool, error) {
 	if err := validateSlottedTablePage(page); err != nil {
 		return false, err
@@ -279,6 +295,40 @@ func InsertRowIntoTablePage(page []byte, row []byte) (slotID int, err error) {
 	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeStart:tablePageBodyOffsetFreeStart+2], uint16(freeStart+tablePageSlotEntrySize))
 	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeEnd:tablePageBodyOffsetFreeEnd+2], uint16(rowOffset))
 	return slotCount, nil
+}
+
+func ReadSlottedRowsFromTablePageData(page []byte) ([][]byte, error) {
+	if err := validateSlottedTablePage(page); err != nil {
+		return nil, err
+	}
+	slotCount, err := TablePageSlotCount(page)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([][]byte, 0, slotCount)
+	for slotID := 0; slotID < slotCount; slotID++ {
+		offset, length, err := TablePageSlot(page, slotID)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, append([]byte(nil), page[offset:offset+length]...))
+	}
+	return rows, nil
+}
+
+func BuildSlottedTablePageData(pageID uint32, rows [][]parser.Value) ([]byte, error) {
+	page := InitializeTablePage(pageID)
+	for _, row := range rows {
+		encoded, err := EncodeSlottedRow(row)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := InsertRowIntoTablePage(page, encoded); err != nil {
+			return nil, err
+		}
+	}
+	return page, nil
 }
 
 func validateSlottedTablePage(page []byte) error {

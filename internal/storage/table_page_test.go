@@ -321,3 +321,65 @@ func TestTablePageSlotRejectsOutOfRange(t *testing.T) {
 		t.Fatalf("TablePageSlot() error = %v, want %v", err, errCorruptedTablePage)
 	}
 }
+
+func TestBuildSlottedTablePageDataStoresEncodedRows(t *testing.T) {
+	rows := [][]parser.Value{
+		{parser.Int64Value(1), parser.StringValue("alice")},
+		{parser.Int64Value(2), parser.StringValue("bob")},
+	}
+
+	page, err := BuildSlottedTablePageData(9, rows)
+	if err != nil {
+		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
+	}
+	if !IsSlottedTablePage(page) {
+		t.Fatal("page is not slotted table page")
+	}
+	slotCount, err := TablePageSlotCount(page)
+	if err != nil {
+		t.Fatalf("TablePageSlotCount() error = %v", err)
+	}
+	if slotCount != len(rows) {
+		t.Fatalf("TablePageSlotCount() = %d, want %d", slotCount, len(rows))
+	}
+
+	payloads, err := ReadSlottedRowsFromTablePageData(page)
+	if err != nil {
+		t.Fatalf("ReadSlottedRowsFromTablePageData() error = %v", err)
+	}
+	if len(payloads) != len(rows) {
+		t.Fatalf("len(payloads) = %d, want %d", len(payloads), len(rows))
+	}
+
+	columnTypes := []uint8{CatalogColumnTypeInt, CatalogColumnTypeText}
+	for i := range payloads {
+		want, err := EncodeSlottedRow(rows[i])
+		if err != nil {
+			t.Fatalf("EncodeSlottedRow() error = %v", err)
+		}
+		if !bytes.Equal(payloads[i], want) {
+			t.Fatalf("payload[%d] mismatch", i)
+		}
+		decoded, err := DecodeSlottedRow(payloads[i], columnTypes)
+		if err != nil {
+			t.Fatalf("DecodeSlottedRow() error = %v", err)
+		}
+		if len(decoded) != len(rows[i]) {
+			t.Fatalf("len(decoded) = %d, want %d", len(decoded), len(rows[i]))
+		}
+		for j := range rows[i] {
+			if decoded[j] != rows[i][j] {
+				t.Fatalf("decoded[%d][%d] = %#v, want %#v", i, j, decoded[j], rows[i][j])
+			}
+		}
+	}
+}
+
+func TestBuildSlottedTablePageDataOverflow(t *testing.T) {
+	row := []parser.Value{parser.StringValue(string(bytes.Repeat([]byte("x"), PageSize)))}
+
+	_, err := BuildSlottedTablePageData(10, [][]parser.Value{row})
+	if !errors.Is(err, errTablePageFull) {
+		t.Fatalf("BuildSlottedTablePageData() error = %v, want %v", err, errTablePageFull)
+	}
+}

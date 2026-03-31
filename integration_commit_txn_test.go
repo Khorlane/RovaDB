@@ -204,7 +204,7 @@ func TestJournalWrittenBeforeDatabaseOverwrite(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		values, err := storage.DecodeRow(payloads[0])
+		values, err := storage.DecodeSlottedRow(payloads[0], []uint8{storage.CatalogColumnTypeInt})
 		if err != nil {
 			return err
 		}
@@ -336,11 +336,7 @@ func TestApplyErrorTriggersRollback(t *testing.T) {
 		table.Rows = append(table.Rows, []parser.Value{parser.Int64Value(2)})
 		table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
 
-		encodedRows, err := encodeRows(table.Rows)
-		if err != nil {
-			return err
-		}
-		tablePageData, err := storage.BuildTablePageData(encodedRows)
+		tablePageData, err := storage.BuildSlottedTablePageData(uint32(table.RootPageID()), table.Rows)
 		if err != nil {
 			return err
 		}

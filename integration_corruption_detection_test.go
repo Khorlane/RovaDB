@@ -117,7 +117,11 @@ func TestCorruptedRowDataDetected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pager.Get(1) error = %v", err)
 	}
-	page.Data()[14] = 99
+	offset, _, err := storage.TablePageSlot(page.Data(), 0)
+	if err != nil {
+		t.Fatalf("storage.TablePageSlot() error = %v", err)
+	}
+	binary.LittleEndian.PutUint16(page.Data()[offset:offset+2], 2)
 	pager.MarkDirty(page)
 	if err := pager.Flush(); err != nil {
 		t.Fatalf("pager.Flush() error = %v", err)
