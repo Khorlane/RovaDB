@@ -42,3 +42,39 @@ func TestPageOffset(t *testing.T) {
 		}
 	}
 }
+
+func TestIsValidPageType(t *testing.T) {
+	valid := []PageType{PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal}
+	for _, pageType := range valid {
+		if !IsValidPageType(pageType) {
+			t.Fatalf("IsValidPageType(%d) = false, want true", pageType)
+		}
+	}
+	if IsValidPageType(PageType(99)) {
+		t.Fatal("IsValidPageType(99) = true, want false")
+	}
+}
+
+func TestIndexPageTypeHelpers(t *testing.T) {
+	if !IsIndexPageType(PageTypeIndexLeaf) {
+		t.Fatal("IsIndexPageType(PageTypeIndexLeaf) = false, want true")
+	}
+	if !IsIndexPageType(PageTypeIndexInternal) {
+		t.Fatal("IsIndexPageType(PageTypeIndexInternal) = false, want true")
+	}
+	if IsIndexPageType(PageTypeTable) {
+		t.Fatal("IsIndexPageType(PageTypeTable) = true, want false")
+	}
+	if !IsLeafIndexPageType(PageTypeIndexLeaf) {
+		t.Fatal("IsLeafIndexPageType(PageTypeIndexLeaf) = false, want true")
+	}
+	if IsLeafIndexPageType(PageTypeIndexInternal) {
+		t.Fatal("IsLeafIndexPageType(PageTypeIndexInternal) = true, want false")
+	}
+	if !IsInternalIndexPageType(PageTypeIndexInternal) {
+		t.Fatal("IsInternalIndexPageType(PageTypeIndexInternal) = false, want true")
+	}
+	if IsInternalIndexPageType(PageTypeIndexLeaf) {
+		t.Fatal("IsInternalIndexPageType(PageTypeIndexLeaf) = true, want false")
+	}
+}

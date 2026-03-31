@@ -22,8 +22,6 @@ const (
 	tablePageBodyOffsetSlotCount = tablePageCommonHeaderSize
 	tablePageBodyOffsetFreeStart = tablePageCommonHeaderSize + 4
 	tablePageBodyOffsetFreeEnd   = tablePageCommonHeaderSize + 6
-
-	tablePageType = 1
 )
 
 // InitTableRootPage initializes a blank table root page header.
@@ -180,7 +178,7 @@ func tablePageFreeOffset(page *Page) uint32 {
 func InitializeTablePage(pageID uint32) []byte {
 	page := make([]byte, PageSize)
 	binary.LittleEndian.PutUint32(page[tablePageHeaderOffsetPageID:tablePageHeaderOffsetPageID+4], pageID)
-	binary.LittleEndian.PutUint16(page[tablePageHeaderOffsetPageType:tablePageHeaderOffsetPageType+2], tablePageType)
+	binary.LittleEndian.PutUint16(page[tablePageHeaderOffsetPageType:tablePageHeaderOffsetPageType+2], uint16(PageTypeTable))
 	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetSlotCount:tablePageBodyOffsetSlotCount+2], 0)
 	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeStart:tablePageBodyOffsetFreeStart+2], tablePageBodyStart)
 	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeEnd:tablePageBodyOffsetFreeEnd+2], PageSize)
@@ -269,7 +267,7 @@ func TablePageLocators(page []byte, pageID uint32) ([]RowLocator, error) {
 }
 
 func IsSlottedTablePage(page []byte) bool {
-	return len(page) == PageSize && binary.LittleEndian.Uint16(page[tablePageHeaderOffsetPageType:tablePageHeaderOffsetPageType+2]) == tablePageType
+	return len(page) == PageSize && PageType(binary.LittleEndian.Uint16(page[tablePageHeaderOffsetPageType:tablePageHeaderOffsetPageType+2])) == PageTypeTable
 }
 
 func CanFitRow(page []byte, rowLen int) (bool, error) {
@@ -413,7 +411,8 @@ func validateSlottedTablePage(page []byte) error {
 	if len(page) != PageSize {
 		return errCorruptedTablePage
 	}
-	if binary.LittleEndian.Uint16(page[tablePageHeaderOffsetPageType:tablePageHeaderOffsetPageType+2]) != tablePageType {
+	pageType := PageType(binary.LittleEndian.Uint16(page[tablePageHeaderOffsetPageType : tablePageHeaderOffsetPageType+2]))
+	if !IsValidPageType(pageType) || pageType != PageTypeTable {
 		return errCorruptedTablePage
 	}
 

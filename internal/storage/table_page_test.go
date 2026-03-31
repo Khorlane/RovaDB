@@ -166,8 +166,8 @@ func TestInitializeTablePage(t *testing.T) {
 	if got := binary.LittleEndian.Uint32(page[tablePageHeaderOffsetPageID : tablePageHeaderOffsetPageID+4]); got != 7 {
 		t.Fatalf("pageID = %d, want 7", got)
 	}
-	if got := binary.LittleEndian.Uint16(page[tablePageHeaderOffsetPageType : tablePageHeaderOffsetPageType+2]); got != tablePageType {
-		t.Fatalf("pageType = %d, want %d", got, tablePageType)
+	if got := binary.LittleEndian.Uint16(page[tablePageHeaderOffsetPageType : tablePageHeaderOffsetPageType+2]); got != uint16(PageTypeTable) {
+		t.Fatalf("pageType = %d, want %d", got, PageTypeTable)
 	}
 	slotCount, err := TablePageSlotCount(page)
 	if err != nil {

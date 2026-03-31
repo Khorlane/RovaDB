@@ -10,6 +10,15 @@ const (
 // PageID identifies a fixed-size page in the database file.
 type PageID uint32
 
+// PageType identifies the physical page layout stored in a page header.
+type PageType uint16
+
+const (
+	PageTypeTable PageType = 1 + iota
+	PageTypeIndexLeaf
+	PageTypeIndexInternal
+)
+
 // Page is a fixed-size in-memory page buffer. Dirty/original tracking is used
 // to stage autocommit writes and to restore pre-commit page bytes on rollback.
 type Page struct {
@@ -75,4 +84,25 @@ func (p *Page) HasOriginal() bool {
 // Bytes [0:HeaderSize) are reserved for the file header, and page space begins at HeaderSize.
 func pageOffset(id PageID) int64 {
 	return HeaderSize + int64(id)*PageSize
+}
+
+func IsValidPageType(pageType PageType) bool {
+	switch pageType {
+	case PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsIndexPageType(pageType PageType) bool {
+	return pageType == PageTypeIndexLeaf || pageType == PageTypeIndexInternal
+}
+
+func IsLeafIndexPageType(pageType PageType) bool {
+	return pageType == PageTypeIndexLeaf
+}
+
+func IsInternalIndexPageType(pageType PageType) bool {
+	return pageType == PageTypeIndexInternal
 }
