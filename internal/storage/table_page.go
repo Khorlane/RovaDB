@@ -63,9 +63,18 @@ func ReadRowsFromTablePage(page *Page) ([][]byte, error) {
 	if page == nil {
 		return nil, errCorruptedTablePage
 	}
+	return ReadRowsFromTablePageData(page.data)
+}
 
-	rowCount := TablePageRowCount(page)
-	freeOffset := tablePageFreeOffset(page)
+// ReadRowsFromTablePageData reads all encoded row payloads from a table root
+// page image.
+func ReadRowsFromTablePageData(pageData []byte) ([][]byte, error) {
+	if len(pageData) < tablePageHeaderSize {
+		return nil, errCorruptedTablePage
+	}
+
+	rowCount := binary.LittleEndian.Uint32(pageData[0:4])
+	freeOffset := binary.LittleEndian.Uint32(pageData[4:8])
 	if freeOffset < tablePageHeaderSize || freeOffset > PageSize {
 		return nil, errCorruptedTablePage
 	}
@@ -76,13 +85,13 @@ func ReadRowsFromTablePage(page *Page) ([][]byte, error) {
 		if offset+4 > freeOffset {
 			return nil, errCorruptedTablePage
 		}
-		rowLen := binary.LittleEndian.Uint32(page.data[offset : offset+4])
+		rowLen := binary.LittleEndian.Uint32(pageData[offset : offset+4])
 		offset += 4
 		if offset+rowLen > freeOffset {
 			return nil, errCorruptedTablePage
 		}
 
-		payload := append([]byte(nil), page.data[offset:offset+rowLen]...)
+		payload := append([]byte(nil), pageData[offset:offset+rowLen]...)
 		rows = append(rows, payload)
 		offset += rowLen
 	}

@@ -49,41 +49,58 @@ type CatalogIndexColumn struct {
 	Desc bool
 }
 
+// PageReader provides durable page reads without exposing pager internals.
+type PageReader interface {
+	ReadPage(pageID PageID) ([]byte, error)
+}
+
+// PageReaderFunc adapts a function to PageReader.
+type PageReaderFunc func(PageID) ([]byte, error)
+
+func (f PageReaderFunc) ReadPage(pageID PageID) ([]byte, error) {
+	return f(pageID)
+}
+
 // LoadCatalog decodes the catalog stored in page 0.
-func LoadCatalog(pager *Pager) (*CatalogData, error) {
-	page, err := pager.Get(catalogPageID)
+func LoadCatalog(reader PageReader) (*CatalogData, error) {
+	pageData, err := reader.ReadPage(catalogPageID)
 	if err != nil {
 		return nil, err
 	}
-	if isZeroPage(page.data) {
+	return LoadCatalogPageData(pageData)
+}
+
+// LoadCatalogPageData decodes a catalog page image.
+func LoadCatalogPageData(pageData []byte) (*CatalogData, error) {
+	if isZeroPage(pageData) {
 		return &CatalogData{}, nil
 	}
 
 	offset := 0
-	version, ok := readUint32(page.data, &offset)
+	version, ok := readUint32(pageData, &offset)
 	if !ok || (version != catalogVersionV1 && version != catalogVersionV2 && version != catalogVersion) {
 		return nil, errCorruptedCatalogPage
 	}
-	tableCount, ok := readUint32(page.data, &offset)
+	tableCount, ok := readUint32(pageData, &offset)
 	if !ok {
 		return nil, errCorruptedCatalogPage
 	}
 
 	cat := &CatalogData{Tables: make([]CatalogTable, 0, tableCount)}
 	for i := uint32(0); i < tableCount; i++ {
-		name, ok := readString(page.data, &offset)
+		name, ok := readString(pageData, &offset)
 		if !ok || name == "" {
 			return nil, errCorruptedCatalogPage
 		}
-		rootPageID, ok := readUint32(page.data, &offset)
+		rootPageID, ok := readUint32(pageData, &offset)
 		if !ok || rootPageID < 1 {
 			return nil, errCorruptedCatalogPage
 		}
-		rowCount, ok := readUint32(page.data, &offset)
+		rowCount, ok := readUint32(pageData, &offset)
 		if !ok {
 			return nil, errCorruptedCatalogPage
 		}
-		columnCount, ok := readUint16(page.data, &offset)
+		columnCount, ok := readUint16(pageData, &offset)
 		if !ok {
 			return nil, errCorruptedCatalogPage
 		}
@@ -96,14 +113,14 @@ func LoadCatalog(pager *Pager) (*CatalogData, error) {
 		}
 		columnNames := make(map[string]struct{}, columnCount)
 		for j := uint16(0); j < columnCount; j++ {
-			columnName, ok := readString(page.data, &offset)
+			columnName, ok := readString(pageData, &offset)
 			if !ok || columnName == "" {
 				return nil, errCorruptedCatalogPage
 			}
-			if offset >= len(page.data) {
+			if offset >= len(pageData) {
 				return nil, errCorruptedCatalogPage
 			}
-			columnType := page.data[offset]
+			columnType := pageData[offset]
 			offset++
 			if columnType != CatalogColumnTypeInt && columnType != CatalogColumnTypeText && columnType != CatalogColumnTypeBool && columnType != CatalogColumnTypeReal {
 				return nil, errCorruptedCatalogPage
@@ -119,14 +136,14 @@ func LoadCatalog(pager *Pager) (*CatalogData, error) {
 			})
 		}
 		if version >= catalogVersionV2 {
-			indexCount, ok := readUint16(page.data, &offset)
+			indexCount, ok := readUint16(pageData, &offset)
 			if !ok {
 				return nil, errCorruptedCatalogPage
 			}
 			table.Indexes = make([]CatalogIndex, 0, indexCount)
 			indexNames := make(map[string]struct{}, indexCount)
 			for j := uint16(0); j < indexCount; j++ {
-				index, err := readCatalogIndex(page.data, &offset, version, columnNames, indexNames)
+				index, err := readCatalogIndex(pageData, &offset, version, columnNames, indexNames)
 				if err != nil {
 					return nil, err
 				}

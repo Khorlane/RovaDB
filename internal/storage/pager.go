@@ -62,6 +62,15 @@ func (p *Pager) Get(id PageID) (*Page, error) {
 	return page, nil
 }
 
+// ReadPage returns a stable copy of a page image for committed read paths.
+func (p *Pager) ReadPage(id PageID) ([]byte, error) {
+	page, err := p.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), page.Data()...), nil
+}
+
 // NewPage allocates a new dirty page.
 func (p *Pager) NewPage() *Page {
 	id := p.nextPageID

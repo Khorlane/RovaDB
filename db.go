@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Khorlane/RovaDB/internal/bufferpool"
 	"github.com/Khorlane/RovaDB/internal/executor"
 	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/planner"
@@ -31,6 +32,7 @@ type DB struct {
 	tables map[string]*executor.Table
 	file   *storage.DBFile
 	pager  *storage.Pager
+	pool   *bufferpool.BufferPool
 	txn    *txn.Txn
 
 	afterJournalWriteHook func() error
@@ -64,7 +66,17 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
-	catalog, err := storage.LoadCatalog(pager)
+	pool := bufferpool.New(0, pagerPageLoader{pager: pager})
+	catalog, err := storage.LoadCatalog(storage.PageReaderFunc(func(pageID storage.PageID) ([]byte, error) {
+		frame, err := pool.GetCommittedPage(bufferpool.PageID(pageID))
+		if err != nil {
+			return nil, err
+		}
+		if frame == nil {
+			return nil, nil
+		}
+		return frame.Data[:], nil
+	}))
 	if err != nil {
 		_ = pager.Close()
 		_ = file.Close()
@@ -76,7 +88,7 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
-	if err := loadPersistedRows(pager, tables); err != nil {
+	if err := loadPersistedRows(pool, tables); err != nil {
 		_ = pager.Close()
 		_ = file.Close()
 		return nil, err
@@ -96,6 +108,7 @@ func Open(path string) (*DB, error) {
 		path:   path,
 		file:   file,
 		pager:  pager,
+		pool:   pool,
 		tables: tables,
 		txn:    nil,
 	}, nil
@@ -1150,17 +1163,31 @@ func (db *DB) defineLegacyBasicIndex(tableName, columnName string) error {
 	return nil
 }
 
-func loadPersistedRows(pager *storage.Pager, tables map[string]*executor.Table) error {
+type pagerPageLoader struct {
+	pager *storage.Pager
+}
+
+func (l pagerPageLoader) ReadPage(pageID bufferpool.PageID) ([]byte, error) {
+	if l.pager == nil {
+		return nil, nil
+	}
+	return l.pager.ReadPage(storage.PageID(pageID))
+}
+
+func loadPersistedRows(pool *bufferpool.BufferPool, tables map[string]*executor.Table) error {
 	for _, table := range tables {
 		if table == nil {
 			continue
 		}
 
-		page, err := pager.Get(table.RootPageID())
+		frame, err := pool.GetCommittedPage(bufferpool.PageID(table.RootPageID()))
 		if err != nil {
 			return wrapStorageError(err)
 		}
-		payloads, err := storage.ReadRowsFromTablePage(page)
+		if frame == nil {
+			return newStorageError("corrupted table page")
+		}
+		payloads, err := storage.ReadRowsFromTablePageData(frame.Data[:])
 		if err != nil {
 			return wrapStorageError(err)
 		}
