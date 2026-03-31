@@ -343,33 +343,29 @@ func TestBuildSlottedTablePageDataStoresEncodedRows(t *testing.T) {
 		t.Fatalf("TablePageSlotCount() = %d, want %d", slotCount, len(rows))
 	}
 
-	payloads, err := ReadSlottedRowsFromTablePageData(page)
+	columnTypes := []uint8{CatalogColumnTypeInt, CatalogColumnTypeText}
+	decodedRows, err := ReadSlottedRowsFromTablePageData(page, columnTypes)
 	if err != nil {
 		t.Fatalf("ReadSlottedRowsFromTablePageData() error = %v", err)
 	}
-	if len(payloads) != len(rows) {
-		t.Fatalf("len(payloads) = %d, want %d", len(payloads), len(rows))
+	if len(decodedRows) != len(rows) {
+		t.Fatalf("len(decodedRows) = %d, want %d", len(decodedRows), len(rows))
 	}
-
-	columnTypes := []uint8{CatalogColumnTypeInt, CatalogColumnTypeText}
-	for i := range payloads {
+	for i := range rows {
+		payload, err := ExtractSlottedRowPayload(page, i)
+		if err != nil {
+			t.Fatalf("ExtractSlottedRowPayload() error = %v", err)
+		}
 		want, err := EncodeSlottedRow(rows[i])
 		if err != nil {
 			t.Fatalf("EncodeSlottedRow() error = %v", err)
 		}
-		if !bytes.Equal(payloads[i], want) {
+		if !bytes.Equal(payload, want) {
 			t.Fatalf("payload[%d] mismatch", i)
 		}
-		decoded, err := DecodeSlottedRow(payloads[i], columnTypes)
-		if err != nil {
-			t.Fatalf("DecodeSlottedRow() error = %v", err)
-		}
-		if len(decoded) != len(rows[i]) {
-			t.Fatalf("len(decoded) = %d, want %d", len(decoded), len(rows[i]))
-		}
 		for j := range rows[i] {
-			if decoded[j] != rows[i][j] {
-				t.Fatalf("decoded[%d][%d] = %#v, want %#v", i, j, decoded[j], rows[i][j])
+			if decodedRows[i][j] != rows[i][j] {
+				t.Fatalf("decoded[%d][%d] = %#v, want %#v", i, j, decodedRows[i][j], rows[i][j])
 			}
 		}
 	}
@@ -381,5 +377,63 @@ func TestBuildSlottedTablePageDataOverflow(t *testing.T) {
 	_, err := BuildSlottedTablePageData(10, [][]parser.Value{row})
 	if !errors.Is(err, errTablePageFull) {
 		t.Fatalf("BuildSlottedTablePageData() error = %v, want %v", err, errTablePageFull)
+	}
+}
+
+func TestReadSlottedRowsFromTablePageDataPadsTrailingNulls(t *testing.T) {
+	page, err := BuildSlottedTablePageData(11, [][]parser.Value{
+		{parser.Int64Value(1), parser.StringValue("alice")},
+	})
+	if err != nil {
+		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
+	}
+
+	rows, err := ReadSlottedRowsFromTablePageData(page, []uint8{
+		CatalogColumnTypeInt,
+		CatalogColumnTypeText,
+		CatalogColumnTypeInt,
+	})
+	if err != nil {
+		t.Fatalf("ReadSlottedRowsFromTablePageData() error = %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+	want := []parser.Value{parser.Int64Value(1), parser.StringValue("alice"), parser.NullValue()}
+	for i := range want {
+		if rows[0][i] != want[i] {
+			t.Fatalf("rows[0][%d] = %#v, want %#v", i, rows[0][i], want[i])
+		}
+	}
+}
+
+func TestReadSlottedRowsFromTablePageDataRejectsTruncatedPayload(t *testing.T) {
+	page, err := BuildSlottedTablePageData(12, [][]parser.Value{
+		{parser.Int64Value(1)},
+	})
+	if err != nil {
+		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
+	}
+
+	offset, _, err := TablePageSlot(page, 0)
+	if err != nil {
+		t.Fatalf("TablePageSlot() error = %v", err)
+	}
+	page[offset] = 0x02
+	page[offset+1] = 0x00
+
+	_, err = ReadSlottedRowsFromTablePageData(page, []uint8{CatalogColumnTypeInt})
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("ReadSlottedRowsFromTablePageData() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestReadSlottedRowsFromTablePageDataRejectsWrongPageType(t *testing.T) {
+	page := InitializeTablePage(13)
+	binary.LittleEndian.PutUint16(page[tablePageHeaderOffsetPageType:tablePageHeaderOffsetPageType+2], 99)
+
+	_, err := ReadSlottedRowsFromTablePageData(page, []uint8{CatalogColumnTypeInt})
+	if !errors.Is(err, errCorruptedTablePage) {
+		t.Fatalf("ReadSlottedRowsFromTablePageData() error = %v, want %v", err, errCorruptedTablePage)
 	}
 }

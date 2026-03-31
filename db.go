@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"encoding/binary"
 	"errors"
 	"os"
 	"reflect"
@@ -1203,33 +1202,11 @@ func readCommittedPageData(pool *bufferpool.BufferPool, pageID storage.PageID) (
 
 func decodePersistedTableRows(pageData []byte, columns []parser.ColumnDef) ([][]parser.Value, error) {
 	if storage.IsSlottedTablePage(pageData) {
-		payloads, err := storage.ReadSlottedRowsFromTablePageData(pageData)
-		if err != nil {
-			return nil, wrapStorageError(err)
-		}
 		columnTypes := make([]uint8, 0, len(columns))
 		for _, column := range columns {
 			columnTypes = append(columnTypes, catalogColumnType(column.Type))
 		}
-		rows := make([][]parser.Value, 0, len(payloads))
-		for _, payload := range payloads {
-			if len(payload) < 2 {
-				return nil, newStorageError("corrupted row data")
-			}
-			encodedColumnCount := int(binary.LittleEndian.Uint16(payload[0:2]))
-			if encodedColumnCount > len(columnTypes) {
-				return nil, newStorageError("corrupted row data")
-			}
-			row, err := storage.DecodeSlottedRow(payload, columnTypes[:encodedColumnCount])
-			if err != nil {
-				return nil, wrapStorageError(err)
-			}
-			for len(row) < len(columnTypes) {
-				row = append(row, parser.NullValue())
-			}
-			rows = append(rows, row)
-		}
-		return rows, nil
+		return storage.ReadSlottedRowsFromTablePageData(pageData, columnTypes)
 	}
 
 	payloads, err := storage.ReadRowsFromTablePageData(pageData)

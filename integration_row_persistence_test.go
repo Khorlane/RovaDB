@@ -63,4 +63,20 @@ func TestInsertPersistsRowsToTableRootPage(t *testing.T) {
 	if got := storage.TablePageRowCount(page); got != 2 {
 		t.Fatalf("storage.TablePageRowCount() = %d, want 2", got)
 	}
+	rows, err := storage.ReadSlottedRowsFromTablePageData(page.Data(), []uint8{
+		storage.CatalogColumnTypeInt,
+		storage.CatalogColumnTypeText,
+	})
+	if err != nil {
+		t.Fatalf("storage.ReadSlottedRowsFromTablePageData() error = %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2", len(rows))
+	}
+	if rows[0][0].I64 != 1 || rows[0][1].Str != "steve" {
+		t.Fatalf("rows[0] = %#v, want id=1 name=steve", rows[0])
+	}
+	if rows[1][0].I64 != 2 || rows[1][1].Str != "bob" {
+		t.Fatalf("rows[1] = %#v, want id=2 name=bob", rows[1])
+	}
 }

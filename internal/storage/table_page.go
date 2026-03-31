@@ -91,7 +91,7 @@ func ReadRowsFromTablePage(page *Page) ([][]byte, error) {
 		return nil, errCorruptedTablePage
 	}
 	if IsSlottedTablePage(page.data) {
-		return ReadSlottedRowsFromTablePageData(page.data)
+		return readSlottedRowPayloads(page.data)
 	}
 	return ReadRowsFromTablePageData(page.data)
 }
@@ -297,10 +297,45 @@ func InsertRowIntoTablePage(page []byte, row []byte) (slotID int, err error) {
 	return slotCount, nil
 }
 
-func ReadSlottedRowsFromTablePageData(page []byte) ([][]byte, error) {
+func ExtractSlottedRowPayload(page []byte, slotID int) ([]byte, error) {
 	if err := validateSlottedTablePage(page); err != nil {
 		return nil, err
 	}
+	offset, length, err := TablePageSlot(page, slotID)
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), page[offset:offset+length]...), nil
+}
+
+func ReadSlottedRowsFromTablePageData(page []byte, columnTypes []uint8) ([][]parser.Value, error) {
+	payloads, err := readSlottedRowPayloads(page)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([][]parser.Value, 0, len(payloads))
+	for _, payload := range payloads {
+		if len(payload) < 2 {
+			return nil, errInvalidRowData
+		}
+		encodedColumnCount := int(binary.LittleEndian.Uint16(payload[0:2]))
+		if encodedColumnCount > len(columnTypes) {
+			return nil, errInvalidRowData
+		}
+		row, err := DecodeSlottedRow(payload, columnTypes[:encodedColumnCount])
+		if err != nil {
+			return nil, err
+		}
+		for len(row) < len(columnTypes) {
+			row = append(row, parser.NullValue())
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+func readSlottedRowPayloads(page []byte) ([][]byte, error) {
 	slotCount, err := TablePageSlotCount(page)
 	if err != nil {
 		return nil, err
@@ -308,11 +343,11 @@ func ReadSlottedRowsFromTablePageData(page []byte) ([][]byte, error) {
 
 	rows := make([][]byte, 0, slotCount)
 	for slotID := 0; slotID < slotCount; slotID++ {
-		offset, length, err := TablePageSlot(page, slotID)
+		payload, err := ExtractSlottedRowPayload(page, slotID)
 		if err != nil {
 			return nil, err
 		}
-		rows = append(rows, append([]byte(nil), page[offset:offset+length]...))
+		rows = append(rows, payload)
 	}
 	return rows, nil
 }
