@@ -69,14 +69,7 @@ func Open(path string) (*DB, error) {
 	poolSize := int(pager.NextPageID()) + 1
 	pool := bufferpool.New(poolSize, pagerPageLoader{pager: pager})
 	catalog, err := storage.LoadCatalog(storage.PageReaderFunc(func(pageID storage.PageID) ([]byte, error) {
-		frame, err := pool.GetCommittedPage(bufferpool.PageID(pageID))
-		if err != nil {
-			return nil, err
-		}
-		if frame == nil {
-			return nil, nil
-		}
-		return frame.Data[:], nil
+		return readCommittedPageData(pool, pageID)
 	}))
 	if err != nil {
 		_ = pager.Close()
@@ -1181,14 +1174,14 @@ func loadPersistedRows(pool *bufferpool.BufferPool, tables map[string]*executor.
 			continue
 		}
 
-		frame, err := pool.GetCommittedPage(bufferpool.PageID(table.RootPageID()))
+		pageData, err := readCommittedPageData(pool, table.RootPageID())
 		if err != nil {
 			return wrapStorageError(err)
 		}
-		if frame == nil {
+		if pageData == nil {
 			return newStorageError("corrupted table page")
 		}
-		payloads, err := storage.ReadRowsFromTablePageData(frame.Data[:])
+		payloads, err := storage.ReadRowsFromTablePageData(pageData)
 		if err != nil {
 			return wrapStorageError(err)
 		}
@@ -1210,6 +1203,21 @@ func loadPersistedRows(pool *bufferpool.BufferPool, tables map[string]*executor.
 	}
 
 	return nil
+}
+
+func readCommittedPageData(pool *bufferpool.BufferPool, pageID storage.PageID) ([]byte, error) {
+	frame, err := pool.GetCommittedPage(bufferpool.PageID(pageID))
+	if err != nil {
+		return nil, err
+	}
+	if frame == nil {
+		return nil, nil
+	}
+
+	pageData := append([]byte(nil), frame.Data[:]...)
+	pool.UnlatchShared(frame)
+	pool.Unpin(frame)
+	return pageData, nil
 }
 
 func catalogColumnType(columnType string) uint8 {
