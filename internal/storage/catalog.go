@@ -7,7 +7,8 @@ import (
 const (
 	catalogVersionV1 = 1
 	catalogVersionV2 = 2
-	catalogVersion   = 3
+	catalogVersionV3 = 3
+	catalogVersion   = 4
 	catalogPageID    = 0
 
 	CatalogColumnTypeInt  = 1
@@ -38,9 +39,10 @@ type CatalogColumn struct {
 
 // CatalogIndex is a persisted index definition.
 type CatalogIndex struct {
-	Name    string
-	Unique  bool
-	Columns []CatalogIndexColumn
+	Name       string
+	Unique     bool
+	RootPageID uint32
+	Columns    []CatalogIndexColumn
 }
 
 // CatalogIndexColumn is a persisted indexed column entry.
@@ -78,7 +80,7 @@ func LoadCatalogPageData(pageData []byte) (*CatalogData, error) {
 
 	offset := 0
 	version, ok := readUint32(pageData, &offset)
-	if !ok || (version != catalogVersionV1 && version != catalogVersionV2 && version != catalogVersion) {
+	if !ok || (version != catalogVersionV1 && version != catalogVersionV2 && version != catalogVersionV3 && version != catalogVersion) {
 		return nil, errCorruptedCatalogPage
 	}
 	tableCount, ok := readUint32(pageData, &offset)
@@ -297,8 +299,9 @@ func readCatalogIndex(data []byte, offset *int, version uint32, columnNames map[
 		}
 		indexNames[columnName] = struct{}{}
 		return CatalogIndex{
-			Name:   columnName,
-			Unique: false,
+			Name:       columnName,
+			Unique:     false,
+			RootPageID: 0,
 			Columns: []CatalogIndexColumn{
 				{Name: columnName},
 			},
@@ -317,6 +320,14 @@ func readCatalogIndex(data []byte, offset *int, version uint32, columnNames map[
 	}
 	unique := data[*offset] != 0
 	*offset++
+	rootPageID := uint32(0)
+	if version >= catalogVersion {
+		var ok bool
+		rootPageID, ok = readUint32(data, offset)
+		if !ok {
+			return CatalogIndex{}, errCorruptedCatalogPage
+		}
+	}
 	columnCount, ok := readUint16(data, offset)
 	if !ok || columnCount == 0 {
 		return CatalogIndex{}, errCorruptedIndexMetadata
@@ -343,7 +354,7 @@ func readCatalogIndex(data []byte, offset *int, version uint32, columnNames map[
 		columns = append(columns, CatalogIndexColumn{Name: columnName, Desc: desc})
 	}
 	indexNames[name] = struct{}{}
-	return CatalogIndex{Name: name, Unique: unique, Columns: columns}, nil
+	return CatalogIndex{Name: name, Unique: unique, RootPageID: rootPageID, Columns: columns}, nil
 }
 
 func appendCatalogIndex(buf []byte, index CatalogIndex, columns []CatalogColumn) ([]byte, error) {
@@ -362,6 +373,7 @@ func appendCatalogIndex(buf []byte, index CatalogIndex, columns []CatalogColumn)
 	} else {
 		buf = append(buf, 0)
 	}
+	buf = appendUint32(buf, index.RootPageID)
 	buf = appendUint16(buf, uint16(len(index.Columns)))
 	for _, column := range index.Columns {
 		if column.Name == "" {

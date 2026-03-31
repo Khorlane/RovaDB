@@ -264,7 +264,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 				return err
 			}
 
-			if err := db.applyStagedCatalogOnly(stagedTables); err != nil {
+			if err := db.applyStagedIndexCreate(stagedTables, stmt.TableName, stmt.Name); err != nil {
 				return err
 			}
 			return nil
@@ -833,6 +833,43 @@ func (db *DB) applyStagedCatalogOnly(stagedTables map[string]*executor.Table) er
 	return db.stageDirtyState(catalogData, nil)
 }
 
+func (db *DB) applyStagedIndexCreate(stagedTables map[string]*executor.Table, tableName, indexName string) error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+
+	table := stagedTables[tableName]
+	if table == nil {
+		return newExecError("table not found: " + tableName)
+	}
+	indexDef := table.IndexDefinition(indexName)
+	if indexDef == nil {
+		return newExecError("index not found")
+	}
+
+	var pages []stagedPage
+	if indexDef.RootPageID == 0 {
+		rootPageID := db.pager.NextPageID()
+		indexDef.RootPageID = uint32(rootPageID)
+		if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok {
+			if index := table.Indexes[columnName]; index != nil {
+				index.RootPageID = indexDef.RootPageID
+			}
+		}
+		pages = append(pages, stagedPage{
+			id:    rootPageID,
+			data:  storage.InitIndexLeafPage(uint32(rootPageID)),
+			isNew: true,
+		})
+	}
+
+	catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
+	if err != nil {
+		return wrapStorageError(err)
+	}
+	return db.stageDirtyState(catalogData, pages)
+}
+
 // Stage 5 correctness requires proposal/staging before apply so a single
 // statement cannot leak mixed committed and uncommitted visibility. Crash-safe
 // durability is still future work.
@@ -918,7 +955,9 @@ func cloneIndexes(indexes map[string]*planner.BasicIndex) map[string]*planner.Ba
 		if index == nil {
 			continue
 		}
-		cloned[columnName] = planner.NewBasicIndex(index.TableName, index.ColumnName)
+		basic := planner.NewBasicIndex(index.TableName, index.ColumnName)
+		basic.RootPageID = index.RootPageID
+		cloned[columnName] = basic
 	}
 	return cloned
 }
@@ -931,9 +970,10 @@ func cloneIndexDefs(indexDefs []storage.CatalogIndex) []storage.CatalogIndex {
 	cloned := make([]storage.CatalogIndex, 0, len(indexDefs))
 	for _, indexDef := range indexDefs {
 		cloned = append(cloned, storage.CatalogIndex{
-			Name:    indexDef.Name,
-			Unique:  indexDef.Unique,
-			Columns: append([]storage.CatalogIndexColumn(nil), indexDef.Columns...),
+			Name:       indexDef.Name,
+			Unique:     indexDef.Unique,
+			RootPageID: indexDef.RootPageID,
+			Columns:    append([]storage.CatalogIndexColumn(nil), indexDef.Columns...),
 		})
 	}
 	return cloned
@@ -1072,7 +1112,9 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 			if !ok {
 				continue
 			}
-			tables[table.Name].Indexes[columnName] = planner.NewBasicIndex(table.Name, columnName)
+			basic := planner.NewBasicIndex(table.Name, columnName)
+			basic.RootPageID = index.RootPageID
+			tables[table.Name].Indexes[columnName] = basic
 		}
 	}
 
@@ -1273,16 +1315,13 @@ func (db *DB) defineLegacyBasicIndex(tableName, columnName string) error {
 		}
 		table.IndexDefs = append(table.IndexDefs, indexDef)
 		index := planner.NewBasicIndex(tableName, columnName)
+		index.RootPageID = indexDef.RootPageID
 		if err := index.Rebuild(colNames, table.Rows); err != nil {
 			return err
 		}
 		table.Indexes[columnName] = index
 
-		catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
-		if err != nil {
-			return wrapStorageError(err)
-		}
-		if err := db.stageDirtyState(catalogData, nil); err != nil {
+		if err := db.applyStagedIndexCreate(stagedTables, tableName, indexDef.Name); err != nil {
 			return err
 		}
 		committedTables = stagedTables
@@ -1484,6 +1523,9 @@ func validateIndexConsistency(table *executor.Table) error {
 			return newExecError("index/table mismatch")
 		}
 		if _, exists := legacyIndexDefs[columnName]; !exists {
+			return newExecError("index/table mismatch")
+		}
+		if index.RootPageID != legacyIndexDefs[columnName].RootPageID {
 			return newExecError("index/table mismatch")
 		}
 		if index.TableName != table.Name || index.ColumnName != columnName {

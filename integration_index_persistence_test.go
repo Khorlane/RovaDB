@@ -1,6 +1,7 @@
 package rovadb
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
@@ -79,6 +80,36 @@ func TestCatalogRoundTripPreservesIndexMetadataForOpen(t *testing.T) {
 	index := catalog.Tables[0].Indexes[0]
 	if index.Name != "id" || index.Unique || len(index.Columns) != 1 || index.Columns[0].Name != "id" || index.Columns[0].Desc {
 		t.Fatalf("catalog.Tables[0].Indexes[0] = %#v, want named single-column ASC non-unique id index", index)
+	}
+	if index.RootPageID == 0 {
+		t.Fatalf("catalog.Tables[0].Indexes[0].RootPageID = 0, want nonzero")
+	}
+	rootPage, err := pager.Get(storage.PageID(index.RootPageID))
+	if err != nil {
+		t.Fatalf("pager.Get(index root) error = %v", err)
+	}
+	if got := storage.PageType(binary.LittleEndian.Uint16(rootPage.Data()[4:6])); got != storage.PageTypeIndexLeaf {
+		t.Fatalf("index root page type = %d, want %d", got, storage.PageTypeIndexLeaf)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil")
+	}
+	indexDef := table.IndexDefinition("id")
+	if indexDef == nil {
+		t.Fatalf("IndexDefinition(id) = nil, defs=%#v", table.IndexDefs)
+	}
+	if indexDef.RootPageID != index.RootPageID {
+		t.Fatalf("IndexDefinition(id).RootPageID = %d, want %d", indexDef.RootPageID, index.RootPageID)
+	}
+	if basic := table.Indexes["id"]; basic == nil {
+		t.Fatal("table.Indexes[id] = nil")
+	} else if basic.RootPageID != index.RootPageID {
+		t.Fatalf("table.Indexes[id].RootPageID = %d, want %d", basic.RootPageID, index.RootPageID)
 	}
 }
 

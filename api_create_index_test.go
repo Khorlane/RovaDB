@@ -45,11 +45,18 @@ func TestExecAPICreateIndexSingleColumnPersistsAndSupportsQueryPath(t *testing.T
 	if table == nil {
 		t.Fatal("db.tables[users] = nil")
 	}
-	if table.IndexDefinition("idx_users_name") == nil {
+	indexDef := table.IndexDefinition("idx_users_name")
+	if indexDef == nil {
 		t.Fatalf("IndexDefinition(idx_users_name) = nil, want non-nil (defs=%#v)", table.IndexDefs)
+	}
+	if indexDef.RootPageID == 0 {
+		t.Fatal("IndexDefinition(idx_users_name).RootPageID = 0, want nonzero")
 	}
 	if table.Indexes["name"] == nil {
 		t.Fatal("table.Indexes[name] = nil, want active BasicIndex")
+	}
+	if table.Indexes["name"].RootPageID != indexDef.RootPageID {
+		t.Fatalf("table.Indexes[name].RootPageID = %d, want %d", table.Indexes["name"].RootPageID, indexDef.RootPageID)
 	}
 
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice' ORDER BY id")
@@ -177,6 +184,9 @@ func TestExecAPICreateIndexPersistsRichDefinitionWithoutActivatingLegacyIndex(t 
 	if indexDef == nil {
 		t.Fatalf("IndexDefinition(idx_users_name_score) = nil, defs=%#v", table.IndexDefs)
 	}
+	if indexDef.RootPageID == 0 {
+		t.Fatal("IndexDefinition(idx_users_name_score).RootPageID = 0, want nonzero")
+	}
 	if len(indexDef.Columns) != 2 || indexDef.Columns[0].Name != "name" || indexDef.Columns[1].Name != "score" || !indexDef.Columns[1].Desc {
 		t.Fatalf("indexDef.Columns = %#v, want [name score DESC]", indexDef.Columns)
 	}
@@ -204,6 +214,49 @@ func TestExecAPICreateIndexRejectsDuplicateNameAcrossDatabase(t *testing.T) {
 
 	if _, err := db.Exec("CREATE INDEX idx_name ON teams (name)"); err == nil || err.Error() != "execution: index already exists" {
 		t.Fatalf("Exec(duplicate name) error = %v, want %q", err, "execution: index already exists")
+	}
+}
+
+func TestExecAPICreateIndexAllocatesDistinctRootPages(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, email TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create first index) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_email ON users (email)"); err != nil {
+		t.Fatalf("Exec(create second index) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil")
+	}
+	nameIndex := table.IndexDefinition("idx_users_name")
+	if nameIndex == nil {
+		t.Fatalf("IndexDefinition(idx_users_name) = nil, defs=%#v", table.IndexDefs)
+	}
+	emailIndex := table.IndexDefinition("idx_users_email")
+	if emailIndex == nil {
+		t.Fatalf("IndexDefinition(idx_users_email) = nil, defs=%#v", table.IndexDefs)
+	}
+	if nameIndex.RootPageID == 0 || emailIndex.RootPageID == 0 {
+		t.Fatalf("root pages = (%d, %d), want both nonzero", nameIndex.RootPageID, emailIndex.RootPageID)
+	}
+	if nameIndex.RootPageID == emailIndex.RootPageID {
+		t.Fatalf("root pages = (%d, %d), want distinct values", nameIndex.RootPageID, emailIndex.RootPageID)
 	}
 }
 
@@ -355,6 +408,9 @@ func TestExecAPIMultiColumnUniqueIndexPersistsAndEnforcesAfterReopen(t *testing.
 	table := db.tables["users"]
 	if table == nil || table.IndexDefinition("idx_users_full_name") == nil {
 		t.Fatalf("IndexDefinition(idx_users_full_name) missing after reopen, table=%#v", table)
+	}
+	if table.IndexDefinition("idx_users_full_name").RootPageID == 0 {
+		t.Fatal("IndexDefinition(idx_users_full_name).RootPageID = 0, want nonzero")
 	}
 	if len(table.Indexes) != 0 {
 		t.Fatalf("table.Indexes = %#v, want no legacy planner index for multi-column definition", table.Indexes)
