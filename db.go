@@ -801,19 +801,31 @@ func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, t
 	// planner/executor cannot use a narrower persistence strategy.
 	table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
 
-	tablePageData, err := storage.BuildSlottedTablePageData(uint32(table.RootPageID()), table.Rows)
+	tablePageData, locators, err := storage.BuildSlottedTablePageDataWithLocators(uint32(table.RootPageID()), table.Rows)
 	if err != nil {
 		return wrapStorageError(err)
 	}
+	if len(locators) != len(table.Rows) {
+		return newStorageError("row locator mismatch")
+	}
+
+	pages := []stagedPage{{
+		id:   table.RootPageID(),
+		data: tablePageData,
+	}}
+
+	indexPages, err := db.buildRebuiltIndexPages(table, table.Rows, locators)
+	if err != nil {
+		return err
+	}
+	pages = append(pages, indexPages...)
+
 	catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
 	if err != nil {
 		return wrapStorageError(err)
 	}
 
-	if err := db.stageDirtyState(catalogData, []stagedPage{{
-		id:   table.RootPageID(),
-		data: tablePageData,
-	}}); err != nil {
+	if err := db.stageDirtyState(catalogData, pages); err != nil {
 		return err
 	}
 	return nil
@@ -1079,6 +1091,45 @@ func (db *DB) buildInsertedIndexPages(table *executor.Table, row []parser.Value,
 		}
 		if err := db.insertIndexRecord(table, indexDef, key, locator, stager); err != nil {
 			return nil, err
+		}
+	}
+	return stager.finalizedPages(), nil
+}
+
+func (db *DB) buildRebuiltIndexPages(table *executor.Table, rows [][]parser.Value, locators []storage.RowLocator) ([]stagedPage, error) {
+	if db == nil || table == nil || len(table.IndexDefs) == 0 {
+		return nil, nil
+	}
+	if len(rows) != len(locators) {
+		return nil, newStorageError("row locator mismatch")
+	}
+
+	stager := newIndexPageStager(db.pager.NextPageID())
+	for i := range table.IndexDefs {
+		indexDef := &table.IndexDefs[i]
+		if indexDef.RootPageID == 0 {
+			continue
+		}
+
+		rootPageID := storage.PageID(indexDef.RootPageID)
+		stager.stage(stagedPage{
+			id:   rootPageID,
+			data: storage.InitIndexLeafPage(indexDef.RootPageID),
+		})
+		if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok {
+			if index := table.Indexes[columnName]; index != nil {
+				index.RootPageID = indexDef.RootPageID
+			}
+		}
+
+		for rowIndex, row := range rows {
+			key, err := encodeIndexKeyForRow(row, table.Columns, *indexDef)
+			if err != nil {
+				return nil, err
+			}
+			if err := db.insertIndexRecord(table, indexDef, key, locators[rowIndex], stager); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return stager.finalizedPages(), nil

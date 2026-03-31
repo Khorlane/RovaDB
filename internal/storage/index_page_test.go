@@ -366,6 +366,46 @@ func TestInsertIndexLeafRecordSortedRejectsFullPage(t *testing.T) {
 	}
 }
 
+func TestDeleteIndexLeafRecordRemovesOneMatchingDuplicate(t *testing.T) {
+	records := []IndexLeafRecord{
+		{Key: []byte("alice"), Locator: RowLocator{PageID: 1, SlotID: 0}},
+		{Key: []byte("alice"), Locator: RowLocator{PageID: 1, SlotID: 1}},
+		{Key: []byte("bob"), Locator: RowLocator{PageID: 1, SlotID: 2}},
+	}
+
+	updated, removed := DeleteIndexLeafRecord(records, []byte("alice"), RowLocator{PageID: 1, SlotID: 1})
+	if !removed {
+		t.Fatal("DeleteIndexLeafRecord() removed = false, want true")
+	}
+	if len(updated) != 2 {
+		t.Fatalf("len(updated) = %d, want 2", len(updated))
+	}
+	if string(updated[0].Key) != "alice" || updated[0].Locator != (RowLocator{PageID: 1, SlotID: 0}) {
+		t.Fatalf("updated[0] = %#v, want alice -> (1,0)", updated[0])
+	}
+	if string(updated[1].Key) != "bob" || updated[1].Locator != (RowLocator{PageID: 1, SlotID: 2}) {
+		t.Fatalf("updated[1] = %#v, want bob -> (1,2)", updated[1])
+	}
+}
+
+func TestDeleteIndexLeafRecordReturnsCloneWhenMissing(t *testing.T) {
+	records := []IndexLeafRecord{
+		{Key: []byte("alice"), Locator: RowLocator{PageID: 1, SlotID: 0}},
+	}
+
+	updated, removed := DeleteIndexLeafRecord(records, []byte("bob"), RowLocator{PageID: 1, SlotID: 1})
+	if removed {
+		t.Fatal("DeleteIndexLeafRecord() removed = true, want false")
+	}
+	if len(updated) != 1 || string(updated[0].Key) != "alice" {
+		t.Fatalf("updated = %#v, want unchanged alice record", updated)
+	}
+	updated[0].Key[0] = 'z'
+	if string(records[0].Key) != "alice" {
+		t.Fatalf("records mutated to %#v, want original preserved", records)
+	}
+}
+
 func TestBuildIndexLeafPageData(t *testing.T) {
 	page, err := BuildIndexLeafPageData(13, []IndexLeafRecord{
 		{Key: []byte("alice"), Locator: RowLocator{PageID: 1, SlotID: 0}},

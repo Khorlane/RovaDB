@@ -380,6 +380,131 @@ func TestFetchRowByLocatorFromIndexLeafSurvivesReopen(t *testing.T) {
 	}
 }
 
+func TestDeleteRebuildsPersistedIndexEntriesAndSurvivesReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, age INT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice', 10)",
+		"INSERT INTO users VALUES (2, 'bob', 20)",
+		"INSERT INTO users VALUES (3, 'cara', 30)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if _, err := db.Exec("DELETE FROM users WHERE id = 2"); err != nil {
+		t.Fatalf("Exec(delete) error = %v", err)
+	}
+
+	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("bob")}, nil)
+	rows := assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("alice")}, [][]parser.Value{
+		{parser.Int64Value(1), parser.StringValue("alice"), parser.Int64Value(10)},
+	})
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("bob")}, nil)
+	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("cara")}, [][]parser.Value{
+		{parser.Int64Value(3), parser.StringValue("cara"), parser.Int64Value(30)},
+	})
+}
+
+func TestUpdateIndexedColumnRebuildsPersistedIndexEntriesAndSurvivesReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, age INT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice', 10)",
+		"INSERT INTO users VALUES (2, 'bob', 20)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if _, err := db.Exec("UPDATE users SET name = 'zoe' WHERE id = 2"); err != nil {
+		t.Fatalf("Exec(update indexed column) error = %v", err)
+	}
+
+	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("bob")}, nil)
+	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("zoe")}, [][]parser.Value{
+		{parser.Int64Value(2), parser.StringValue("zoe"), parser.Int64Value(20)},
+	})
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("bob")}, nil)
+	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("zoe")}, [][]parser.Value{
+		{parser.Int64Value(2), parser.StringValue("zoe"), parser.Int64Value(20)},
+	})
+}
+
+func TestUpdateNonIndexedColumnPreservesIndexMembership(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice', false)",
+		"INSERT INTO users VALUES (2, 'bob', true)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if _, err := db.Exec("UPDATE users SET active = true WHERE id = 1"); err != nil {
+		t.Fatalf("Exec(update non-indexed column) error = %v", err)
+	}
+
+	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("alice")}, [][]parser.Value{
+		{parser.Int64Value(1), parser.StringValue("alice"), parser.BoolValue(true)},
+	})
+	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("bob")}, [][]parser.Value{
+		{parser.Int64Value(2), parser.StringValue("bob"), parser.BoolValue(true)},
+	})
+}
+
 func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
 	path := testDBPath(t)
 
@@ -544,4 +669,50 @@ func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
 	if !foundInsertedRow {
 		t.Fatalf("locators = %#v, want one locator resolving to inserted row %q", locators, insertedValue)
 	}
+}
+
+func assertIndexedRowLookup(t *testing.T, db *DB, tableName, indexName string, keyValues []parser.Value, wantRows [][]parser.Value) [][]parser.Value {
+	t.Helper()
+
+	table := db.tables[tableName]
+	if table == nil {
+		t.Fatalf("db.tables[%q] = nil", tableName)
+	}
+	indexDef := table.IndexDefinition(indexName)
+	if indexDef == nil {
+		t.Fatalf("IndexDefinition(%s) = nil, defs=%#v", indexName, table.IndexDefs)
+	}
+	searchKey, err := storage.EncodeIndexKey(keyValues)
+	if err != nil {
+		t.Fatalf("EncodeIndexKey(%#v) error = %v", keyValues, err)
+	}
+	pageReader := func(pageID uint32) ([]byte, error) {
+		return readCommittedPageData(db.pool, storage.PageID(pageID))
+	}
+	locators, err := storage.LookupIndexExact(pageReader, indexDef.RootPageID, searchKey)
+	if err != nil {
+		t.Fatalf("LookupIndexExact(%s) error = %v", indexName, err)
+	}
+	rows := make([][]parser.Value, 0, len(locators))
+	for _, locator := range locators {
+		row, err := db.fetchRowByLocator(table, locator)
+		if err != nil {
+			t.Fatalf("fetchRowByLocator(%#v) error = %v", locator, err)
+		}
+		rows = append(rows, row)
+	}
+	if len(rows) != len(wantRows) {
+		t.Fatalf("len(rows) = %d, want %d (rows=%#v)", len(rows), len(wantRows), rows)
+	}
+	for i := range wantRows {
+		if len(rows[i]) != len(wantRows[i]) {
+			t.Fatalf("len(rows[%d]) = %d, want %d", i, len(rows[i]), len(wantRows[i]))
+		}
+		for j := range wantRows[i] {
+			if rows[i][j] != wantRows[i][j] {
+				t.Fatalf("rows[%d][%d] = %#v, want %#v", i, j, rows[i][j], wantRows[i][j])
+			}
+		}
+	}
+	return rows
 }

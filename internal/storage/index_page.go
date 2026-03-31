@@ -1,6 +1,9 @@
 package storage
 
-import "encoding/binary"
+import (
+	"bytes"
+	"encoding/binary"
+)
 
 const (
 	indexPageCommonHeaderSize = 32
@@ -384,6 +387,20 @@ func InsertSortedIndexLeafRecords(records []IndexLeafRecord, record IndexLeafRec
 		}
 	}
 	return records
+}
+
+func DeleteIndexLeafRecord(records []IndexLeafRecord, key []byte, locator RowLocator) ([]IndexLeafRecord, bool) {
+	for i, record := range records {
+		if !bytes.Equal(record.Key, key) || record.Locator != locator {
+			continue
+		}
+
+		updated := make([]IndexLeafRecord, 0, len(records)-1)
+		updated = append(updated, cloneIndexLeafRecords(records[:i])...)
+		updated = append(updated, cloneIndexLeafRecords(records[i+1:])...)
+		return updated, true
+	}
+	return cloneIndexLeafRecords(records), false
 }
 
 func cloneIndexLeafRecords(records []IndexLeafRecord) []IndexLeafRecord {
