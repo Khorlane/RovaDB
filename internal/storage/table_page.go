@@ -6,6 +6,24 @@ import (
 
 const tablePageHeaderSize = 8
 
+const (
+	tablePageCommonHeaderSize = 32
+	tablePageBodyHeaderSize   = 8
+	tablePageSlotEntrySize    = 4
+	tablePageBodyStart        = tablePageCommonHeaderSize + tablePageBodyHeaderSize
+
+	tablePageHeaderOffsetPageID   = 0
+	tablePageHeaderOffsetPageType = 4
+	tablePageHeaderOffsetPageLSN  = 8
+	tablePageHeaderOffsetChecksum = 16
+
+	tablePageBodyOffsetSlotCount = tablePageCommonHeaderSize
+	tablePageBodyOffsetFreeStart = tablePageCommonHeaderSize + 4
+	tablePageBodyOffsetFreeEnd   = tablePageCommonHeaderSize + 6
+
+	tablePageType = 1
+)
+
 // InitTableRootPage initializes a blank table root page header.
 func InitTableRootPage(page *Page) {
 	if page == nil {
@@ -144,4 +162,143 @@ func tablePageFreeOffset(page *Page) uint32 {
 		return 0
 	}
 	return binary.LittleEndian.Uint32(page.data[4:8])
+}
+
+// InitializeTablePage builds a blank slotted table page.
+func InitializeTablePage(pageID uint32) []byte {
+	page := make([]byte, PageSize)
+	binary.LittleEndian.PutUint32(page[tablePageHeaderOffsetPageID:tablePageHeaderOffsetPageID+4], pageID)
+	binary.LittleEndian.PutUint16(page[tablePageHeaderOffsetPageType:tablePageHeaderOffsetPageType+2], tablePageType)
+	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetSlotCount:tablePageBodyOffsetSlotCount+2], 0)
+	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeStart:tablePageBodyOffsetFreeStart+2], tablePageBodyStart)
+	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeEnd:tablePageBodyOffsetFreeEnd+2], PageSize)
+	return page
+}
+
+func TablePageSlotCount(page []byte) (int, error) {
+	if err := validateSlottedTablePage(page); err != nil {
+		return 0, err
+	}
+	return int(binary.LittleEndian.Uint16(page[tablePageBodyOffsetSlotCount : tablePageBodyOffsetSlotCount+2])), nil
+}
+
+func TablePageFreeStart(page []byte) (int, error) {
+	if err := validateSlottedTablePage(page); err != nil {
+		return 0, err
+	}
+	return int(binary.LittleEndian.Uint16(page[tablePageBodyOffsetFreeStart : tablePageBodyOffsetFreeStart+2])), nil
+}
+
+func TablePageFreeEnd(page []byte) (int, error) {
+	if err := validateSlottedTablePage(page); err != nil {
+		return 0, err
+	}
+	return int(binary.LittleEndian.Uint16(page[tablePageBodyOffsetFreeEnd : tablePageBodyOffsetFreeEnd+2])), nil
+}
+
+func TablePageFreeSpace(page []byte) (int, error) {
+	freeStart, err := TablePageFreeStart(page)
+	if err != nil {
+		return 0, err
+	}
+	freeEnd, err := TablePageFreeEnd(page)
+	if err != nil {
+		return 0, err
+	}
+	return freeEnd - freeStart, nil
+}
+
+func TablePageSlot(page []byte, slotID int) (offset int, length int, err error) {
+	if err := validateSlottedTablePage(page); err != nil {
+		return 0, 0, err
+	}
+	slotCount, err := TablePageSlotCount(page)
+	if err != nil {
+		return 0, 0, err
+	}
+	if slotID < 0 || slotID >= slotCount {
+		return 0, 0, errCorruptedTablePage
+	}
+
+	entryOffset := tablePageBodyStart + slotID*tablePageSlotEntrySize
+	offset = int(binary.LittleEndian.Uint16(page[entryOffset : entryOffset+2]))
+	length = int(binary.LittleEndian.Uint16(page[entryOffset+2 : entryOffset+4]))
+	if offset < tablePageBodyStart || length < 0 || offset+length > PageSize {
+		return 0, 0, errCorruptedTablePage
+	}
+	return offset, length, nil
+}
+
+func CanFitRow(page []byte, rowLen int) (bool, error) {
+	if err := validateSlottedTablePage(page); err != nil {
+		return false, err
+	}
+	if rowLen < 0 {
+		return false, errCorruptedTablePage
+	}
+	freeSpace, err := TablePageFreeSpace(page)
+	if err != nil {
+		return false, err
+	}
+	return freeSpace >= rowLen+tablePageSlotEntrySize, nil
+}
+
+func InsertRowIntoTablePage(page []byte, row []byte) (slotID int, err error) {
+	if err := validateSlottedTablePage(page); err != nil {
+		return 0, err
+	}
+
+	fit, err := CanFitRow(page, len(row))
+	if err != nil {
+		return 0, err
+	}
+	if !fit {
+		return 0, errTablePageFull
+	}
+
+	slotCount, err := TablePageSlotCount(page)
+	if err != nil {
+		return 0, err
+	}
+	freeStart, err := TablePageFreeStart(page)
+	if err != nil {
+		return 0, err
+	}
+	freeEnd, err := TablePageFreeEnd(page)
+	if err != nil {
+		return 0, err
+	}
+
+	rowOffset := freeEnd - len(row)
+	copy(page[rowOffset:freeEnd], row)
+
+	entryOffset := tablePageBodyStart + slotCount*tablePageSlotEntrySize
+	binary.LittleEndian.PutUint16(page[entryOffset:entryOffset+2], uint16(rowOffset))
+	binary.LittleEndian.PutUint16(page[entryOffset+2:entryOffset+4], uint16(len(row)))
+	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetSlotCount:tablePageBodyOffsetSlotCount+2], uint16(slotCount+1))
+	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeStart:tablePageBodyOffsetFreeStart+2], uint16(freeStart+tablePageSlotEntrySize))
+	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeEnd:tablePageBodyOffsetFreeEnd+2], uint16(rowOffset))
+	return slotCount, nil
+}
+
+func validateSlottedTablePage(page []byte) error {
+	if len(page) != PageSize {
+		return errCorruptedTablePage
+	}
+	if binary.LittleEndian.Uint16(page[tablePageHeaderOffsetPageType:tablePageHeaderOffsetPageType+2]) != tablePageType {
+		return errCorruptedTablePage
+	}
+
+	slotCount := int(binary.LittleEndian.Uint16(page[tablePageBodyOffsetSlotCount : tablePageBodyOffsetSlotCount+2]))
+	freeStart := int(binary.LittleEndian.Uint16(page[tablePageBodyOffsetFreeStart : tablePageBodyOffsetFreeStart+2]))
+	freeEnd := int(binary.LittleEndian.Uint16(page[tablePageBodyOffsetFreeEnd : tablePageBodyOffsetFreeEnd+2]))
+	expectedFreeStart := tablePageBodyStart + slotCount*tablePageSlotEntrySize
+
+	if slotCount < 0 || freeStart < tablePageBodyStart || freeEnd < tablePageBodyStart || freeEnd > PageSize {
+		return errCorruptedTablePage
+	}
+	if freeStart != expectedFreeStart || freeStart > freeEnd {
+		return errCorruptedTablePage
+	}
+	return nil
 }

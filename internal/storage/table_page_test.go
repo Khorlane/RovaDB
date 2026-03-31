@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"testing"
@@ -153,5 +154,170 @@ func TestReadRowsFromTablePageCountMismatch(t *testing.T) {
 	_, err = ReadRowsFromTablePage(page)
 	if !errors.Is(err, errCorruptedTablePage) {
 		t.Fatalf("ReadRowsFromTablePage() error = %v, want %v", err, errCorruptedTablePage)
+	}
+}
+
+func TestInitializeTablePage(t *testing.T) {
+	page := InitializeTablePage(7)
+
+	if got := len(page); got != PageSize {
+		t.Fatalf("len(page) = %d, want %d", got, PageSize)
+	}
+	if got := binary.LittleEndian.Uint32(page[tablePageHeaderOffsetPageID : tablePageHeaderOffsetPageID+4]); got != 7 {
+		t.Fatalf("pageID = %d, want 7", got)
+	}
+	if got := binary.LittleEndian.Uint16(page[tablePageHeaderOffsetPageType : tablePageHeaderOffsetPageType+2]); got != tablePageType {
+		t.Fatalf("pageType = %d, want %d", got, tablePageType)
+	}
+	slotCount, err := TablePageSlotCount(page)
+	if err != nil {
+		t.Fatalf("TablePageSlotCount() error = %v", err)
+	}
+	if slotCount != 0 {
+		t.Fatalf("TablePageSlotCount() = %d, want 0", slotCount)
+	}
+	freeStart, err := TablePageFreeStart(page)
+	if err != nil {
+		t.Fatalf("TablePageFreeStart() error = %v", err)
+	}
+	if freeStart != tablePageBodyStart {
+		t.Fatalf("TablePageFreeStart() = %d, want %d", freeStart, tablePageBodyStart)
+	}
+	freeEnd, err := TablePageFreeEnd(page)
+	if err != nil {
+		t.Fatalf("TablePageFreeEnd() error = %v", err)
+	}
+	if freeEnd != PageSize {
+		t.Fatalf("TablePageFreeEnd() = %d, want %d", freeEnd, PageSize)
+	}
+	freeSpace, err := TablePageFreeSpace(page)
+	if err != nil {
+		t.Fatalf("TablePageFreeSpace() error = %v", err)
+	}
+	if freeSpace != PageSize-tablePageBodyStart {
+		t.Fatalf("TablePageFreeSpace() = %d, want %d", freeSpace, PageSize-tablePageBodyStart)
+	}
+}
+
+func TestInsertRowIntoTablePage(t *testing.T) {
+	page := InitializeTablePage(1)
+	row := []byte{0xAA, 0xBB, 0xCC}
+
+	slotID, err := InsertRowIntoTablePage(page, row)
+	if err != nil {
+		t.Fatalf("InsertRowIntoTablePage() error = %v", err)
+	}
+	if slotID != 0 {
+		t.Fatalf("slotID = %d, want 0", slotID)
+	}
+
+	slotCount, err := TablePageSlotCount(page)
+	if err != nil {
+		t.Fatalf("TablePageSlotCount() error = %v", err)
+	}
+	if slotCount != 1 {
+		t.Fatalf("TablePageSlotCount() = %d, want 1", slotCount)
+	}
+	freeStart, err := TablePageFreeStart(page)
+	if err != nil {
+		t.Fatalf("TablePageFreeStart() error = %v", err)
+	}
+	if freeStart != tablePageBodyStart+tablePageSlotEntrySize {
+		t.Fatalf("TablePageFreeStart() = %d, want %d", freeStart, tablePageBodyStart+tablePageSlotEntrySize)
+	}
+	freeEnd, err := TablePageFreeEnd(page)
+	if err != nil {
+		t.Fatalf("TablePageFreeEnd() error = %v", err)
+	}
+	if freeEnd != PageSize-len(row) {
+		t.Fatalf("TablePageFreeEnd() = %d, want %d", freeEnd, PageSize-len(row))
+	}
+
+	offset, length, err := TablePageSlot(page, 0)
+	if err != nil {
+		t.Fatalf("TablePageSlot() error = %v", err)
+	}
+	if length != len(row) {
+		t.Fatalf("slot length = %d, want %d", length, len(row))
+	}
+	if !bytes.Equal(page[offset:offset+length], row) {
+		t.Fatalf("stored row = %v, want %v", page[offset:offset+length], row)
+	}
+}
+
+func TestInsertMultipleRowsIntoTablePage(t *testing.T) {
+	page := InitializeTablePage(2)
+	row1 := []byte{0x10, 0x11}
+	row2 := []byte{0x20, 0x21, 0x22}
+
+	slot1, err := InsertRowIntoTablePage(page, row1)
+	if err != nil {
+		t.Fatalf("InsertRowIntoTablePage(row1) error = %v", err)
+	}
+	slot2, err := InsertRowIntoTablePage(page, row2)
+	if err != nil {
+		t.Fatalf("InsertRowIntoTablePage(row2) error = %v", err)
+	}
+	if slot1 != 0 || slot2 != 1 {
+		t.Fatalf("slots = (%d, %d), want (0, 1)", slot1, slot2)
+	}
+
+	offset1, length1, err := TablePageSlot(page, slot1)
+	if err != nil {
+		t.Fatalf("TablePageSlot(slot1) error = %v", err)
+	}
+	offset2, length2, err := TablePageSlot(page, slot2)
+	if err != nil {
+		t.Fatalf("TablePageSlot(slot2) error = %v", err)
+	}
+	if length1 != len(row1) || length2 != len(row2) {
+		t.Fatalf("slot lengths = (%d, %d), want (%d, %d)", length1, length2, len(row1), len(row2))
+	}
+	if offset2 >= offset1 {
+		t.Fatalf("offset2 = %d, want less than offset1 = %d", offset2, offset1)
+	}
+	if !bytes.Equal(page[offset1:offset1+length1], row1) {
+		t.Fatalf("row1 bytes mismatch")
+	}
+	if !bytes.Equal(page[offset2:offset2+length2], row2) {
+		t.Fatalf("row2 bytes mismatch")
+	}
+}
+
+func TestCanFitRowFalseWhenInsufficientSpace(t *testing.T) {
+	page := InitializeTablePage(3)
+	rowLen := PageSize - tablePageBodyStart - tablePageSlotEntrySize + 1
+
+	fit, err := CanFitRow(page, rowLen)
+	if err != nil {
+		t.Fatalf("CanFitRow() error = %v", err)
+	}
+	if fit {
+		t.Fatal("CanFitRow() = true, want false")
+	}
+}
+
+func TestSlottedTablePageRejectsInvalidPageSize(t *testing.T) {
+	page := make([]byte, PageSize-1)
+
+	if _, err := TablePageSlotCount(page); !errors.Is(err, errCorruptedTablePage) {
+		t.Fatalf("TablePageSlotCount() error = %v, want %v", err, errCorruptedTablePage)
+	}
+}
+
+func TestSlottedTablePageRejectsWrongPageType(t *testing.T) {
+	page := InitializeTablePage(4)
+	binary.LittleEndian.PutUint16(page[tablePageHeaderOffsetPageType:tablePageHeaderOffsetPageType+2], 99)
+
+	if _, err := TablePageSlotCount(page); !errors.Is(err, errCorruptedTablePage) {
+		t.Fatalf("TablePageSlotCount() error = %v, want %v", err, errCorruptedTablePage)
+	}
+}
+
+func TestTablePageSlotRejectsOutOfRange(t *testing.T) {
+	page := InitializeTablePage(5)
+
+	if _, _, err := TablePageSlot(page, 0); !errors.Is(err, errCorruptedTablePage) {
+		t.Fatalf("TablePageSlot() error = %v, want %v", err, errCorruptedTablePage)
 	}
 }
