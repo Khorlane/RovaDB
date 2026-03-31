@@ -53,6 +53,27 @@ func (bp *BufferPool) Unpin(f *Frame) {
 	}
 }
 
+func (bp *BufferPool) MarkDirty(f *Frame) {
+	if f == nil {
+		return
+	}
+	f.Dirty = true
+}
+
+func (bp *BufferPool) MarkClean(f *Frame) {
+	if f == nil {
+		return
+	}
+	f.Dirty = false
+}
+
+func (bp *BufferPool) IsDirty(f *Frame) bool {
+	if f == nil {
+		return false
+	}
+	return f.Dirty
+}
+
 func (bp *BufferPool) LatchShared(f *Frame) {
 	if f == nil {
 		return

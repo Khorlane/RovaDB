@@ -59,6 +59,9 @@ func TestGetCommittedPageLoadsViaLoader(t *testing.T) {
 	if !bytes.Equal(frame.Data[:], loader.pages[7]) {
 		t.Fatal("frame.Data mismatch")
 	}
+	if pool.IsDirty(frame) {
+		t.Fatal("newly loaded frame is dirty, want clean")
+	}
 	if got := frame.PinCount; got != 1 {
 		t.Fatalf("frame.PinCount = %d, want 1", got)
 	}
@@ -412,4 +415,97 @@ func TestUnlatchSharedNilIsNoOp(t *testing.T) {
 	pool := New(1, nil)
 
 	pool.UnlatchShared(nil)
+}
+
+func TestMarkDirtyAndMarkCleanUpdateTrackedFrameState(t *testing.T) {
+	pool := New(1, &stubLoader{
+		pages: map[PageID][]byte{
+			12: bytes.Repeat([]byte{0x12}, PageSize),
+		},
+	})
+
+	frame, err := pool.GetCommittedPage(12)
+	if err != nil {
+		t.Fatalf("GetCommittedPage() error = %v", err)
+	}
+	if pool.IsDirty(frame) {
+		t.Fatal("frame starts dirty, want clean")
+	}
+
+	pool.MarkDirty(frame)
+	if !pool.IsDirty(frame) {
+		t.Fatal("frame not dirty after MarkDirty()")
+	}
+
+	pool.MarkClean(frame)
+	if pool.IsDirty(frame) {
+		t.Fatal("frame still dirty after MarkClean()")
+	}
+	pool.UnlatchShared(frame)
+}
+
+func TestDirtyHelpersAreNilSafe(t *testing.T) {
+	pool := New(1, nil)
+
+	pool.MarkDirty(nil)
+	pool.MarkClean(nil)
+	if pool.IsDirty(nil) {
+		t.Fatal("IsDirty(nil) = true, want false")
+	}
+}
+
+func TestDirtyFramesReturnsOnlyTrackedDirtyFrames(t *testing.T) {
+	pool := New(1, &stubLoader{
+		pages: map[PageID][]byte{
+			13: bytes.Repeat([]byte{0x13}, PageSize),
+			14: bytes.Repeat([]byte{0x14}, PageSize),
+			15: bytes.Repeat([]byte{0x15}, PageSize),
+		},
+	})
+
+	frame13, err := pool.GetCommittedPage(13)
+	if err != nil {
+		t.Fatalf("GetCommittedPage(13) error = %v", err)
+	}
+	frame14, err := pool.GetCommittedPage(14)
+	if err != nil {
+		t.Fatalf("GetCommittedPage(14) error = %v", err)
+	}
+	frame15, err := pool.GetCommittedPage(15)
+	if err != nil {
+		t.Fatalf("GetCommittedPage(15) error = %v", err)
+	}
+
+	pool.MarkDirty(frame14)
+	pool.MarkDirty(frame13)
+
+	dirty := pool.DirtyFrames()
+	if len(dirty) != 2 {
+		t.Fatalf("len(DirtyFrames()) = %d, want 2", len(dirty))
+	}
+	if dirty[0] != frame13 {
+		t.Fatal("DirtyFrames()[0] is not tracked frame13")
+	}
+	if dirty[1] != frame14 {
+		t.Fatal("DirtyFrames()[1] is not tracked frame14")
+	}
+
+	pool.MarkDirty(frame13)
+	dirty = pool.DirtyFrames()
+	if len(dirty) != 2 {
+		t.Fatalf("len(DirtyFrames()) after repeat dirty = %d, want 2", len(dirty))
+	}
+
+	pool.MarkClean(frame13)
+	dirty = pool.DirtyFrames()
+	if len(dirty) != 1 {
+		t.Fatalf("len(DirtyFrames()) after clean = %d, want 1", len(dirty))
+	}
+	if dirty[0] != frame14 {
+		t.Fatal("DirtyFrames()[0] is not tracked frame14 after clean")
+	}
+
+	pool.UnlatchShared(frame13)
+	pool.UnlatchShared(frame14)
+	pool.UnlatchShared(frame15)
 }
