@@ -241,6 +241,33 @@ func TablePageSlot(page []byte, slotID int) (offset int, length int, err error) 
 	return offset, length, nil
 }
 
+func SlotLocator(pageID uint32, slotID int) (RowLocator, error) {
+	if slotID < 0 || slotID > int(^uint16(0)) {
+		return RowLocator{}, errCorruptedTablePage
+	}
+	return RowLocator{PageID: pageID, SlotID: uint16(slotID)}, nil
+}
+
+func TablePageLocators(page []byte, pageID uint32) ([]RowLocator, error) {
+	slotCount, err := TablePageSlotCount(page)
+	if err != nil {
+		return nil, err
+	}
+
+	locators := make([]RowLocator, 0, slotCount)
+	for slotID := 0; slotID < slotCount; slotID++ {
+		if _, _, err := TablePageSlot(page, slotID); err != nil {
+			return nil, err
+		}
+		locator, err := SlotLocator(pageID, slotID)
+		if err != nil {
+			return nil, err
+		}
+		locators = append(locators, locator)
+	}
+	return locators, nil
+}
+
 func IsSlottedTablePage(page []byte) bool {
 	return len(page) == PageSize && binary.LittleEndian.Uint16(page[tablePageHeaderOffsetPageType:tablePageHeaderOffsetPageType+2]) == tablePageType
 }
@@ -309,30 +336,46 @@ func ExtractSlottedRowPayload(page []byte, slotID int) ([]byte, error) {
 }
 
 func ReadSlottedRowsFromTablePageData(page []byte, columnTypes []uint8) ([][]parser.Value, error) {
-	payloads, err := readSlottedRowPayloads(page)
+	if err := validateSlottedTablePage(page); err != nil {
+		return nil, err
+	}
+	pageID := binary.LittleEndian.Uint32(page[tablePageHeaderOffsetPageID : tablePageHeaderOffsetPageID+4])
+	_, rows, err := ReadSlottedRowsWithLocators(page, pageID, columnTypes)
 	if err != nil {
 		return nil, err
+	}
+	return rows, nil
+}
+
+func ReadSlottedRowsWithLocators(page []byte, pageID uint32, columnTypes []uint8) ([]RowLocator, [][]parser.Value, error) {
+	payloads, err := readSlottedRowPayloads(page)
+	if err != nil {
+		return nil, nil, err
+	}
+	locators, err := TablePageLocators(page, pageID)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	rows := make([][]parser.Value, 0, len(payloads))
 	for _, payload := range payloads {
 		if len(payload) < 2 {
-			return nil, errInvalidRowData
+			return nil, nil, errInvalidRowData
 		}
 		encodedColumnCount := int(binary.LittleEndian.Uint16(payload[0:2]))
 		if encodedColumnCount > len(columnTypes) {
-			return nil, errInvalidRowData
+			return nil, nil, errInvalidRowData
 		}
 		row, err := DecodeSlottedRow(payload, columnTypes[:encodedColumnCount])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for len(row) < len(columnTypes) {
 			row = append(row, parser.NullValue())
 		}
 		rows = append(rows, row)
 	}
-	return rows, nil
+	return locators, rows, nil
 }
 
 func readSlottedRowPayloads(page []byte) ([][]byte, error) {

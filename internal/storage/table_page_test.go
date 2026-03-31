@@ -322,6 +322,56 @@ func TestTablePageSlotRejectsOutOfRange(t *testing.T) {
 	}
 }
 
+func TestSlotLocator(t *testing.T) {
+	locator, err := SlotLocator(7, 3)
+	if err != nil {
+		t.Fatalf("SlotLocator() error = %v", err)
+	}
+	if locator.PageID != 7 || locator.SlotID != 3 {
+		t.Fatalf("locator = %#v, want PageID=7 SlotID=3", locator)
+	}
+}
+
+func TestSlotLocatorRejectsInvalidSlotIndex(t *testing.T) {
+	if _, err := SlotLocator(1, -1); !errors.Is(err, errCorruptedTablePage) {
+		t.Fatalf("SlotLocator() error = %v, want %v", err, errCorruptedTablePage)
+	}
+}
+
+func TestTablePageLocators(t *testing.T) {
+	page, err := BuildSlottedTablePageData(8, [][]parser.Value{
+		{parser.Int64Value(1)},
+		{parser.Int64Value(2)},
+	})
+	if err != nil {
+		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
+	}
+
+	locators, err := TablePageLocators(page, 8)
+	if err != nil {
+		t.Fatalf("TablePageLocators() error = %v", err)
+	}
+	if len(locators) != 2 {
+		t.Fatalf("len(locators) = %d, want 2", len(locators))
+	}
+	want := []RowLocator{{PageID: 8, SlotID: 0}, {PageID: 8, SlotID: 1}}
+	for i := range want {
+		if locators[i] != want[i] {
+			t.Fatalf("locators[%d] = %#v, want %#v", i, locators[i], want[i])
+		}
+	}
+}
+
+func TestTablePageLocatorsRejectWrongPageType(t *testing.T) {
+	page := InitializeTablePage(9)
+	binary.LittleEndian.PutUint16(page[tablePageHeaderOffsetPageType:tablePageHeaderOffsetPageType+2], 99)
+
+	_, err := TablePageLocators(page, 9)
+	if !errors.Is(err, errCorruptedTablePage) {
+		t.Fatalf("TablePageLocators() error = %v, want %v", err, errCorruptedTablePage)
+	}
+}
+
 func TestBuildSlottedTablePageDataStoresEncodedRows(t *testing.T) {
 	rows := [][]parser.Value{
 		{parser.Int64Value(1), parser.StringValue("alice")},
@@ -435,5 +485,48 @@ func TestReadSlottedRowsFromTablePageDataRejectsWrongPageType(t *testing.T) {
 	_, err := ReadSlottedRowsFromTablePageData(page, []uint8{CatalogColumnTypeInt})
 	if !errors.Is(err, errCorruptedTablePage) {
 		t.Fatalf("ReadSlottedRowsFromTablePageData() error = %v, want %v", err, errCorruptedTablePage)
+	}
+}
+
+func TestReadSlottedRowsWithLocators(t *testing.T) {
+	rows := [][]parser.Value{
+		{parser.Int64Value(1), parser.StringValue("alice")},
+		{parser.Int64Value(2), parser.StringValue("bob")},
+	}
+	page, err := BuildSlottedTablePageData(14, rows)
+	if err != nil {
+		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
+	}
+
+	locators, decodedRows, err := ReadSlottedRowsWithLocators(page, 14, []uint8{
+		CatalogColumnTypeInt,
+		CatalogColumnTypeText,
+	})
+	if err != nil {
+		t.Fatalf("ReadSlottedRowsWithLocators() error = %v", err)
+	}
+	if len(locators) != len(rows) || len(decodedRows) != len(rows) {
+		t.Fatalf("lens = (%d, %d), want (%d, %d)", len(locators), len(decodedRows), len(rows), len(rows))
+	}
+	for i := range rows {
+		wantLocator := RowLocator{PageID: 14, SlotID: uint16(i)}
+		if locators[i] != wantLocator {
+			t.Fatalf("locators[%d] = %#v, want %#v", i, locators[i], wantLocator)
+		}
+		for j := range rows[i] {
+			if decodedRows[i][j] != rows[i][j] {
+				t.Fatalf("decodedRows[%d][%d] = %#v, want %#v", i, j, decodedRows[i][j], rows[i][j])
+			}
+		}
+	}
+}
+
+func TestReadSlottedRowsWithLocatorsRejectsInvalidMetadata(t *testing.T) {
+	page := InitializeTablePage(15)
+	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeStart:tablePageBodyOffsetFreeStart+2], tablePageBodyStart+1)
+
+	_, _, err := ReadSlottedRowsWithLocators(page, 15, []uint8{CatalogColumnTypeInt})
+	if !errors.Is(err, errCorruptedTablePage) {
+		t.Fatalf("ReadSlottedRowsWithLocators() error = %v, want %v", err, errCorruptedTablePage)
 	}
 }
