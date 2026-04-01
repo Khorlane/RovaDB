@@ -74,6 +74,17 @@ func LoadCatalog(reader PageReader) (*CatalogData, error) {
 
 // LoadCatalogPageData decodes a catalog page image.
 func LoadCatalogPageData(pageData []byte) (*CatalogData, error) {
+	if ValidateDirectoryPage(pageData) == nil {
+		payload, err := directoryCatalogPayload(pageData)
+		if err != nil {
+			return nil, err
+		}
+		return loadCatalogPayload(payload)
+	}
+	return loadCatalogPayload(pageData)
+}
+
+func loadCatalogPayload(pageData []byte) (*CatalogData, error) {
 	if isZeroPage(pageData) {
 		return &CatalogData{}, nil
 	}
@@ -184,7 +195,8 @@ func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
 		cat = &CatalogData{}
 	}
 
-	buf := make([]byte, 0, PageSize)
+	maxCatalogPayloadSize := PageSize - directoryCatalogOffset
+	buf := make([]byte, 0, maxCatalogPayloadSize)
 	buf = appendUint32(buf, catalogVersion)
 	buf = appendUint32(buf, uint32(len(cat.Tables)))
 
@@ -206,7 +218,7 @@ func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
 			}
 			buf = appendString(buf, column.Name)
 			buf = append(buf, column.Type)
-			if len(buf) > PageSize {
+			if len(buf) > maxCatalogPayloadSize {
 				return nil, errCatalogTooLarge
 			}
 		}
@@ -218,14 +230,12 @@ func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
 				return nil, err
 			}
 		}
-		if len(buf) > PageSize {
+		if len(buf) > maxCatalogPayloadSize {
 			return nil, errCatalogTooLarge
 		}
 	}
 
-	pageData := make([]byte, PageSize)
-	copy(pageData, buf)
-	return pageData, nil
+	return buildDirectoryCatalogPage(buf, version, 0)
 }
 
 func isZeroPage(data []byte) bool {
@@ -361,6 +371,7 @@ func appendCatalogIndex(buf []byte, index CatalogIndex, columns []CatalogColumn)
 	if index.Name == "" || len(index.Columns) == 0 {
 		return nil, errCorruptedIndexMetadata
 	}
+	maxCatalogPayloadSize := PageSize - directoryCatalogOffset
 	validColumns := make(map[string]struct{}, len(columns))
 	for _, column := range columns {
 		validColumns[column.Name] = struct{}{}
@@ -392,7 +403,7 @@ func appendCatalogIndex(buf []byte, index CatalogIndex, columns []CatalogColumn)
 		} else {
 			buf = append(buf, 0)
 		}
-		if len(buf) > PageSize {
+		if len(buf) > maxCatalogPayloadSize {
 			return nil, errCatalogTooLarge
 		}
 	}

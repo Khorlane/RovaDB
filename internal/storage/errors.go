@@ -11,6 +11,7 @@ var (
 	errCorruptedWALHeader      = dberr.NewStorage("corrupted wal header")
 	errCorruptedWALFrame       = dberr.NewStorage("corrupted wal frame")
 	errCorruptedPageHeader     = dberr.NewStorage("corrupted page header")
+	errCorruptedDirectoryPage  = dberr.NewStorage("corrupted directory page")
 	errCorruptedCatalogPage    = dberr.NewStorage("corrupted catalog page")
 	errCorruptedTablePage      = dberr.NewStorage("corrupted table page")
 	errCorruptedIndexPage      = dberr.NewStorage("corrupted index page")

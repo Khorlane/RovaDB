@@ -27,6 +27,17 @@ func TestOpenCreatesFile(t *testing.T) {
 	if _, err := os.Stat(storage.WALPath(path)); err != nil {
 		t.Fatalf("os.Stat(%q) error = %v", storage.WALPath(path), err)
 	}
+
+	rawDB, pager := openRawStorage(t, path)
+	defer rawDB.Close()
+
+	page, err := pager.Get(storage.DirectoryControlPageID)
+	if err != nil {
+		t.Fatalf("pager.Get(directory) error = %v", err)
+	}
+	if err := storage.ValidateDirectoryPage(page.Data()); err != nil {
+		t.Fatalf("ValidateDirectoryPage() error = %v", err)
+	}
 }
 
 func TestOpenExistingValidFile(t *testing.T) {
@@ -56,6 +67,36 @@ func TestOpenExistingValidFileWithValidWAL(t *testing.T) {
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("first Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("second Open() error = %v", err)
+	}
+	defer db.Close()
+}
+
+func TestOpenRevalidatesDirectoryPageOnReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("first Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("first Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	page, err := pager.Get(storage.DirectoryControlPageID)
+	if err != nil {
+		t.Fatalf("pager.Get(directory) error = %v", err)
+	}
+	if err := storage.ValidateDirectoryPage(page.Data()); err != nil {
+		t.Fatalf("ValidateDirectoryPage() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
 	}
 
 	db, err = Open(path)
@@ -201,6 +242,38 @@ func TestOpenFailsOnMalformedWAL(t *testing.T) {
 	if err == nil {
 		db.Close()
 		t.Fatal("Open() error = nil, want malformed wal error")
+	}
+}
+
+func TestOpenFailsOnMalformedDirectoryPage(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("os.OpenFile() error = %v", err)
+	}
+	corrupted := make([]byte, storage.PageSize)
+	copy(corrupted, []byte("bad-directory"))
+	if _, err := file.WriteAt(corrupted, storage.HeaderSize); err != nil {
+		_ = file.Close()
+		t.Fatalf("file.WriteAt() error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("file.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want malformed directory page error")
 	}
 }
 

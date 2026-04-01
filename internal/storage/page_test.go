@@ -46,7 +46,7 @@ func TestPageOffset(t *testing.T) {
 }
 
 func TestIsValidPageType(t *testing.T) {
-	valid := []PageType{PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal, PageTypeFreePage}
+	valid := []PageType{PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal, PageTypeFreePage, PageTypeDirectory}
 	for _, pageType := range valid {
 		if !IsValidPageType(pageType) {
 			t.Fatalf("IsValidPageType(%d) = false, want true", pageType)
@@ -60,6 +60,9 @@ func TestIsValidPageType(t *testing.T) {
 func TestFreePageIsNotIndexPageType(t *testing.T) {
 	if IsIndexPageType(PageTypeFreePage) {
 		t.Fatal("IsIndexPageType(PageTypeFreePage) = true, want false")
+	}
+	if IsIndexPageType(PageTypeDirectory) {
+		t.Fatal("IsIndexPageType(PageTypeDirectory) = true, want false")
 	}
 }
 

@@ -94,6 +94,10 @@ func Open(path string) (*DB, error) {
 	if err != nil {
 		return nil, wrapStorageError(err)
 	}
+	if err := storage.EnsureDirectoryPage(file.File()); err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
 	if err := storage.EnsureWALFile(path, storage.DBFormatVersion()); err != nil {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
