@@ -984,6 +984,8 @@ func (db *DB) stageDirtyState(catalogData []byte, pages []stagedPage) error {
 	return nil
 }
 
+// stagePrivatePageData is the writer-side page helper. It resolves only
+// private frames before materializing them into the existing pager flow.
 func (db *DB) stagePrivatePageData(staged stagedPage) error {
 	if db == nil || db.pool == nil {
 		return nil
@@ -1896,6 +1898,8 @@ func validatePersistedIndexRoots(pool *bufferpool.BufferPool, tables map[string]
 	return nil
 }
 
+// readCommittedPageData is the reader-side page helper. It never resolves
+// writer-private frames.
 func readCommittedPageData(pool *bufferpool.BufferPool, pageID storage.PageID) ([]byte, error) {
 	frame, err := pool.GetCommittedPage(bufferpool.PageID(pageID))
 	if err != nil {

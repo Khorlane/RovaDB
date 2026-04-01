@@ -1,5 +1,6 @@
 package bufferpool
 
+// GetCommittedPage resolves only the committed frame for the page.
 func (bp *BufferPool) GetCommittedPage(pageID PageID) (*Frame, error) {
 	return bp.getOrLoadCommittedFrame(pageID)
 }
@@ -29,6 +30,7 @@ func (bp *BufferPool) getOrLoadCommittedFrameUnlatched(pageID PageID) (*Frame, e
 	return bp.trackCommittedFrame(frame), nil
 }
 
+// GetPrivatePage resolves only the writer-private frame for the page.
 func (bp *BufferPool) GetPrivatePage(pageID PageID) (*Frame, error) {
 	if bp == nil {
 		return nil, nil
@@ -40,6 +42,7 @@ func (bp *BufferPool) GetPrivatePage(pageID PageID) (*Frame, error) {
 	return bp.pinExclusiveLatchAndReturn(frame), nil
 }
 
+// InstallPrivatePage seeds a writer-private frame for a newly built page image.
 func (bp *BufferPool) InstallPrivatePage(pageID PageID, data []byte) (*Frame, error) {
 	if bp == nil {
 		return nil, nil

@@ -422,6 +422,77 @@ func TestStageDirtyStateUsesPrivateFramesAndLeavesCommittedReadUnchanged(t *test
 	db.clearTxn()
 }
 
+func TestReaderHelpersStayOnCommittedRowsWhilePrivateFrameExists(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	if err := db.beginTxn(); err != nil {
+		t.Fatalf("beginTxn() error = %v", err)
+	}
+	stagedTables := cloneTables(db.tables)
+	if err := db.loadRowsIntoTables(stagedTables, "users"); err != nil {
+		t.Fatalf("loadRowsIntoTables() error = %v", err)
+	}
+	stagedTables["users"].Rows[0][1] = parser.StringValue("beth")
+
+	if err := db.applyStagedTableRewrite(stagedTables, "users"); err != nil {
+		t.Fatalf("applyStagedTableRewrite() error = %v", err)
+	}
+
+	rows, err := db.scanTableRows(db.tables["users"])
+	if err != nil {
+		t.Fatalf("scanTableRows() error = %v", err)
+	}
+	if len(rows) != 1 || rows[0][0] != parser.Int64Value(1) || rows[0][1] != parser.StringValue("alice") {
+		t.Fatalf("scanTableRows() = %#v, want committed row [1 alice]", rows)
+	}
+
+	row, err := db.fetchRowByLocator(db.tables["users"], storage.RowLocator{
+		PageID: uint32(db.tables["users"].RootPageID()),
+		SlotID: 0,
+	})
+	if err != nil {
+		t.Fatalf("fetchRowByLocator() error = %v", err)
+	}
+	if len(row) != 2 || row[0] != parser.Int64Value(1) || row[1] != parser.StringValue("alice") {
+		t.Fatalf("fetchRowByLocator() = %#v, want committed row [1 alice]", row)
+	}
+
+	privateFrame, err := db.pool.GetPrivatePage(bufferpool.PageID(db.tables["users"].RootPageID()))
+	if err != nil {
+		t.Fatalf("GetPrivatePage() error = %v", err)
+	}
+	privateRows, err := storage.ReadSlottedRowsFromTablePageData(privateFrame.Data[:], []uint8{
+		storage.CatalogColumnTypeInt,
+		storage.CatalogColumnTypeText,
+	})
+	if err != nil {
+		t.Fatalf("ReadSlottedRowsFromTablePageData(private) error = %v", err)
+	}
+	if len(privateRows) != 1 || privateRows[0][1] != parser.StringValue("beth") {
+		t.Fatalf("private rows = %#v, want private row [1 beth]", privateRows)
+	}
+	db.pool.UnlatchExclusive(privateFrame)
+	db.pool.Unpin(privateFrame)
+
+	if err := db.rollbackTxn(); err != nil {
+		t.Fatalf("rollbackTxn() error = %v", err)
+	}
+	db.clearTxn()
+}
+
 func TestRollbackRestoresDirtyPages(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
