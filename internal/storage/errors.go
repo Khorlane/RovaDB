@@ -9,6 +9,7 @@ import (
 var (
 	errCorruptedDatabaseHeader = dberr.NewStorage("corrupted database header")
 	errCorruptedWALHeader      = dberr.NewStorage("corrupted wal header")
+	errCorruptedWALFrame       = dberr.NewStorage("corrupted wal frame")
 	errCorruptedPageHeader     = dberr.NewStorage("corrupted page header")
 	errCorruptedCatalogPage    = dberr.NewStorage("corrupted catalog page")
 	errCorruptedTablePage      = dberr.NewStorage("corrupted table page")

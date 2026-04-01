@@ -8,8 +8,10 @@ import (
 )
 
 const (
-	walVersion    = 1
-	walHeaderSize = 20
+	walVersion         = 1
+	walHeaderSize      = 20
+	walFrameHeaderSize = 24
+	WALFrameSize       = walFrameHeaderSize + PageSize
 )
 
 var (
@@ -24,6 +26,15 @@ type WALHeader struct {
 	WALVersion      uint32
 	DBFormatVersion uint32
 	PageSize        uint32
+}
+
+// WALFrame stores one full-page WAL image.
+type WALFrame struct {
+	FrameLSN uint64
+	PageID   uint32
+	PageLSN  uint64
+	Reserved uint32
+	PageData [PageSize]byte
 }
 
 // WALPath returns the sidecar WAL path for a database file.
@@ -127,4 +138,155 @@ func EnsureWALFile(dbPath string, dbFormatVersion uint32) error {
 		return errCorruptedWALHeader
 	}
 	return nil
+}
+
+// EncodeWALFrame encodes one fixed-width WAL frame.
+func EncodeWALFrame(frame WALFrame) []byte {
+	raw := make([]byte, WALFrameSize)
+	binary.LittleEndian.PutUint64(raw[0:8], frame.FrameLSN)
+	binary.LittleEndian.PutUint32(raw[8:12], frame.PageID)
+	binary.LittleEndian.PutUint64(raw[12:20], frame.PageLSN)
+	binary.LittleEndian.PutUint32(raw[20:24], frame.Reserved)
+	copy(raw[walFrameHeaderSize:], frame.PageData[:])
+	return raw
+}
+
+// DecodeWALFrame decodes and validates one fixed-width WAL frame.
+func DecodeWALFrame(data []byte) (WALFrame, error) {
+	if len(data) != WALFrameSize {
+		return WALFrame{}, errCorruptedWALFrame
+	}
+
+	var frame WALFrame
+	frame.FrameLSN = binary.LittleEndian.Uint64(data[0:8])
+	frame.PageID = binary.LittleEndian.Uint32(data[8:12])
+	frame.PageLSN = binary.LittleEndian.Uint64(data[12:20])
+	frame.Reserved = binary.LittleEndian.Uint32(data[20:24])
+	copy(frame.PageData[:], data[walFrameHeaderSize:])
+
+	if err := ValidateWALFrame(frame); err != nil {
+		return WALFrame{}, err
+	}
+	return frame, nil
+}
+
+// ValidateWALFrame validates a decoded WAL frame and its embedded page image.
+func ValidateWALFrame(frame WALFrame) error {
+	if frame.PageID == 0 {
+		return errCorruptedWALFrame
+	}
+	if err := validateWALPageImage(frame.PageID, frame.PageLSN, frame.PageData[:]); err != nil {
+		return err
+	}
+	return nil
+}
+
+// AppendWALFrame appends one validated frame after the WAL header.
+func AppendWALFrame(dbPath string, frame WALFrame) error {
+	if err := ValidateWALFrame(frame); err != nil {
+		return err
+	}
+
+	path := WALPath(dbPath)
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND, 0)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := ReadWALHeader(file); err != nil {
+		return err
+	}
+	_, err = file.Write(EncodeWALFrame(frame))
+	return err
+}
+
+// ReadWALFrames reads and validates all frames after the WAL header.
+func ReadWALFrames(dbPath string) ([]WALFrame, error) {
+	file, err := os.Open(WALPath(dbPath))
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	if _, err := ReadWALHeader(file); err != nil {
+		return nil, err
+	}
+
+	frames := make([]WALFrame, 0)
+	for {
+		raw := make([]byte, WALFrameSize)
+		_, err := io.ReadFull(file, raw)
+		if err == nil {
+			frame, err := DecodeWALFrame(raw)
+			if err != nil {
+				return nil, err
+			}
+			frames = append(frames, frame)
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			return frames, nil
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, errCorruptedWALFrame
+		}
+		return nil, err
+	}
+}
+
+func validateWALPageImage(pageID uint32, pageLSN uint64, pageData []byte) error {
+	if len(pageData) != PageSize {
+		return errCorruptedWALFrame
+	}
+
+	if embeddedPageID := binary.LittleEndian.Uint32(pageData[0:4]); embeddedPageID != pageID {
+		return errCorruptedWALFrame
+	}
+	if embeddedPageLSN := binary.LittleEndian.Uint64(pageData[8:16]); embeddedPageLSN != pageLSN {
+		return errCorruptedWALFrame
+	}
+
+	storedChecksum := binary.LittleEndian.Uint32(pageData[16:20])
+	if storedChecksum != walPageChecksum(pageData) {
+		return errCorruptedWALFrame
+	}
+
+	pageType := PageType(binary.LittleEndian.Uint16(pageData[4:6]))
+	switch pageType {
+	case PageTypeTable:
+		if err := validateSlottedTablePage(pageData); err != nil {
+			return errCorruptedWALFrame
+		}
+	case PageTypeIndexLeaf, PageTypeIndexInternal:
+		if err := validateIndexPage(pageData); err != nil {
+			return errCorruptedWALFrame
+		}
+	default:
+		return errCorruptedWALFrame
+	}
+
+	return nil
+}
+
+func walPageChecksum(pageData []byte) uint32 {
+	var checksum uint32
+	for i, b := range pageData {
+		if i >= 16 && i < 20 {
+			continue
+		}
+		checksum = checksum*16777619 ^ uint32(b)
+	}
+	return checksum
+}
+
+func setWALPageChecksum(pageData []byte) {
+	if len(pageData) != PageSize {
+		return
+	}
+	binary.LittleEndian.PutUint32(pageData[16:20], 0)
+	binary.LittleEndian.PutUint32(pageData[16:20], walPageChecksum(pageData))
 }
