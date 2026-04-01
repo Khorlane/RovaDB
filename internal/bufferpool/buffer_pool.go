@@ -88,6 +88,28 @@ func (bp *BufferPool) DiscardPrivatePages() {
 	clear(bp.private)
 }
 
+func (bp *BufferPool) PromotePrivatePages() {
+	if bp == nil || len(bp.private) == 0 {
+		return
+	}
+
+	ids := make([]int, 0, len(bp.private))
+	for pageID := range bp.private {
+		ids = append(ids, int(pageID))
+	}
+	sort.Ints(ids)
+
+	for _, id := range ids {
+		private := bp.private[PageID(id)]
+		promoted, err := newPromotedCommittedFrame(private)
+		if err != nil || promoted == nil {
+			continue
+		}
+		bp.trackCommittedFrame(promoted)
+	}
+	clear(bp.private)
+}
+
 func (bp *BufferPool) DirtyFrames() []*Frame {
 	if bp == nil || len(bp.committed) == 0 {
 		return nil

@@ -866,3 +866,63 @@ func TestDiscardPrivatePagesRemovesPrivateFramesButKeepsCommitted(t *testing.T) 
 	pool.UnlatchExclusive(privateAgain)
 	pool.Unpin(privateAgain)
 }
+
+func TestPromotePrivatePagesReplacesCommittedContentAndClearsPrivate(t *testing.T) {
+	loader := &stubLoader{
+		pages: map[PageID][]byte{
+			27: bytes.Repeat([]byte{0x27}, PageSize),
+		},
+	}
+	pool := New(2, loader)
+
+	committed, err := pool.GetCommittedPage(27)
+	if err != nil {
+		t.Fatalf("GetCommittedPage() error = %v", err)
+	}
+	pool.UnlatchShared(committed)
+	pool.Unpin(committed)
+
+	private, err := pool.GetPrivatePage(27)
+	if err != nil {
+		t.Fatalf("GetPrivatePage() error = %v", err)
+	}
+	private.Data[0] = 0x99
+	pool.MarkDirty(private)
+	pool.UnlatchExclusive(private)
+	pool.Unpin(private)
+
+	pool.PromotePrivatePages()
+	if got := pool.privateFrameCount(); got != 0 {
+		t.Fatalf("privateFrameCount() = %d, want 0", got)
+	}
+
+	promoted, ok := pool.getCommittedFrame(27)
+	if !ok || promoted == nil {
+		t.Fatal("committed frame missing after promotion")
+	}
+	if promoted == private {
+		t.Fatal("committed frame aliases private frame after promotion")
+	}
+	if promoted.FrameType != FrameCommitted {
+		t.Fatalf("promoted.FrameType = %d, want %d", promoted.FrameType, FrameCommitted)
+	}
+	if promoted.Dirty {
+		t.Fatal("promoted frame is dirty, want clean")
+	}
+	if promoted.PinCount != 0 {
+		t.Fatalf("promoted.PinCount = %d, want 0", promoted.PinCount)
+	}
+	if promoted.Data[0] != 0x99 {
+		t.Fatalf("promoted.Data[0] = 0x%02x, want 0x99", promoted.Data[0])
+	}
+
+	committedAgain, err := pool.GetCommittedPage(27)
+	if err != nil {
+		t.Fatalf("GetCommittedPage() after promotion error = %v", err)
+	}
+	if committedAgain.Data[0] != 0x99 {
+		t.Fatalf("GetCommittedPage() after promotion saw 0x%02x, want 0x99", committedAgain.Data[0])
+	}
+	pool.UnlatchShared(committedAgain)
+	pool.Unpin(committedAgain)
+}

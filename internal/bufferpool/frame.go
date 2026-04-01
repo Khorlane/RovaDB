@@ -67,6 +67,23 @@ func newPrivateFrameFromData(pageID PageID, data []byte) (*Frame, error) {
 	return frame, nil
 }
 
+func newPromotedCommittedFrame(private *Frame) (*Frame, error) {
+	if private == nil {
+		return nil, nil
+	}
+
+	frame := &Frame{
+		PageID:    private.PageID,
+		PageType:  private.PageType,
+		PageLSN:   private.PageLSN,
+		FrameType: FrameCommitted,
+		Dirty:     false,
+		PinCount:  0,
+	}
+	copy(frame.Data[:], private.Data[:])
+	return frame, nil
+}
+
 func (bp *BufferPool) loadCommittedFrame(pageID PageID) (*Frame, error) {
 	if bp == nil || bp.loader == nil {
 		return nil, nil

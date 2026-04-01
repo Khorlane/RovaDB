@@ -790,7 +790,9 @@ func (db *DB) commitTxn() error {
 		}
 		return err
 	}
-	db.refreshBufferPool()
+	if db.pool != nil {
+		db.pool.PromotePrivatePages()
+	}
 	return nil
 }
 

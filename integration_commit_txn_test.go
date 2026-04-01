@@ -571,6 +571,92 @@ func TestRollbackDiscardsPrivatePagesAndFreshWriteRecreatesFromCommitted(t *test
 	db.clearTxn()
 }
 
+func TestCommitPromotesPrivatePagesAndReadersSeeNewContent(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	if err := db.beginTxn(); err != nil {
+		t.Fatalf("beginTxn() error = %v", err)
+	}
+	stagedTables := cloneTables(db.tables)
+	if err := db.loadRowsIntoTables(stagedTables, "users"); err != nil {
+		t.Fatalf("loadRowsIntoTables() error = %v", err)
+	}
+	stagedTables["users"].Rows[0][1] = parser.StringValue("beth")
+	if err := db.applyStagedTableRewrite(stagedTables, "users"); err != nil {
+		t.Fatalf("applyStagedTableRewrite() error = %v", err)
+	}
+
+	rowsBeforeCommit, err := db.scanTableRows(db.tables["users"])
+	if err != nil {
+		t.Fatalf("scanTableRows(before commit) error = %v", err)
+	}
+	if len(rowsBeforeCommit) != 1 || rowsBeforeCommit[0][1] != parser.StringValue("alice") {
+		t.Fatalf("scanTableRows(before commit) = %#v, want committed row [1 alice]", rowsBeforeCommit)
+	}
+
+	if err := db.txn.MarkDirty(); err != nil {
+		t.Fatalf("txn.MarkDirty() error = %v", err)
+	}
+	if err := db.commitTxn(); err != nil {
+		t.Fatalf("commitTxn() error = %v", err)
+	}
+	db.tables = stagedTables
+
+	rootPageID := db.tables["users"].RootPageID()
+	if db.pool.HasPrivatePage(bufferpool.PageID(rootPageID)) {
+		t.Fatal("private frame still present after commit promotion")
+	}
+
+	rowsAfterCommit, err := db.scanTableRows(db.tables["users"])
+	if err != nil {
+		t.Fatalf("scanTableRows(after commit) error = %v", err)
+	}
+	if len(rowsAfterCommit) != 1 || rowsAfterCommit[0][0] != parser.Int64Value(1) || rowsAfterCommit[0][1] != parser.StringValue("beth") {
+		t.Fatalf("scanTableRows(after commit) = %#v, want promoted row [1 beth]", rowsAfterCommit)
+	}
+
+	row, err := db.fetchRowByLocator(db.tables["users"], storage.RowLocator{
+		PageID: uint32(rootPageID),
+		SlotID: 0,
+	})
+	if err != nil {
+		t.Fatalf("fetchRowByLocator(after commit) error = %v", err)
+	}
+	if len(row) != 2 || row[0] != parser.Int64Value(1) || row[1] != parser.StringValue("beth") {
+		t.Fatalf("fetchRowByLocator(after commit) = %#v, want promoted row [1 beth]", row)
+	}
+
+	committedPageData, err := readCommittedPageData(db.pool, rootPageID)
+	if err != nil {
+		t.Fatalf("readCommittedPageData(after commit) error = %v", err)
+	}
+	decoded, err := storage.ReadSlottedRowsFromTablePageData(committedPageData, []uint8{
+		storage.CatalogColumnTypeInt,
+		storage.CatalogColumnTypeText,
+	})
+	if err != nil {
+		t.Fatalf("ReadSlottedRowsFromTablePageData(after commit) error = %v", err)
+	}
+	if len(decoded) != 1 || decoded[0][1] != parser.StringValue("beth") {
+		t.Fatalf("decoded committed rows = %#v, want promoted row [1 beth]", decoded)
+	}
+
+	db.clearTxn()
+}
+
 func TestRollbackRestoresDirtyPages(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
