@@ -1,5 +1,9 @@
 package bufferpool
 
+import "errors"
+
+var errFrameNotPrivate = errors.New("bufferpool: frame is not private")
+
 // GetCommittedPage resolves only the committed frame for the page.
 func (bp *BufferPool) GetCommittedPage(pageID PageID) (*Frame, error) {
 	return bp.getOrLoadCommittedFrame(pageID)
@@ -76,6 +80,13 @@ func (bp *BufferPool) HasPrivatePage(pageID PageID) bool {
 	}
 	_, ok := bp.getPrivateFrame(pageID)
 	return ok
+}
+
+func RequirePrivateFrame(f *Frame) error {
+	if f == nil || f.FrameType != FramePrivate {
+		return errFrameNotPrivate
+	}
+	return nil
 }
 
 func (bp *BufferPool) pinSharedLatchAndReturn(f *Frame) *Frame {

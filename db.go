@@ -1009,7 +1009,7 @@ func (db *DB) stagePrivatePageData(staged stagedPage) error {
 	if staged.isNew {
 		frame, err = db.pool.InstallPrivatePage(bufferpool.PageID(staged.id), staged.data)
 	} else {
-		frame, err = db.pool.GetPrivatePage(bufferpool.PageID(staged.id))
+		frame, err = db.getWritablePrivateFrame(staged.id)
 		if err == nil && frame != nil {
 			clear(frame.Data[:])
 			copy(frame.Data[:], staged.data)
@@ -1025,6 +1025,24 @@ func (db *DB) stagePrivatePageData(staged stagedPage) error {
 	db.pool.UnlatchExclusive(frame)
 	db.pool.Unpin(frame)
 	return nil
+}
+
+func (db *DB) getWritablePrivateFrame(pageID storage.PageID) (*bufferpool.Frame, error) {
+	if db == nil || db.pool == nil {
+		return nil, nil
+	}
+	frame, err := db.pool.GetPrivatePage(bufferpool.PageID(pageID))
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+	if err := bufferpool.RequirePrivateFrame(frame); err != nil {
+		if frame != nil {
+			db.pool.UnlatchExclusive(frame)
+			db.pool.Unpin(frame)
+		}
+		return nil, wrapStorageError(err)
+	}
+	return frame, nil
 }
 
 func (db *DB) materializePendingPages() error {
@@ -1048,9 +1066,9 @@ func (db *DB) materializePendingPages() error {
 			}
 		}
 
-		frame, err := db.pool.GetPrivatePage(bufferpool.PageID(staged.id))
+		frame, err := db.getWritablePrivateFrame(staged.id)
 		if err != nil {
-			return wrapStorageError(err)
+			return err
 		}
 		if frame == nil {
 			return newStorageError("corrupted page")

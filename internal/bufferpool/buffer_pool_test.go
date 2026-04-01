@@ -926,3 +926,32 @@ func TestPromotePrivatePagesReplacesCommittedContentAndClearsPrivate(t *testing.
 	pool.UnlatchShared(committedAgain)
 	pool.Unpin(committedAgain)
 }
+
+func TestRequirePrivateFrameRejectsCommittedFrame(t *testing.T) {
+	loader := &stubLoader{
+		pages: map[PageID][]byte{
+			28: bytes.Repeat([]byte{0x28}, PageSize),
+		},
+	}
+	pool := New(2, loader)
+
+	committed, err := pool.GetCommittedPage(28)
+	if err != nil {
+		t.Fatalf("GetCommittedPage() error = %v", err)
+	}
+	if err := RequirePrivateFrame(committed); !errors.Is(err, errFrameNotPrivate) {
+		t.Fatalf("RequirePrivateFrame(committed) error = %v, want %v", err, errFrameNotPrivate)
+	}
+	pool.UnlatchShared(committed)
+	pool.Unpin(committed)
+
+	private, err := pool.GetPrivatePage(28)
+	if err != nil {
+		t.Fatalf("GetPrivatePage() error = %v", err)
+	}
+	if err := RequirePrivateFrame(private); err != nil {
+		t.Fatalf("RequirePrivateFrame(private) error = %v, want nil", err)
+	}
+	pool.UnlatchExclusive(private)
+	pool.Unpin(private)
+}
