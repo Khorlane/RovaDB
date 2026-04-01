@@ -278,6 +278,23 @@ func AppendWALCommitRecord(dbPath string, rec WALCommitRecord) error {
 	return err
 }
 
+// SyncWALFile fsyncs the WAL sidecar after appended records are durable-ready.
+func SyncWALFile(dbPath string) error {
+	file, err := os.OpenFile(WALPath(dbPath), os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := ReadWALHeader(file); err != nil {
+		return err
+	}
+	return file.Sync()
+}
+
 // ReadWALRecords reads and validates all typed WAL records after the header.
 func ReadWALRecords(dbPath string) ([]WALRecord, error) {
 	file, err := os.Open(WALPath(dbPath))

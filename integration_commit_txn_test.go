@@ -816,6 +816,70 @@ func TestWALAppendFailurePreventsPromotionAndCommitSuccess(t *testing.T) {
 	assertSelectTextRows(t, db, "SELECT name FROM users", "alice")
 }
 
+func TestWALSyncFailurePreventsPromotionAndCommitSuccess(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	beforeRecords, err := storage.ReadWALRecords(path)
+	if err != nil {
+		t.Fatalf("ReadWALRecords(before) error = %v", err)
+	}
+
+	originalSyncWAL := syncWAL
+	syncWAL = func(path string) error {
+		return errors.New("wal sync failed")
+	}
+	defer func() {
+		syncWAL = originalSyncWAL
+	}()
+
+	err = db.execMutatingStatement(func() error {
+		stagedTables := cloneTables(db.tables)
+		if err := db.loadRowsIntoTables(stagedTables, "users"); err != nil {
+			return err
+		}
+		stagedTables["users"].Rows[0][1] = parser.StringValue("beth")
+		return db.applyStagedTableRewrite(stagedTables, "users")
+	})
+	if err == nil {
+		t.Fatal("execMutatingStatement() error = nil, want commit failure")
+	}
+
+	rootPageID := db.tables["users"].RootPageID()
+	if db.pool.HasPrivatePage(bufferpool.PageID(rootPageID)) {
+		t.Fatal("private frame still present after WAL sync failure")
+	}
+
+	afterRecords, err := storage.ReadWALRecords(path)
+	if err != nil {
+		t.Fatalf("ReadWALRecords(after) error = %v", err)
+	}
+	if len(afterRecords) != len(beforeRecords)+3 {
+		t.Fatalf("len(ReadWALRecords(after)) = %d, want %d", len(afterRecords), len(beforeRecords)+3)
+	}
+	newRecords := afterRecords[len(beforeRecords):]
+	if len(newRecords) != 3 {
+		t.Fatalf("len(newRecords) = %d, want 3", len(newRecords))
+	}
+	if newRecords[0].Type != storage.WALRecordTypeFrame || newRecords[1].Type != storage.WALRecordTypeFrame || newRecords[2].Type != storage.WALRecordTypeCommit {
+		t.Fatalf("new record types = [%d %d %d], want [frame frame commit]", newRecords[0].Type, newRecords[1].Type, newRecords[2].Type)
+	}
+
+	assertSelectTextRows(t, db, "SELECT name FROM users", "alice")
+}
+
 func TestRollbackRestoresDirtyPages(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

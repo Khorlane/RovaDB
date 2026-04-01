@@ -415,6 +415,33 @@ func TestAppendWALCommitRecordWritesAfterFrames(t *testing.T) {
 	}
 }
 
+func TestSyncWALFileSucceedsOnValidWAL(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	if err := EnsureWALFile(dbPath, DBFormatVersion()); err != nil {
+		t.Fatalf("EnsureWALFile() error = %v", err)
+	}
+
+	frame := buildTestWALFrame(t, 2, 10, 0)
+	if err := AppendWALFrame(dbPath, frame); err != nil {
+		t.Fatalf("AppendWALFrame() error = %v", err)
+	}
+	if err := AppendWALCommitRecord(dbPath, WALCommitRecord{CommitLSN: 11}); err != nil {
+		t.Fatalf("AppendWALCommitRecord() error = %v", err)
+	}
+
+	if err := SyncWALFile(dbPath); err != nil {
+		t.Fatalf("SyncWALFile() error = %v", err)
+	}
+}
+
+func TestSyncWALFileFailsOnMissingWAL(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "missing.db")
+
+	if err := SyncWALFile(dbPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("SyncWALFile() error = %v, want %v", err, os.ErrNotExist)
+	}
+}
+
 func buildTestWALFrame(t *testing.T, pageID uint32, frameLSN uint64, reserved uint32) WALFrame {
 	t.Helper()
 

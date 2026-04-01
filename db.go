@@ -29,6 +29,7 @@ var (
 var (
 	appendWALFrameRecord  = storage.AppendWALFrame
 	appendWALCommitRecord = storage.AppendWALCommitRecord
+	syncWAL               = storage.SyncWALFile
 )
 
 // DB is the top-level handle for a RovaDB database.
@@ -1089,6 +1090,9 @@ func (db *DB) appendPendingPagesToWAL() error {
 
 	commitLSN := db.nextWALRecordLSN()
 	if err := appendWALCommitRecord(db.path, storage.WALCommitRecord{CommitLSN: commitLSN}); err != nil {
+		return wrapStorageError(err)
+	}
+	if err := syncWAL(db.path); err != nil {
 		return wrapStorageError(err)
 	}
 	return nil
