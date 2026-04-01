@@ -146,6 +146,18 @@ func TestWALFrameRoundTrip(t *testing.T) {
 	}
 }
 
+func TestWALCommitRecordRoundTrip(t *testing.T) {
+	want := WALCommitRecord{CommitLSN: 11, Reserved: 7}
+
+	got, err := DecodeWALCommitRecord(EncodeWALCommitRecord(want))
+	if err != nil {
+		t.Fatalf("DecodeWALCommitRecord() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("round-trip commit record = %#v, want %#v", got, want)
+	}
+}
+
 func TestAppendWALFrameWritesFrameAfterHeader(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	if err := EnsureWALFile(dbPath, DBFormatVersion()); err != nil {
@@ -182,35 +194,54 @@ func TestAppendWALFrameWritesFrameAfterHeader(t *testing.T) {
 	if got.FrameLSN != frame.FrameLSN || got.PageID != frame.PageID || got.PageLSN != frame.PageLSN {
 		t.Fatalf("decoded file frame = %#v, want %#v", got, frame)
 	}
+	if recordType := binary.LittleEndian.Uint32(raw[walHeaderSize : walHeaderSize+4]); recordType != WALRecordTypeFrame {
+		t.Fatalf("record type = %d, want %d", recordType, WALRecordTypeFrame)
+	}
 }
 
-func TestReadWALFramesReturnsFramesInOrder(t *testing.T) {
+func TestReadWALRecordsReturnsMixedRecordsInOrder(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	if err := EnsureWALFile(dbPath, DBFormatVersion()); err != nil {
 		t.Fatalf("EnsureWALFile() error = %v", err)
 	}
 
 	want1 := buildTestWALFrame(t, 2, 10, 0)
-	want2 := buildTestWALFrame(t, 4, 20, 0)
+	want2 := buildTestWALFrame(t, 4, 11, 0)
+	wantCommit := WALCommitRecord{CommitLSN: 11, Reserved: 3}
 	if err := AppendWALFrame(dbPath, want1); err != nil {
 		t.Fatalf("AppendWALFrame(first) error = %v", err)
 	}
 	if err := AppendWALFrame(dbPath, want2); err != nil {
 		t.Fatalf("AppendWALFrame(second) error = %v", err)
 	}
+	if err := AppendWALCommitRecord(dbPath, wantCommit); err != nil {
+		t.Fatalf("AppendWALCommitRecord() error = %v", err)
+	}
 
-	got, err := ReadWALFrames(dbPath)
+	got, err := ReadWALRecords(dbPath)
 	if err != nil {
-		t.Fatalf("ReadWALFrames() error = %v", err)
+		t.Fatalf("ReadWALRecords() error = %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("len(ReadWALFrames()) = %d, want 2", len(got))
+	if len(got) != 3 {
+		t.Fatalf("len(ReadWALRecords()) = %d, want 3", len(got))
 	}
-	if got[0].FrameLSN != want1.FrameLSN || got[0].PageID != want1.PageID || got[0].PageLSN != want1.PageLSN {
-		t.Fatalf("first frame = %#v, want %#v", got[0], want1)
+	if got[0].Type != WALRecordTypeFrame || got[0].Frame == nil {
+		t.Fatalf("first record = %#v, want frame", got[0])
 	}
-	if got[1].FrameLSN != want2.FrameLSN || got[1].PageID != want2.PageID || got[1].PageLSN != want2.PageLSN {
-		t.Fatalf("second frame = %#v, want %#v", got[1], want2)
+	if got[0].Frame.FrameLSN != want1.FrameLSN || got[0].Frame.PageID != want1.PageID || got[0].Frame.PageLSN != want1.PageLSN {
+		t.Fatalf("first frame = %#v, want %#v", got[0].Frame, want1)
+	}
+	if got[1].Type != WALRecordTypeFrame || got[1].Frame == nil {
+		t.Fatalf("second record = %#v, want frame", got[1])
+	}
+	if got[1].Frame.FrameLSN != want2.FrameLSN || got[1].Frame.PageID != want2.PageID || got[1].Frame.PageLSN != want2.PageLSN {
+		t.Fatalf("second frame = %#v, want %#v", got[1].Frame, want2)
+	}
+	if got[2].Type != WALRecordTypeCommit || got[2].Commit == nil {
+		t.Fatalf("third record = %#v, want commit", got[2])
+	}
+	if *got[2].Commit != wantCommit {
+		t.Fatalf("commit record = %#v, want %#v", *got[2].Commit, wantCommit)
 	}
 }
 
@@ -224,7 +255,9 @@ func TestReadWALFramesRejectsTruncatedFrame(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.OpenFile() error = %v", err)
 	}
-	if _, err := file.Write(make([]byte, WALFrameSize-1)); err != nil {
+	raw := make([]byte, WALFrameSize-1)
+	binary.LittleEndian.PutUint32(raw[0:4], WALRecordTypeFrame)
+	if _, err := file.Write(raw); err != nil {
 		_ = file.Close()
 		t.Fatalf("file.Write() error = %v", err)
 	}
@@ -238,10 +271,36 @@ func TestReadWALFramesRejectsTruncatedFrame(t *testing.T) {
 	}
 }
 
+func TestReadWALRecordsRejectsTruncatedCommitRecord(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	if err := EnsureWALFile(dbPath, DBFormatVersion()); err != nil {
+		t.Fatalf("EnsureWALFile() error = %v", err)
+	}
+
+	file, err := os.OpenFile(WALPath(dbPath), os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatalf("os.OpenFile() error = %v", err)
+	}
+	raw := make([]byte, WALCommitRecordSize-1)
+	binary.LittleEndian.PutUint32(raw[0:4], WALRecordTypeCommit)
+	if _, err := file.Write(raw); err != nil {
+		_ = file.Close()
+		t.Fatalf("file.Write() error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("file.Close() error = %v", err)
+	}
+
+	_, err = ReadWALRecords(dbPath)
+	if !errors.Is(err, errCorruptedWALFrame) {
+		t.Fatalf("ReadWALRecords() error = %v, want %v", err, errCorruptedWALFrame)
+	}
+}
+
 func TestDecodeWALFrameRejectsBadChecksum(t *testing.T) {
 	frame := buildTestWALFrame(t, 5, 9, 0)
 	raw := EncodeWALFrame(frame)
-	raw[walFrameHeaderSize+100] ^= 0xFF
+	raw[walRecordTypeSize+24+100] ^= 0xFF
 
 	_, err := DecodeWALFrame(raw)
 	if !errors.Is(err, errCorruptedWALFrame) {
@@ -275,7 +334,7 @@ func TestReadWALFramesRejectsCorruptedStoredFrame(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.OpenFile() error = %v", err)
 	}
-	offset := int64(walHeaderSize + walFrameHeaderSize + 25)
+	offset := int64(walHeaderSize + walRecordTypeSize + 24 + 25)
 	if _, err := file.WriteAt([]byte{0x7F}, offset); err != nil {
 		_ = file.Close()
 		t.Fatalf("file.WriteAt() error = %v", err)
@@ -287,6 +346,72 @@ func TestReadWALFramesRejectsCorruptedStoredFrame(t *testing.T) {
 	_, err = ReadWALFrames(dbPath)
 	if !errors.Is(err, errCorruptedWALFrame) {
 		t.Fatalf("ReadWALFrames() error = %v, want %v", err, errCorruptedWALFrame)
+	}
+}
+
+func TestReadWALRecordsRejectsUnknownRecordType(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	if err := EnsureWALFile(dbPath, DBFormatVersion()); err != nil {
+		t.Fatalf("EnsureWALFile() error = %v", err)
+	}
+
+	file, err := os.OpenFile(WALPath(dbPath), os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatalf("os.OpenFile() error = %v", err)
+	}
+	var raw [4]byte
+	binary.LittleEndian.PutUint32(raw[:], 99)
+	if _, err := file.Write(raw[:]); err != nil {
+		_ = file.Close()
+		t.Fatalf("file.Write() error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("file.Close() error = %v", err)
+	}
+
+	_, err = ReadWALRecords(dbPath)
+	if !errors.Is(err, errUnknownWALRecordType) {
+		t.Fatalf("ReadWALRecords() error = %v, want %v", err, errUnknownWALRecordType)
+	}
+}
+
+func TestAppendWALCommitRecordWritesAfterFrames(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	if err := EnsureWALFile(dbPath, DBFormatVersion()); err != nil {
+		t.Fatalf("EnsureWALFile() error = %v", err)
+	}
+
+	frame1 := buildTestWALFrame(t, 2, 10, 0)
+	frame2 := buildTestWALFrame(t, 3, 11, 0)
+	commit := WALCommitRecord{CommitLSN: 11, Reserved: 1}
+	if err := AppendWALFrame(dbPath, frame1); err != nil {
+		t.Fatalf("AppendWALFrame(first) error = %v", err)
+	}
+	if err := AppendWALFrame(dbPath, frame2); err != nil {
+		t.Fatalf("AppendWALFrame(second) error = %v", err)
+	}
+	if err := AppendWALCommitRecord(dbPath, commit); err != nil {
+		t.Fatalf("AppendWALCommitRecord() error = %v", err)
+	}
+
+	raw, err := os.ReadFile(WALPath(dbPath))
+	if err != nil {
+		t.Fatalf("os.ReadFile() error = %v", err)
+	}
+	wantSize := walHeaderSize + 2*WALFrameSize + WALCommitRecordSize
+	if len(raw) != wantSize {
+		t.Fatalf("len(raw) = %d, want %d", len(raw), wantSize)
+	}
+	commitOffset := walHeaderSize + 2*WALFrameSize
+	if recordType := binary.LittleEndian.Uint32(raw[commitOffset : commitOffset+4]); recordType != WALRecordTypeCommit {
+		t.Fatalf("commit record type = %d, want %d", recordType, WALRecordTypeCommit)
+	}
+	gotCommit, err := DecodeWALCommitRecord(raw[commitOffset : commitOffset+WALCommitRecordSize])
+	if err != nil {
+		t.Fatalf("DecodeWALCommitRecord(raw commit) error = %v", err)
+	}
+	if gotCommit != commit {
+		t.Fatalf("decoded commit = %#v, want %#v", gotCommit, commit)
 	}
 }
 

@@ -8,16 +8,25 @@ import (
 )
 
 const (
-	walVersion         = 1
-	walHeaderSize      = 20
-	walFrameHeaderSize = 24
-	WALFrameSize       = walFrameHeaderSize + PageSize
+	walVersion           = 1
+	walHeaderSize        = 20
+	walRecordTypeSize    = 4
+	walFramePayloadSize  = 24 + PageSize
+	WALFrameSize         = walRecordTypeSize + walFramePayloadSize
+	walCommitPayloadSize = 12
+	WALCommitRecordSize  = walRecordTypeSize + walCommitPayloadSize
 )
 
 var (
 	walMagic                 = [8]byte{'R', 'O', 'V', 'A', 'W', 'A', 'L', '1'}
 	errUnsupportedWALVersion = errors.New("storage: unsupported wal version")
 	errWALPageSizeMismatch   = errors.New("storage: wal page size mismatch")
+	errUnknownWALRecordType  = errors.New("storage: unknown wal record type")
+)
+
+const (
+	WALRecordTypeFrame  uint32 = 1
+	WALRecordTypeCommit uint32 = 2
 )
 
 // WALHeader is the fixed-width WAL file header.
@@ -35,6 +44,19 @@ type WALFrame struct {
 	PageLSN  uint64
 	Reserved uint32
 	PageData [PageSize]byte
+}
+
+// WALCommitRecord stores one fixed-size commit-boundary marker.
+type WALCommitRecord struct {
+	CommitLSN uint64
+	Reserved  uint32
+}
+
+// WALRecord stores one typed WAL record from the post-header stream.
+type WALRecord struct {
+	Type   uint32
+	Frame  *WALFrame
+	Commit *WALCommitRecord
 }
 
 // WALPath returns the sidecar WAL path for a database file.
@@ -143,11 +165,12 @@ func EnsureWALFile(dbPath string, dbFormatVersion uint32) error {
 // EncodeWALFrame encodes one fixed-width WAL frame.
 func EncodeWALFrame(frame WALFrame) []byte {
 	raw := make([]byte, WALFrameSize)
-	binary.LittleEndian.PutUint64(raw[0:8], frame.FrameLSN)
-	binary.LittleEndian.PutUint32(raw[8:12], frame.PageID)
-	binary.LittleEndian.PutUint64(raw[12:20], frame.PageLSN)
-	binary.LittleEndian.PutUint32(raw[20:24], frame.Reserved)
-	copy(raw[walFrameHeaderSize:], frame.PageData[:])
+	binary.LittleEndian.PutUint32(raw[0:4], WALRecordTypeFrame)
+	binary.LittleEndian.PutUint64(raw[4:12], frame.FrameLSN)
+	binary.LittleEndian.PutUint32(raw[12:16], frame.PageID)
+	binary.LittleEndian.PutUint64(raw[16:24], frame.PageLSN)
+	binary.LittleEndian.PutUint32(raw[24:28], frame.Reserved)
+	copy(raw[28:], frame.PageData[:])
 	return raw
 }
 
@@ -156,18 +179,49 @@ func DecodeWALFrame(data []byte) (WALFrame, error) {
 	if len(data) != WALFrameSize {
 		return WALFrame{}, errCorruptedWALFrame
 	}
+	if binary.LittleEndian.Uint32(data[0:4]) != WALRecordTypeFrame {
+		return WALFrame{}, errCorruptedWALFrame
+	}
 
 	var frame WALFrame
-	frame.FrameLSN = binary.LittleEndian.Uint64(data[0:8])
-	frame.PageID = binary.LittleEndian.Uint32(data[8:12])
-	frame.PageLSN = binary.LittleEndian.Uint64(data[12:20])
-	frame.Reserved = binary.LittleEndian.Uint32(data[20:24])
-	copy(frame.PageData[:], data[walFrameHeaderSize:])
+	frame.FrameLSN = binary.LittleEndian.Uint64(data[4:12])
+	frame.PageID = binary.LittleEndian.Uint32(data[12:16])
+	frame.PageLSN = binary.LittleEndian.Uint64(data[16:24])
+	frame.Reserved = binary.LittleEndian.Uint32(data[24:28])
+	copy(frame.PageData[:], data[28:])
 
 	if err := ValidateWALFrame(frame); err != nil {
 		return WALFrame{}, err
 	}
 	return frame, nil
+}
+
+// EncodeWALCommitRecord encodes one fixed-width WAL commit record.
+func EncodeWALCommitRecord(rec WALCommitRecord) []byte {
+	raw := make([]byte, WALCommitRecordSize)
+	binary.LittleEndian.PutUint32(raw[0:4], WALRecordTypeCommit)
+	binary.LittleEndian.PutUint64(raw[4:12], rec.CommitLSN)
+	binary.LittleEndian.PutUint32(raw[12:16], rec.Reserved)
+	return raw
+}
+
+// DecodeWALCommitRecord decodes and validates one fixed-width WAL commit record.
+func DecodeWALCommitRecord(data []byte) (WALCommitRecord, error) {
+	if len(data) != WALCommitRecordSize {
+		return WALCommitRecord{}, errCorruptedWALFrame
+	}
+	if binary.LittleEndian.Uint32(data[0:4]) != WALRecordTypeCommit {
+		return WALCommitRecord{}, errCorruptedWALFrame
+	}
+
+	rec := WALCommitRecord{
+		CommitLSN: binary.LittleEndian.Uint64(data[4:12]),
+		Reserved:  binary.LittleEndian.Uint32(data[12:16]),
+	}
+	if rec.CommitLSN == 0 {
+		return WALCommitRecord{}, errCorruptedWALFrame
+	}
+	return rec, nil
 }
 
 // ValidateWALFrame validates a decoded WAL frame and its embedded page image.
@@ -204,8 +258,31 @@ func AppendWALFrame(dbPath string, frame WALFrame) error {
 	return err
 }
 
-// ReadWALFrames reads and validates all frames after the WAL header.
-func ReadWALFrames(dbPath string) ([]WALFrame, error) {
+// AppendWALCommitRecord appends one validated commit record after prior WAL records.
+func AppendWALCommitRecord(dbPath string, rec WALCommitRecord) error {
+	if rec.CommitLSN == 0 {
+		return errCorruptedWALFrame
+	}
+
+	path := WALPath(dbPath)
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND, 0)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := ReadWALHeader(file); err != nil {
+		return err
+	}
+	_, err = file.Write(EncodeWALCommitRecord(rec))
+	return err
+}
+
+// ReadWALRecords reads and validates all typed WAL records after the header.
+func ReadWALRecords(dbPath string) ([]WALRecord, error) {
 	file, err := os.Open(WALPath(dbPath))
 	if err != nil {
 		return nil, err
@@ -216,26 +293,73 @@ func ReadWALFrames(dbPath string) ([]WALFrame, error) {
 		return nil, err
 	}
 
-	frames := make([]WALFrame, 0)
+	records := make([]WALRecord, 0)
 	for {
-		raw := make([]byte, WALFrameSize)
-		_, err := io.ReadFull(file, raw)
-		if err == nil {
+		var recordTypeRaw [walRecordTypeSize]byte
+		_, err := io.ReadFull(file, recordTypeRaw[:])
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return records, nil
+			}
+			if errors.Is(err, io.ErrUnexpectedEOF) {
+				return nil, errCorruptedWALFrame
+			}
+			return nil, err
+		}
+
+		recordType := binary.LittleEndian.Uint32(recordTypeRaw[:])
+		switch recordType {
+		case WALRecordTypeFrame:
+			raw := make([]byte, WALFrameSize)
+			copy(raw[0:4], recordTypeRaw[:])
+			if _, err := io.ReadFull(file, raw[4:]); err != nil {
+				if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+					return nil, errCorruptedWALFrame
+				}
+				return nil, err
+			}
 			frame, err := DecodeWALFrame(raw)
 			if err != nil {
 				return nil, err
 			}
-			frames = append(frames, frame)
-			continue
+			frameCopy := frame
+			records = append(records, WALRecord{Type: WALRecordTypeFrame, Frame: &frameCopy})
+		case WALRecordTypeCommit:
+			raw := make([]byte, WALCommitRecordSize)
+			copy(raw[0:4], recordTypeRaw[:])
+			if _, err := io.ReadFull(file, raw[4:]); err != nil {
+				if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+					return nil, errCorruptedWALFrame
+				}
+				return nil, err
+			}
+			rec, err := DecodeWALCommitRecord(raw)
+			if err != nil {
+				return nil, err
+			}
+			recCopy := rec
+			records = append(records, WALRecord{Type: WALRecordTypeCommit, Commit: &recCopy})
+		default:
+			return nil, errUnknownWALRecordType
 		}
-		if errors.Is(err, io.EOF) {
-			return frames, nil
-		}
-		if errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, errCorruptedWALFrame
-		}
+	}
+}
+
+// ReadWALFrames reads and validates only frame records after the WAL header.
+func ReadWALFrames(dbPath string) ([]WALFrame, error) {
+	records, err := ReadWALRecords(dbPath)
+	if err != nil {
 		return nil, err
 	}
+
+	frames := make([]WALFrame, 0, len(records))
+	for _, record := range records {
+		if record.Type != WALRecordTypeFrame || record.Frame == nil {
+			continue
+		}
+		frames = append(frames, *record.Frame)
+	}
+	return frames, nil
 }
 
 func validateWALPageImage(pageID uint32, pageLSN uint64, pageData []byte) error {
