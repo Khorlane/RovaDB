@@ -296,6 +296,38 @@ func SyncWALFile(dbPath string) error {
 	return file.Sync()
 }
 
+// ResetWALFile rewrites the WAL sidecar to a valid header-only state.
+func ResetWALFile(dbPath string, dbFormatVersion uint32) error {
+	path := WALPath(dbPath)
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := ReadWALHeader(file); err != nil {
+		return err
+	}
+	if err := file.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if err := WriteWALHeader(file, WALHeader{
+		Magic:           walMagic,
+		WALVersion:      walVersion,
+		DBFormatVersion: dbFormatVersion,
+		PageSize:        PageSize,
+	}); err != nil {
+		return err
+	}
+	return file.Sync()
+}
+
 // ReadWALRecords reads and validates all typed WAL records after the header.
 func ReadWALRecords(dbPath string) ([]WALRecord, error) {
 	file, err := os.Open(WALPath(dbPath))

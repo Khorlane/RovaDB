@@ -48,6 +48,7 @@ var (
 	appendWALFrameRecord  = storage.AppendWALFrame
 	appendWALCommitRecord = storage.AppendWALCommitRecord
 	syncWAL               = storage.SyncWALFile
+	resetWAL              = storage.ResetWALFile
 )
 
 // DB is the top-level handle for a RovaDB database.
@@ -835,6 +836,11 @@ func (db *DB) commitTxn() error {
 	var checkpointErr error
 	if durable {
 		checkpointErr = db.checkpointCommittedPages()
+		if checkpointErr == nil {
+			if err := resetWAL(db.path, storage.DBFormatVersion()); err != nil {
+				checkpointErr = wrapStorageError(err)
+			}
+		}
 	}
 	db.pager.ClearDirtyTracking()
 	if len(db.pager.DirtyPages()) != 0 || len(db.pager.DirtyPagesWithOriginals()) != 0 {

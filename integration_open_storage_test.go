@@ -65,6 +65,27 @@ func TestOpenExistingValidFileWithValidWAL(t *testing.T) {
 	defer db.Close()
 }
 
+func TestOpenWithHeaderOnlyWALSucceeds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("first Open() error = %v", err)
+	}
+	if err := storage.ResetWALFile(path, storage.DBFormatVersion()); err != nil {
+		t.Fatalf("ResetWALFile() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("first Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("second Open() error = %v", err)
+	}
+	defer db.Close()
+}
+
 func TestOpenInvalidHeader(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.db")
 	if err := os.WriteFile(path, []byte("not-a-rovadb-file"), 0o644); err != nil {
@@ -275,8 +296,17 @@ func TestOpenReplaysCommittedWALState(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
-		t.Fatalf("Exec(insert) error = %v", err)
+	db.afterDatabaseSyncHook = func() error {
+		return errors.New("checkpoint failed after WAL durability")
+	}
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err == nil {
+		t.Fatal("Exec(insert) error = nil, want checkpoint failure")
+	}
+	db.afterDatabaseSyncHook = nil
+	if records, err := storage.ReadWALRecords(path); err != nil {
+		t.Fatalf("ReadWALRecords() error = %v", err)
+	} else if len(records) == 0 {
+		t.Fatal("len(ReadWALRecords()) = 0, want committed WAL after checkpoint failure")
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -384,9 +414,13 @@ func TestOpenReplayIsIdempotentAcrossRepeatedOpens(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
-		t.Fatalf("Exec(insert) error = %v", err)
+	db.afterDatabaseSyncHook = func() error {
+		return errors.New("checkpoint failed after WAL durability")
 	}
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err == nil {
+		t.Fatal("Exec(insert) error = nil, want checkpoint failure")
+	}
+	db.afterDatabaseSyncHook = nil
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
@@ -440,9 +474,13 @@ func TestOpenReplaysMultipleCommittedWALTransactions(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(first insert) error = %v", err)
 	}
-	if _, err := db.Exec("INSERT INTO t VALUES (2)"); err != nil {
-		t.Fatalf("Exec(second insert) error = %v", err)
+	db.afterDatabaseSyncHook = func() error {
+		return errors.New("checkpoint failed after WAL durability")
 	}
+	if _, err := db.Exec("INSERT INTO t VALUES (2)"); err == nil {
+		t.Fatal("Exec(second insert) error = nil, want checkpoint failure")
+	}
+	db.afterDatabaseSyncHook = nil
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}

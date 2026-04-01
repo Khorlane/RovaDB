@@ -442,6 +442,38 @@ func TestSyncWALFileFailsOnMissingWAL(t *testing.T) {
 	}
 }
 
+func TestResetWALFileLeavesHeaderOnlyWAL(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	if err := EnsureWALFile(dbPath, DBFormatVersion()); err != nil {
+		t.Fatalf("EnsureWALFile() error = %v", err)
+	}
+	if err := AppendWALFrame(dbPath, buildTestWALFrame(t, 2, 10, 0)); err != nil {
+		t.Fatalf("AppendWALFrame() error = %v", err)
+	}
+	if err := AppendWALCommitRecord(dbPath, WALCommitRecord{CommitLSN: 11}); err != nil {
+		t.Fatalf("AppendWALCommitRecord() error = %v", err)
+	}
+
+	if err := ResetWALFile(dbPath, DBFormatVersion()); err != nil {
+		t.Fatalf("ResetWALFile() error = %v", err)
+	}
+
+	info, err := os.Stat(WALPath(dbPath))
+	if err != nil {
+		t.Fatalf("os.Stat() error = %v", err)
+	}
+	if got, want := info.Size(), int64(walHeaderSize); got != want {
+		t.Fatalf("wal size = %d, want %d", got, want)
+	}
+	records, err := ReadWALRecords(dbPath)
+	if err != nil {
+		t.Fatalf("ReadWALRecords() error = %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("len(ReadWALRecords()) = %d, want 0", len(records))
+	}
+}
+
 func TestApplyWALFramesToDBWritesMissingPage(t *testing.T) {
 	dbPath := createReplayTestDB(t)
 	frame := buildTestWALFrameWithValue(t, 3, 1, "missing")

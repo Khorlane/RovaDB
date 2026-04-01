@@ -657,7 +657,7 @@ func TestCommitPromotesPrivatePagesAndReadersSeeNewContent(t *testing.T) {
 	db.clearTxn()
 }
 
-func TestCommitAppendsWALFramesAndCommitRecord(t *testing.T) {
+func TestCommitCheckpointResetsWALToHeaderOnly(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
@@ -674,52 +674,14 @@ func TestCommitAppendsWALFramesAndCommitRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadWALRecords() error = %v", err)
 	}
-	if len(records) != 3 {
-		t.Fatalf("len(ReadWALRecords()) = %d, want 3", len(records))
-	}
-	if records[0].Type != storage.WALRecordTypeFrame || records[0].Frame == nil {
-		t.Fatalf("records[0] = %#v, want frame", records[0])
-	}
-	if records[1].Type != storage.WALRecordTypeFrame || records[1].Frame == nil {
-		t.Fatalf("records[1] = %#v, want frame", records[1])
-	}
-	if records[2].Type != storage.WALRecordTypeCommit || records[2].Commit == nil {
-		t.Fatalf("records[2] = %#v, want commit", records[2])
-	}
-	if records[2].Commit.CommitLSN != 3 {
-		t.Fatalf("commit LSN = %d, want 3", records[2].Commit.CommitLSN)
-	}
-
-	frame0 := records[0].Frame
-	if frame0.PageID != 0 || frame0.FrameLSN != 1 || frame0.PageLSN != 1 {
-		t.Fatalf("catalog frame = %#v, want page 0 lsn 1", frame0)
-	}
-	if _, err := storage.LoadCatalogPageData(frame0.PageData[:]); err != nil {
-		t.Fatalf("LoadCatalogPageData(catalog frame) error = %v", err)
-	}
-
-	frame1 := records[1].Frame
-	if frame1.PageID != 1 || frame1.FrameLSN != 2 || frame1.PageLSN != 2 {
-		t.Fatalf("table frame = %#v, want page 1 lsn 2", frame1)
-	}
-	pageLSN, err := storage.PageLSN(frame1.PageData[:])
-	if err != nil {
-		t.Fatalf("PageLSN(table frame) error = %v", err)
-	}
-	if pageLSN != frame1.PageLSN {
-		t.Fatalf("PageLSN(table frame) = %d, want %d", pageLSN, frame1.PageLSN)
-	}
-	if _, err := storage.PageChecksum(frame1.PageData[:]); err != nil {
-		t.Fatalf("PageChecksum(table frame) error = %v", err)
-	}
-	if _, err := storage.ReadSlottedRowsFromTablePageData(frame1.PageData[:], []uint8{storage.CatalogColumnTypeInt}); err != nil {
-		t.Fatalf("ReadSlottedRowsFromTablePageData(table frame) error = %v", err)
+	if len(records) != 0 {
+		t.Fatalf("len(ReadWALRecords()) = %d, want 0 after successful checkpoint", len(records))
 	}
 
 	assertSelectIntRows(t, db, "SELECT * FROM t")
 }
 
-func TestInsertAppendsWALFramesMatchingModifiedPages(t *testing.T) {
+func TestInsertCheckpointLeavesWALHeaderOnly(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
@@ -731,11 +693,6 @@ func TestInsertAppendsWALFramesMatchingModifiedPages(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	before, err := storage.ReadWALRecords(path)
-	if err != nil {
-		t.Fatalf("ReadWALRecords(before) error = %v", err)
-	}
-
 	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
@@ -744,18 +701,8 @@ func TestInsertAppendsWALFramesMatchingModifiedPages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadWALRecords(after) error = %v", err)
 	}
-	newRecords := after[len(before):]
-	if len(newRecords) != 3 {
-		t.Fatalf("len(newRecords) = %d, want 3", len(newRecords))
-	}
-	if newRecords[0].Type != storage.WALRecordTypeFrame || newRecords[1].Type != storage.WALRecordTypeFrame || newRecords[2].Type != storage.WALRecordTypeCommit {
-		t.Fatalf("new record types = [%d %d %d], want [frame frame commit]", newRecords[0].Type, newRecords[1].Type, newRecords[2].Type)
-	}
-	if newRecords[0].Frame == nil || newRecords[1].Frame == nil || newRecords[2].Commit == nil {
-		t.Fatal("new records missing frame/commit payloads")
-	}
-	if newRecords[0].Frame.FrameLSN != 4 || newRecords[1].Frame.FrameLSN != 5 || newRecords[2].Commit.CommitLSN != 6 {
-		t.Fatalf("new LSNs = [%d %d %d], want [4 5 6]", newRecords[0].Frame.FrameLSN, newRecords[1].Frame.FrameLSN, newRecords[2].Commit.CommitLSN)
+	if len(after) != 0 {
+		t.Fatalf("len(ReadWALRecords(after)) = %d, want 0 after successful checkpoint", len(after))
 	}
 }
 
@@ -914,6 +861,52 @@ func TestCheckpointFailureAfterWALDurabilityPreservesCommittedState(t *testing.T
 	}
 	if len(afterRecords) != len(beforeRecords)+3 {
 		t.Fatalf("len(ReadWALRecords(after)) = %d, want %d", len(afterRecords), len(beforeRecords)+3)
+	}
+
+	assertSelectTextRows(t, db, "SELECT name FROM users", "beth")
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+	assertSelectTextRows(t, db, "SELECT name FROM users", "beth")
+}
+
+func TestWALResetFailureAfterCheckpointSurfacesErrorAndLeavesStateCorrect(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	originalResetWAL := resetWAL
+	resetWAL = func(path string, dbFormatVersion uint32) error {
+		return errors.New("wal reset failed")
+	}
+	defer func() {
+		resetWAL = originalResetWAL
+	}()
+
+	_, err = db.Exec("UPDATE users SET name = 'beth' WHERE id = 1")
+	if err == nil {
+		t.Fatal("Exec(update) error = nil, want WAL reset failure")
+	}
+
+	records, err := storage.ReadWALRecords(path)
+	if err != nil {
+		t.Fatalf("ReadWALRecords() error = %v", err)
+	}
+	if len(records) == 0 {
+		t.Fatal("len(ReadWALRecords()) = 0, want WAL intact after reset failure")
 	}
 
 	assertSelectTextRows(t, db, "SELECT name FROM users", "beth")
