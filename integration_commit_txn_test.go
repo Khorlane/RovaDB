@@ -490,6 +490,84 @@ func TestReaderHelpersStayOnCommittedRowsWhilePrivateFrameExists(t *testing.T) {
 	if err := db.rollbackTxn(); err != nil {
 		t.Fatalf("rollbackTxn() error = %v", err)
 	}
+	if db.pool.HasPrivatePage(bufferpool.PageID(db.tables["users"].RootPageID())) {
+		t.Fatal("private frame still present after rollback")
+	}
+	db.clearTxn()
+}
+
+func TestRollbackDiscardsPrivatePagesAndFreshWriteRecreatesFromCommitted(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rootPageID := db.tables["t"].RootPageID()
+	committedBefore, err := readCommittedPageData(db.pool, rootPageID)
+	if err != nil {
+		t.Fatalf("readCommittedPageData(before) error = %v", err)
+	}
+
+	if err := db.beginTxn(); err != nil {
+		t.Fatalf("beginTxn() error = %v", err)
+	}
+	stagedTables := cloneTables(db.tables)
+	if err := db.loadRowsIntoTables(stagedTables, "t"); err != nil {
+		t.Fatalf("loadRowsIntoTables() error = %v", err)
+	}
+	stagedTables["t"].Rows[0][0] = parser.Int64Value(2)
+	if err := db.applyStagedTableRewrite(stagedTables, "t"); err != nil {
+		t.Fatalf("applyStagedTableRewrite() error = %v", err)
+	}
+	if !db.pool.HasPrivatePage(bufferpool.PageID(rootPageID)) {
+		t.Fatal("HasPrivatePage(root) = false, want private frame before rollback")
+	}
+
+	if err := db.rollbackTxn(); err != nil {
+		t.Fatalf("rollbackTxn() error = %v", err)
+	}
+	if db.pool.HasPrivatePage(bufferpool.PageID(rootPageID)) {
+		t.Fatal("HasPrivatePage(root) = true, want false after rollback")
+	}
+
+	committedAfter, err := readCommittedPageData(db.pool, rootPageID)
+	if err != nil {
+		t.Fatalf("readCommittedPageData(after rollback) error = %v", err)
+	}
+	if !bytes.Equal(committedAfter, committedBefore) {
+		t.Fatal("committed page bytes changed after rollback")
+	}
+	rows, err := db.scanTableRows(db.tables["t"])
+	if err != nil {
+		t.Fatalf("scanTableRows() after rollback error = %v", err)
+	}
+	if len(rows) != 1 || rows[0][0] != parser.Int64Value(1) {
+		t.Fatalf("scanTableRows() after rollback = %#v, want [[1]]", rows)
+	}
+
+	privateAfterRollback, err := db.pool.GetPrivatePage(bufferpool.PageID(rootPageID))
+	if err != nil {
+		t.Fatalf("GetPrivatePage() after rollback error = %v", err)
+	}
+	privateRows, err := storage.ReadSlottedRowsFromTablePageData(privateAfterRollback.Data[:], []uint8{storage.CatalogColumnTypeInt})
+	if err != nil {
+		t.Fatalf("ReadSlottedRowsFromTablePageData(private after rollback) error = %v", err)
+	}
+	if len(privateRows) != 1 || privateRows[0][0] != parser.Int64Value(1) {
+		t.Fatalf("privateRows after rollback = %#v, want recreated committed row [[1]]", privateRows)
+	}
+	db.pool.UnlatchExclusive(privateAfterRollback)
+	db.pool.Unpin(privateAfterRollback)
 	db.clearTxn()
 }
 

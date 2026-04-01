@@ -652,12 +652,18 @@ func (db *DB) rollbackTxn() error {
 		return ErrInvalidArgument
 	}
 	if db.txn == nil {
+		if db.pool != nil {
+			db.pool.DiscardPrivatePages()
+		}
 		return nil
 	}
 	if db.pager == nil {
 		return newExecError("invalid transaction state")
 	}
 	if db.txn.IsActive() {
+		if db.pool != nil {
+			db.pool.DiscardPrivatePages()
+		}
 		db.pager.RestoreDirtyPages()
 		if err := db.txn.Rollback(); err != nil {
 			return err
@@ -675,6 +681,9 @@ func (db *DB) rollbackTxn() error {
 	}
 	if db.txn.CanCommit() {
 		return newExecError("invalid transaction state")
+	}
+	if db.pool != nil {
+		db.pool.DiscardPrivatePages()
 	}
 	return nil
 }

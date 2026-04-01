@@ -813,3 +813,56 @@ func TestUnlatchExclusiveNilIsNoOp(t *testing.T) {
 
 	pool.UnlatchExclusive(nil)
 }
+
+func TestDiscardPrivatePagesRemovesPrivateFramesButKeepsCommitted(t *testing.T) {
+	loader := &stubLoader{
+		pages: map[PageID][]byte{
+			26: bytes.Repeat([]byte{0x26}, PageSize),
+		},
+	}
+	pool := New(2, loader)
+
+	committed, err := pool.GetCommittedPage(26)
+	if err != nil {
+		t.Fatalf("GetCommittedPage() error = %v", err)
+	}
+	pool.UnlatchShared(committed)
+	pool.Unpin(committed)
+
+	private, err := pool.GetPrivatePage(26)
+	if err != nil {
+		t.Fatalf("GetPrivatePage() error = %v", err)
+	}
+	private.Data[0] = 0x99
+	pool.MarkDirty(private)
+	pool.UnlatchExclusive(private)
+	pool.Unpin(private)
+
+	pool.DiscardPrivatePages()
+	if got := pool.privateFrameCount(); got != 0 {
+		t.Fatalf("privateFrameCount() = %d, want 0", got)
+	}
+
+	committedAgain, err := pool.GetCommittedPage(26)
+	if err != nil {
+		t.Fatalf("GetCommittedPage() after discard error = %v", err)
+	}
+	if committedAgain != committed {
+		t.Fatal("GetCommittedPage() returned different committed frame after discard")
+	}
+	if committedAgain.Data[0] != 0x26 {
+		t.Fatalf("committedAgain.Data[0] = 0x%02x, want 0x26", committedAgain.Data[0])
+	}
+	pool.UnlatchShared(committedAgain)
+	pool.Unpin(committedAgain)
+
+	privateAgain, err := pool.GetPrivatePage(26)
+	if err != nil {
+		t.Fatalf("GetPrivatePage() recreate error = %v", err)
+	}
+	if privateAgain.Data[0] != 0x26 {
+		t.Fatalf("privateAgain.Data[0] = 0x%02x, want recreated committed byte 0x26", privateAgain.Data[0])
+	}
+	pool.UnlatchExclusive(privateAgain)
+	pool.Unpin(privateAgain)
+}

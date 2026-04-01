@@ -70,6 +70,14 @@ func (bp *BufferPool) PutPage(f *Frame) {
 	}
 }
 
+func (bp *BufferPool) HasPrivatePage(pageID PageID) bool {
+	if bp == nil {
+		return false
+	}
+	_, ok := bp.getPrivateFrame(pageID)
+	return ok
+}
+
 func (bp *BufferPool) pinSharedLatchAndReturn(f *Frame) *Frame {
 	bp.Pin(f)
 	bp.LatchShared(f)

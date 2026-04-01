@@ -81,6 +81,13 @@ func (bp *BufferPool) privateFrameCount() int {
 	return len(bp.private)
 }
 
+func (bp *BufferPool) DiscardPrivatePages() {
+	if bp == nil || len(bp.private) == 0 {
+		return
+	}
+	clear(bp.private)
+}
+
 func (bp *BufferPool) DirtyFrames() []*Frame {
 	if bp == nil || len(bp.committed) == 0 {
 		return nil
