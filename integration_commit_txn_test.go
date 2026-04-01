@@ -124,13 +124,13 @@ func TestCommitErrorPropagates(t *testing.T) {
 		t.Fatal("commitTxn() error = nil, want failure")
 	}
 	if db.txn == nil {
-		t.Fatal("db.txn = nil, want active txn retained")
+		t.Fatal("db.txn = nil, want committed txn retained")
 	}
-	if !db.txn.CanCommit() {
-		t.Fatal("db.txn.CanCommit() = false, want true after failed commit")
+	if db.txn.CanCommit() {
+		t.Fatal("db.txn.CanCommit() = true, want false after post-WAL checkpoint failure")
 	}
-	if len(db.pager.DirtyPages()) == 0 {
-		t.Fatal("len(db.pager.DirtyPages()) = 0, want dirty pages retained after failed commit")
+	if len(db.pager.DirtyPages()) != 0 {
+		t.Fatalf("len(db.pager.DirtyPages()) = %d, want 0 after post-WAL checkpoint failure", len(db.pager.DirtyPages()))
 	}
 }
 
@@ -325,7 +325,7 @@ func TestWriterGateReleasedAfterMutationFailure(t *testing.T) {
 	defer db.Close()
 
 	wantErr := errors.New("boom")
-	if err := db.execMutatingStatement(func() error {
+	if _, err := db.execMutatingStatement(func() error {
 		return wantErr
 	}); !errors.Is(err, wantErr) {
 		t.Fatalf("execMutatingStatement() error = %v, want %v", err, wantErr)
@@ -788,7 +788,7 @@ func TestWALAppendFailurePreventsPromotionAndCommitSuccess(t *testing.T) {
 		appendWALFrameRecord = originalAppendFrame
 	}()
 
-	err = db.execMutatingStatement(func() error {
+	_, err = db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
 		if err := db.loadRowsIntoTables(stagedTables, "users"); err != nil {
 			return err
@@ -845,7 +845,7 @@ func TestWALSyncFailurePreventsPromotionAndCommitSuccess(t *testing.T) {
 		syncWAL = originalSyncWAL
 	}()
 
-	err = db.execMutatingStatement(func() error {
+	_, err = db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
 		if err := db.loadRowsIntoTables(stagedTables, "users"); err != nil {
 			return err
@@ -878,6 +878,53 @@ func TestWALSyncFailurePreventsPromotionAndCommitSuccess(t *testing.T) {
 	}
 
 	assertSelectTextRows(t, db, "SELECT name FROM users", "alice")
+}
+
+func TestCheckpointFailureAfterWALDurabilityPreservesCommittedState(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	beforeRecords, err := storage.ReadWALRecords(path)
+	if err != nil {
+		t.Fatalf("ReadWALRecords(before) error = %v", err)
+	}
+
+	db.afterDatabaseSyncHook = func() error {
+		return errors.New("checkpoint failed after WAL durability")
+	}
+	_, err = db.Exec("UPDATE users SET name = 'beth' WHERE id = 1")
+	if err == nil {
+		t.Fatal("Exec(update) error = nil, want checkpoint failure")
+	}
+	db.afterDatabaseSyncHook = nil
+
+	afterRecords, err := storage.ReadWALRecords(path)
+	if err != nil {
+		t.Fatalf("ReadWALRecords(after) error = %v", err)
+	}
+	if len(afterRecords) != len(beforeRecords)+3 {
+		t.Fatalf("len(ReadWALRecords(after)) = %d, want %d", len(afterRecords), len(beforeRecords)+3)
+	}
+
+	assertSelectTextRows(t, db, "SELECT name FROM users", "beth")
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+	assertSelectTextRows(t, db, "SELECT name FROM users", "beth")
 }
 
 func TestRollbackRestoresDirtyPages(t *testing.T) {
@@ -935,7 +982,7 @@ func TestApplyErrorTriggersRollback(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	err = db.execMutatingStatement(func() error {
+	_, err = db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
 		if err := db.loadRowsIntoTables(stagedTables, "t"); err != nil {
 			return err
@@ -1043,7 +1090,7 @@ func TestRollbackAfterFailedCommitRestoresState(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	err = db.execMutatingStatement(func() error {
+	_, err = db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
 		if err := db.loadRowsIntoTables(stagedTables, "t"); err != nil {
 			return err
@@ -1163,7 +1210,7 @@ func TestSuccessfulRollbackLeavesNoTxnAndNoTracking(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	err = db.execMutatingStatement(func() error {
+	_, err = db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
 		if err := db.loadRowsIntoTables(stagedTables, "t"); err != nil {
 			return err
@@ -1204,7 +1251,7 @@ func TestBoolRollbackCloseReopenKeepsCommittedState(t *testing.T) {
 		}
 	}
 
-	err = db.execMutatingStatement(func() error {
+	_, err = db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
 		if err := db.loadRowsIntoTables(stagedTables, "flags"); err != nil {
 			return err
@@ -1260,7 +1307,7 @@ func TestRealRollbackCloseReopenKeepsCommittedState(t *testing.T) {
 		}
 	}
 
-	err = db.execMutatingStatement(func() error {
+	_, err = db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
 		if err := db.loadRowsIntoTables(stagedTables, "measurements"); err != nil {
 			return err

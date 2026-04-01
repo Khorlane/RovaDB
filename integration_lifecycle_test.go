@@ -113,7 +113,7 @@ func TestLifecycleRollbackCloseReopenKeepsCommittedState(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	err = db.execMutatingStatement(func() error {
+	_, err = db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
 		if err := db.loadRowsIntoTables(stagedTables, "users"); err != nil {
 			return err

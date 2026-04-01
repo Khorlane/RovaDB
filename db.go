@@ -26,6 +26,24 @@ var (
 	ErrTxnInvariantViolation    = errors.New("rovadb: transaction invariant violation")
 )
 
+type checkpointError struct {
+	err error
+}
+
+func (e *checkpointError) Error() string {
+	if e == nil || e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
+
+func (e *checkpointError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
 var (
 	appendWALFrameRecord  = storage.AppendWALFrame
 	appendWALCommitRecord = storage.AppendWALCommitRecord
@@ -208,7 +226,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 	case *parser.CreateTableStmt:
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table
-		err := db.execMutatingStatement(func() error {
+		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
 
 			var err error
@@ -223,19 +241,21 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			committedTables = stagedTables
 			return nil
 		})
+		if committed {
+			if err := validateTables(committedTables, false); err != nil {
+				return Result{}, err
+			}
+			clearLoadedRows(committedTables)
+			db.tables = committedTables
+		}
 		if err != nil {
 			return Result{}, err
 		}
-		if err := validateTables(committedTables, false); err != nil {
-			return Result{}, err
-		}
-		clearLoadedRows(committedTables)
-		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.InsertStmt:
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table
-		err := db.execMutatingStatement(func() error {
+		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
 			if err := db.loadRowsIntoTables(stagedTables, stmt.TableName); err != nil {
 				return err
@@ -253,19 +273,21 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			committedTables = stagedTables
 			return nil
 		})
+		if committed {
+			if err := validateTables(committedTables, false); err != nil {
+				return Result{}, err
+			}
+			clearLoadedRows(committedTables)
+			db.tables = committedTables
+		}
 		if err != nil {
 			return Result{}, err
 		}
-		if err := validateTables(committedTables, false); err != nil {
-			return Result{}, err
-		}
-		clearLoadedRows(committedTables)
-		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.AlterTableAddColumnStmt:
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table
-		err := db.execMutatingStatement(func() error {
+		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
 			if err := db.loadRowsIntoTables(stagedTables, stmt.TableName); err != nil {
 				return err
@@ -283,19 +305,21 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			committedTables = stagedTables
 			return nil
 		})
+		if committed {
+			if err := validateTables(committedTables, false); err != nil {
+				return Result{}, err
+			}
+			clearLoadedRows(committedTables)
+			db.tables = committedTables
+		}
 		if err != nil {
 			return Result{}, err
 		}
-		if err := validateTables(committedTables, false); err != nil {
-			return Result{}, err
-		}
-		clearLoadedRows(committedTables)
-		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.CreateIndexStmt:
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table
-		err := db.execMutatingStatement(func() error {
+		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
 			if err := db.loadRowsIntoTables(stagedTables, stmt.TableName); err != nil {
 				return err
@@ -312,19 +336,21 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			}
 			return nil
 		})
+		if committed {
+			if err := validateTables(committedTables, false); err != nil {
+				return Result{}, err
+			}
+			clearLoadedRows(committedTables)
+			db.tables = committedTables
+		}
 		if err != nil {
 			return Result{}, err
 		}
-		if err := validateTables(committedTables, false); err != nil {
-			return Result{}, err
-		}
-		clearLoadedRows(committedTables)
-		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.DropIndexStmt:
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table
-		err := db.execMutatingStatement(func() error {
+		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
 
 			var err error
@@ -338,19 +364,21 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			}
 			return nil
 		})
+		if committed {
+			if err := validateTables(committedTables, false); err != nil {
+				return Result{}, err
+			}
+			clearLoadedRows(committedTables)
+			db.tables = committedTables
+		}
 		if err != nil {
 			return Result{}, err
 		}
-		if err := validateTables(committedTables, false); err != nil {
-			return Result{}, err
-		}
-		clearLoadedRows(committedTables)
-		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.DropTableStmt:
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table
-		err := db.execMutatingStatement(func() error {
+		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
 
 			var err error
@@ -364,19 +392,21 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			}
 			return nil
 		})
+		if committed {
+			if err := validateTables(committedTables, false); err != nil {
+				return Result{}, err
+			}
+			clearLoadedRows(committedTables)
+			db.tables = committedTables
+		}
 		if err != nil {
 			return Result{}, err
 		}
-		if err := validateTables(committedTables, false); err != nil {
-			return Result{}, err
-		}
-		clearLoadedRows(committedTables)
-		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.UpdateStmt:
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table
-		err := db.execMutatingStatement(func() error {
+		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
 			if err := db.loadRowsIntoTables(stagedTables, stmt.TableName); err != nil {
 				return err
@@ -394,19 +424,21 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			committedTables = stagedTables
 			return nil
 		})
+		if committed {
+			if err := validateTables(committedTables, false); err != nil {
+				return Result{}, err
+			}
+			clearLoadedRows(committedTables)
+			db.tables = committedTables
+		}
 		if err != nil {
 			return Result{}, err
 		}
-		if err := validateTables(committedTables, false); err != nil {
-			return Result{}, err
-		}
-		clearLoadedRows(committedTables)
-		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.DeleteStmt:
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table
-		err := db.execMutatingStatement(func() error {
+		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
 			if err := db.loadRowsIntoTables(stagedTables, stmt.TableName); err != nil {
 				return err
@@ -424,14 +456,16 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			committedTables = stagedTables
 			return nil
 		})
+		if committed {
+			if err := validateTables(committedTables, false); err != nil {
+				return Result{}, err
+			}
+			clearLoadedRows(committedTables)
+			db.tables = committedTables
+		}
 		if err != nil {
 			return Result{}, err
 		}
-		if err := validateTables(committedTables, false); err != nil {
-			return Result{}, err
-		}
-		clearLoadedRows(committedTables)
-		db.tables = committedTables
 		return Result{rowsAffected: rowsAffected}, nil
 	default:
 		return Result{}, newExecError("unsupported query form")
@@ -720,44 +754,49 @@ func (db *DB) rollbackTxn() error {
 }
 
 // execMutatingStatement enforces internal autocommit for mutating statements.
-func (db *DB) execMutatingStatement(apply func() error) error {
+func (db *DB) execMutatingStatement(apply func() error) (bool, error) {
 	if db == nil {
-		return ErrInvalidArgument
+		return false, ErrInvalidArgument
 	}
 	if err := db.beginWriteTxn(); err != nil {
-		return err
+		return false, err
 	}
 	defer db.endWriteTxn()
 
 	if err := db.beginTxn(); err != nil {
-		return err
+		return false, err
 	}
 	if err := apply(); err != nil {
 		if rollbackErr := db.rollbackTxn(); rollbackErr != nil {
-			return errors.Join(err, rollbackErr)
+			return false, errors.Join(err, rollbackErr)
 		}
 		db.clearTxn()
-		return err
+		return false, err
 	}
 
 	if db.txn != nil {
 		if err := db.txn.MarkDirty(); err != nil {
 			if rollbackErr := db.rollbackTxn(); rollbackErr != nil {
-				return errors.Join(err, rollbackErr)
+				return false, errors.Join(err, rollbackErr)
 			}
 			db.clearTxn()
-			return err
+			return false, err
 		}
 	}
 	if err := db.commitTxn(); err != nil {
+		var cpErr *checkpointError
+		if errors.As(err, &cpErr) {
+			db.clearTxn()
+			return true, err
+		}
 		if rollbackErr := db.rollbackTxn(); rollbackErr != nil {
-			return errors.Join(err, rollbackErr)
+			return false, errors.Join(err, rollbackErr)
 		}
 		db.clearTxn()
-		return err
+		return false, err
 	}
 	db.clearTxn()
-	return nil
+	return true, nil
 }
 
 // commitTxn is the only durability boundary for a mutating statement. It
@@ -777,46 +816,12 @@ func (db *DB) commitTxn() error {
 	if !db.txn.CanCommit() {
 		return newExecError("invalid transaction state")
 	}
+	durable := false
 	if db.txn.IsDirty() {
 		if err := db.appendPendingPagesToWAL(); err != nil {
 			return err
 		}
-		journalPages := db.pager.DirtyPagesWithOriginals()
-		if len(journalPages) > 0 {
-			if err := storage.WriteRollbackJournal(storage.JournalPath(db.path), db.pager.PageSize(), journalPages); err != nil {
-				return wrapStorageError(err)
-			}
-			if db.afterJournalWriteHook != nil {
-				if err := db.afterJournalWriteHook(); err != nil {
-					return err
-				}
-			}
-		}
-		if err := db.pager.FlushDirty(); err != nil {
-			return wrapStorageError(err)
-		}
-		if err := db.pager.Sync(); err != nil {
-			return wrapStorageError(err)
-		}
-		if db.afterDatabaseSyncHook != nil {
-			if err := db.afterDatabaseSyncHook(); err != nil {
-				return err
-			}
-		}
-		if len(journalPages) > 0 {
-			if err := os.Remove(storage.JournalPath(db.path)); err != nil && !os.IsNotExist(err) {
-				return wrapStorageError(err)
-			}
-		}
-	}
-	db.pager.ClearDirtyTracking()
-	if len(db.pager.DirtyPages()) != 0 || len(db.pager.DirtyPagesWithOriginals()) != 0 {
-		return newExecError("invalid transaction state")
-	}
-	if _, err := os.Stat(storage.JournalPath(db.path)); err == nil {
-		return newExecError("invalid transaction state")
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return wrapStorageError(err)
+		durable = true
 	}
 	if err := db.txn.Commit(); err != nil {
 		if errors.Is(err, txn.ErrNoActiveTxn) || errors.Is(err, txn.ErrInvalidCommitState) {
@@ -826,6 +831,59 @@ func (db *DB) commitTxn() error {
 	}
 	if db.pool != nil {
 		db.pool.PromotePrivatePages()
+	}
+	var checkpointErr error
+	if durable {
+		checkpointErr = db.checkpointCommittedPages()
+	}
+	db.pager.ClearDirtyTracking()
+	if len(db.pager.DirtyPages()) != 0 || len(db.pager.DirtyPagesWithOriginals()) != 0 {
+		return newExecError("invalid transaction state")
+	}
+	if checkpointErr == nil {
+		if _, err := os.Stat(storage.JournalPath(db.path)); err == nil {
+			return newExecError("invalid transaction state")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return wrapStorageError(err)
+		}
+	}
+	if checkpointErr != nil {
+		return &checkpointError{err: checkpointErr}
+	}
+	return nil
+}
+
+func (db *DB) checkpointCommittedPages() error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+
+	journalPages := db.pager.DirtyPagesWithOriginals()
+	if len(journalPages) > 0 {
+		if err := storage.WriteRollbackJournal(storage.JournalPath(db.path), db.pager.PageSize(), journalPages); err != nil {
+			return wrapStorageError(err)
+		}
+		if db.afterJournalWriteHook != nil {
+			if err := db.afterJournalWriteHook(); err != nil {
+				return err
+			}
+		}
+	}
+	if err := db.pager.FlushDirty(); err != nil {
+		return wrapStorageError(err)
+	}
+	if err := db.pager.Sync(); err != nil {
+		return wrapStorageError(err)
+	}
+	if db.afterDatabaseSyncHook != nil {
+		if err := db.afterDatabaseSyncHook(); err != nil {
+			return err
+		}
+	}
+	if len(journalPages) > 0 {
+		if err := os.Remove(storage.JournalPath(db.path)); err != nil && !os.IsNotExist(err) {
+			return wrapStorageError(err)
+		}
 	}
 	return nil
 }
@@ -1944,7 +2002,7 @@ func (db *DB) defineLegacyBasicIndex(tableName, columnName string) error {
 	}
 
 	var committedTables map[string]*executor.Table
-	err := db.execMutatingStatement(func() error {
+	committed, err := db.execMutatingStatement(func() error {
 		stagedTables := cloneTables(db.tables)
 		if err := db.loadRowsIntoTables(stagedTables, tableName); err != nil {
 			return err
@@ -1993,15 +2051,15 @@ func (db *DB) defineLegacyBasicIndex(tableName, columnName string) error {
 		committedTables = stagedTables
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	if err := validateTables(committedTables, false); err != nil {
-		return err
-	}
-	if committedTables != nil {
+	if committed {
+		if err := validateTables(committedTables, false); err != nil {
+			return err
+		}
 		clearLoadedRows(committedTables)
 		db.tables = committedTables
+	}
+	if err != nil {
+		return err
 	}
 	return nil
 }
