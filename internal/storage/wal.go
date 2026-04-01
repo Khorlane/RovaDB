@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -405,6 +406,32 @@ func CommittedWALFrames(dbPath string) ([]WALFrame, error) {
 	return committed, nil
 }
 
+// NextWALLSN returns the next monotonic LSN after existing WAL contents.
+func NextWALLSN(dbPath string) (uint64, error) {
+	records, err := ReadWALRecords(dbPath)
+	if err != nil {
+		return 0, err
+	}
+
+	var maxLSN uint64
+	for _, record := range records {
+		switch record.Type {
+		case WALRecordTypeFrame:
+			if record.Frame != nil && record.Frame.FrameLSN > maxLSN {
+				maxLSN = record.Frame.FrameLSN
+			}
+		case WALRecordTypeCommit:
+			if record.Commit != nil && record.Commit.CommitLSN > maxLSN {
+				maxLSN = record.Commit.CommitLSN
+			}
+		}
+	}
+	if maxLSN == 0 {
+		return 1, nil
+	}
+	return maxLSN + 1, nil
+}
+
 // ApplyWALFramesToDB overwrites main database pages with committed WAL images.
 func ApplyWALFramesToDB(dbPath string, frames []WALFrame) error {
 	if len(frames) == 0 {
@@ -421,11 +448,55 @@ func ApplyWALFramesToDB(dbPath string, frames []WALFrame) error {
 		if err := ValidateWALFrame(frame); err != nil {
 			return err
 		}
+		currentPageLSN, err := currentDBPageLSNForReplay(file, frame)
+		if err != nil {
+			return err
+		}
+		if frame.PageLSN <= currentPageLSN {
+			continue
+		}
 		if _, err := file.WriteAt(frame.PageData[:], pageOffset(PageID(frame.PageID))); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func currentDBPageLSNForReplay(file *os.File, frame WALFrame) (uint64, error) {
+	if file == nil {
+		return 0, nil
+	}
+
+	info, err := file.Stat()
+	if err != nil {
+		return 0, err
+	}
+
+	offset := pageOffset(PageID(frame.PageID))
+	if info.Size() < offset+PageSize {
+		return 0, nil
+	}
+
+	pageData := make([]byte, PageSize)
+	if _, err := file.ReadAt(pageData, offset); err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return 0, nil
+		}
+		return 0, err
+	}
+
+	if frame.PageID == catalogPageID {
+		if bytes.Equal(pageData, frame.PageData[:]) {
+			return frame.PageLSN, nil
+		}
+		return 0, nil
+	}
+
+	currentPageLSN, err := PageLSN(pageData)
+	if err != nil {
+		return 0, nil
+	}
+	return currentPageLSN, nil
 }
 
 func validateWALPageImage(pageID uint32, pageLSN uint64, pageData []byte) error {

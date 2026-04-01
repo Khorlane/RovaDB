@@ -126,6 +126,13 @@ func Open(path string) (*DB, error) {
 	}
 	clearLoadedRows(tables)
 
+	nextWALLSN, err := storage.NextWALLSN(path)
+	if err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
+
 	return &DB{
 		path:       path,
 		file:       file,
@@ -133,7 +140,7 @@ func Open(path string) (*DB, error) {
 		pool:       pool,
 		tables:     tables,
 		txn:        nil,
-		nextWALLSN: 1,
+		nextWALLSN: nextWALLSN,
 	}, nil
 }
 
@@ -1077,6 +1084,9 @@ func (db *DB) appendPendingPagesToWAL() error {
 				return wrapStorageError(err)
 			}
 		}
+		if err := db.updatePendingPageImage(staged.id, pageData); err != nil {
+			return err
+		}
 
 		var frame storage.WALFrame
 		frame.FrameLSN = frameLSN
@@ -1094,6 +1104,41 @@ func (db *DB) appendPendingPagesToWAL() error {
 	}
 	if err := syncWAL(db.path); err != nil {
 		return wrapStorageError(err)
+	}
+	return nil
+}
+
+func (db *DB) updatePendingPageImage(pageID storage.PageID, pageData []byte) error {
+	if db == nil {
+		return ErrInvalidArgument
+	}
+
+	for i := range db.pendingPages {
+		if db.pendingPages[i].id != pageID {
+			continue
+		}
+		db.pendingPages[i].data = append([]byte(nil), pageData...)
+
+		frame, err := db.getWritablePrivateFrame(pageID)
+		if err != nil {
+			return err
+		}
+		if frame == nil {
+			return newStorageError("corrupted page")
+		}
+		clear(frame.Data[:])
+		copy(frame.Data[:], pageData)
+		db.pool.MarkDirty(frame)
+		db.pool.UnlatchExclusive(frame)
+		db.pool.Unpin(frame)
+
+		page, err := db.pager.Get(pageID)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		clear(page.Data())
+		copy(page.Data(), pageData)
+		return nil
 	}
 	return nil
 }

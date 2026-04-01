@@ -442,6 +442,138 @@ func TestSyncWALFileFailsOnMissingWAL(t *testing.T) {
 	}
 }
 
+func TestApplyWALFramesToDBWritesMissingPage(t *testing.T) {
+	dbPath := createReplayTestDB(t)
+	frame := buildTestWALFrameWithValue(t, 3, 1, "missing")
+
+	if err := ApplyWALFramesToDB(dbPath, []WALFrame{frame}); err != nil {
+		t.Fatalf("ApplyWALFramesToDB() error = %v", err)
+	}
+
+	got := readReplayTestDBPage(t, dbPath, frame.PageID)
+	if !bytes.Equal(got, frame.PageData[:]) {
+		t.Fatal("replayed page bytes do not match WAL frame for missing page")
+	}
+}
+
+func TestApplyWALFramesToDBWritesNewerPageLSN(t *testing.T) {
+	dbPath := createReplayTestDB(t)
+	current := buildTestWALFrameWithValue(t, 2, 5, "older")
+	newer := buildTestWALFrameWithValue(t, 2, 7, "newer")
+	writeReplayTestDBPage(t, dbPath, current.PageID, current.PageData[:])
+
+	if err := ApplyWALFramesToDB(dbPath, []WALFrame{newer}); err != nil {
+		t.Fatalf("ApplyWALFramesToDB() error = %v", err)
+	}
+
+	got := readReplayTestDBPage(t, dbPath, newer.PageID)
+	if !bytes.Equal(got, newer.PageData[:]) {
+		t.Fatal("replayed page bytes do not match newer WAL frame")
+	}
+}
+
+func TestApplyWALFramesToDBSkipsEqualPageLSN(t *testing.T) {
+	dbPath := createReplayTestDB(t)
+	current := buildTestWALFrameWithValue(t, 2, 7, "current")
+	equal := buildTestWALFrameWithValue(t, 2, 7, "equal")
+	writeReplayTestDBPage(t, dbPath, current.PageID, current.PageData[:])
+
+	if err := ApplyWALFramesToDB(dbPath, []WALFrame{equal}); err != nil {
+		t.Fatalf("ApplyWALFramesToDB() error = %v", err)
+	}
+
+	got := readReplayTestDBPage(t, dbPath, current.PageID)
+	if !bytes.Equal(got, current.PageData[:]) {
+		t.Fatal("equal PageLSN frame should have been skipped")
+	}
+}
+
+func TestApplyWALFramesToDBSkipsOlderPageLSN(t *testing.T) {
+	dbPath := createReplayTestDB(t)
+	current := buildTestWALFrameWithValue(t, 2, 9, "current")
+	older := buildTestWALFrameWithValue(t, 2, 7, "older")
+	writeReplayTestDBPage(t, dbPath, current.PageID, current.PageData[:])
+
+	if err := ApplyWALFramesToDB(dbPath, []WALFrame{older}); err != nil {
+		t.Fatalf("ApplyWALFramesToDB() error = %v", err)
+	}
+
+	got := readReplayTestDBPage(t, dbPath, current.PageID)
+	if !bytes.Equal(got, current.PageData[:]) {
+		t.Fatal("older PageLSN frame should have been skipped")
+	}
+}
+
+func TestApplyWALFramesToDBIsIdempotent(t *testing.T) {
+	dbPath := createReplayTestDB(t)
+	frame := buildTestWALFrameWithValue(t, 4, 11, "idempotent")
+
+	if err := ApplyWALFramesToDB(dbPath, []WALFrame{frame}); err != nil {
+		t.Fatalf("first ApplyWALFramesToDB() error = %v", err)
+	}
+	first := readReplayTestDBPage(t, dbPath, frame.PageID)
+
+	if err := ApplyWALFramesToDB(dbPath, []WALFrame{frame}); err != nil {
+		t.Fatalf("second ApplyWALFramesToDB() error = %v", err)
+	}
+	second := readReplayTestDBPage(t, dbPath, frame.PageID)
+
+	if !bytes.Equal(first, second) {
+		t.Fatal("replay is not idempotent across repeated ApplyWALFramesToDB() calls")
+	}
+}
+
+func TestApplyWALFramesToDBAppliesAndSkipsPerPage(t *testing.T) {
+	dbPath := createReplayTestDB(t)
+	page2Current := buildTestWALFrameWithValue(t, 2, 8, "page2-current")
+	page3Newer := buildTestWALFrameWithValue(t, 3, 4, "page3-newer")
+	page3Current := buildTestWALFrameWithValue(t, 3, 2, "page3-current")
+	page4Frame := buildTestWALFrameWithValue(t, 4, 1, "page4-new")
+	writeReplayTestDBPage(t, dbPath, page2Current.PageID, page2Current.PageData[:])
+	writeReplayTestDBPage(t, dbPath, page3Current.PageID, page3Current.PageData[:])
+
+	page2Older := buildTestWALFrameWithValue(t, 2, 7, "page2-older")
+	if err := ApplyWALFramesToDB(dbPath, []WALFrame{page2Older, page3Newer, page4Frame}); err != nil {
+		t.Fatalf("ApplyWALFramesToDB() error = %v", err)
+	}
+
+	gotPage2 := readReplayTestDBPage(t, dbPath, page2Current.PageID)
+	if !bytes.Equal(gotPage2, page2Current.PageData[:]) {
+		t.Fatal("stale page 2 frame should have been skipped")
+	}
+
+	gotPage3 := readReplayTestDBPage(t, dbPath, page3Newer.PageID)
+	if !bytes.Equal(gotPage3, page3Newer.PageData[:]) {
+		t.Fatal("newer page 3 frame should have been applied")
+	}
+
+	gotPage4 := readReplayTestDBPage(t, dbPath, page4Frame.PageID)
+	if !bytes.Equal(gotPage4, page4Frame.PageData[:]) {
+		t.Fatal("missing page 4 frame should have been applied")
+	}
+}
+
+func TestNextWALLSNReturnsNextMonotonicValue(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	if err := EnsureWALFile(dbPath, DBFormatVersion()); err != nil {
+		t.Fatalf("EnsureWALFile() error = %v", err)
+	}
+	if err := AppendWALFrame(dbPath, buildTestWALFrame(t, 2, 10, 0)); err != nil {
+		t.Fatalf("AppendWALFrame() error = %v", err)
+	}
+	if err := AppendWALCommitRecord(dbPath, WALCommitRecord{CommitLSN: 11}); err != nil {
+		t.Fatalf("AppendWALCommitRecord() error = %v", err)
+	}
+
+	nextLSN, err := NextWALLSN(dbPath)
+	if err != nil {
+		t.Fatalf("NextWALLSN() error = %v", err)
+	}
+	if nextLSN != 12 {
+		t.Fatalf("NextWALLSN() = %d, want 12", nextLSN)
+	}
+}
+
 func buildTestWALFrame(t *testing.T, pageID uint32, frameLSN uint64, reserved uint32) WALFrame {
 	t.Helper()
 
@@ -465,4 +597,74 @@ func buildTestWALFrame(t *testing.T, pageID uint32, frameLSN uint64, reserved ui
 	frame.Reserved = reserved
 	copy(frame.PageData[:], page)
 	return frame
+}
+
+func buildTestWALFrameWithValue(t *testing.T, pageID uint32, frameLSN uint64, value string) WALFrame {
+	t.Helper()
+
+	page := InitializeTablePage(pageID)
+	if err := SetPageLSN(page, frameLSN); err != nil {
+		t.Fatalf("SetPageLSN() error = %v", err)
+	}
+	row, err := EncodeSlottedRow([]parser.Value{parser.StringValue(value)})
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+	if _, err := InsertRowIntoTablePage(page, row); err != nil {
+		t.Fatalf("InsertRowIntoTablePage() error = %v", err)
+	}
+	if err := RecomputePageChecksum(page); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
+
+	var frame WALFrame
+	frame.FrameLSN = frameLSN
+	frame.PageID = pageID
+	frame.PageLSN = frameLSN
+	copy(frame.PageData[:], page)
+	return frame
+}
+
+func createReplayTestDB(t *testing.T) string {
+	t.Helper()
+
+	dbPath := filepath.Join(t.TempDir(), "replay.db")
+	dbFile, err := OpenOrCreate(dbPath)
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	if err := dbFile.Close(); err != nil {
+		t.Fatalf("dbFile.Close() error = %v", err)
+	}
+	return dbPath
+}
+
+func writeReplayTestDBPage(t *testing.T, dbPath string, pageID uint32, pageData []byte) {
+	t.Helper()
+
+	file, err := os.OpenFile(dbPath, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("os.OpenFile() error = %v", err)
+	}
+	defer file.Close()
+
+	if _, err := file.WriteAt(pageData, pageOffset(PageID(pageID))); err != nil {
+		t.Fatalf("file.WriteAt() error = %v", err)
+	}
+}
+
+func readReplayTestDBPage(t *testing.T, dbPath string, pageID uint32) []byte {
+	t.Helper()
+
+	file, err := os.Open(dbPath)
+	if err != nil {
+		t.Fatalf("os.Open() error = %v", err)
+	}
+	defer file.Close()
+
+	pageData := make([]byte, PageSize)
+	if _, err := file.ReadAt(pageData, pageOffset(PageID(pageID))); err != nil {
+		t.Fatalf("file.ReadAt() error = %v", err)
+	}
+	return pageData
 }
