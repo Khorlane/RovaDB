@@ -277,6 +277,206 @@ func TestOpenFailsOnMalformedDirectoryPage(t *testing.T) {
 	}
 }
 
+func TestOpenLoadsDurableFreeListHead(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	seedFreePageForTest(t, pager, 2, 0)
+	if err := storage.WriteDirectoryFreeListHead(rawDB.File(), 2); err != nil {
+		t.Fatalf("WriteDirectoryFreeListHead() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if db.freeListHead != 2 {
+		t.Fatalf("db.freeListHead = %d, want 2", db.freeListHead)
+	}
+}
+
+func TestCreateTableReusesDurableFreeListHeadAndAdvancesIt(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE t1 (id INT)"); err != nil {
+		t.Fatalf("Exec(create t1) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	seedFreePageForTest(t, pager, 2, 3)
+	seedFreePageForTest(t, pager, 3, 0)
+	if err := storage.WriteDirectoryFreeListHead(rawDB.File(), 2); err != nil {
+		t.Fatalf("WriteDirectoryFreeListHead() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE t2 (id INT)"); err != nil {
+		t.Fatalf("Exec(create t2) error = %v", err)
+	}
+	if got := db.tables["t2"].RootPageID(); got != 2 {
+		t.Fatalf("t2 rootPageID = %d, want 2", got)
+	}
+	if db.freeListHead != 3 {
+		t.Fatalf("db.freeListHead = %d, want 3", db.freeListHead)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, _ = openRawStorage(t, path)
+	defer rawDB.Close()
+	head, err := storage.ReadDirectoryFreeListHead(rawDB.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryFreeListHead() error = %v", err)
+	}
+	if head != 3 {
+		t.Fatalf("ReadDirectoryFreeListHead() = %d, want 3", head)
+	}
+}
+
+func TestCreateTableFallsBackToFreshAllocationWhenFreeListEmpty(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE t1 (id INT)"); err != nil {
+		t.Fatalf("Exec(create t1) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE t2 (id INT)"); err != nil {
+		t.Fatalf("Exec(create t2) error = %v", err)
+	}
+	defer db.Close()
+
+	if got := db.tables["t2"].RootPageID(); got != 2 {
+		t.Fatalf("t2 rootPageID = %d, want 2", got)
+	}
+	if db.freeListHead != 0 {
+		t.Fatalf("db.freeListHead = %d, want 0", db.freeListHead)
+	}
+}
+
+func TestReopenPreservesFreeListHeadForSubsequentAllocation(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE t1 (id INT)"); err != nil {
+		t.Fatalf("Exec(create t1) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	seedFreePageForTest(t, pager, 2, 3)
+	seedFreePageForTest(t, pager, 3, 0)
+	if err := storage.WriteDirectoryFreeListHead(rawDB.File(), 2); err != nil {
+		t.Fatalf("WriteDirectoryFreeListHead() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE t2 (id INT)"); err != nil {
+		t.Fatalf("Exec(create t2) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("second reopen Open() error = %v", err)
+	}
+	defer db.Close()
+	if db.freeListHead != 3 {
+		t.Fatalf("db.freeListHead = %d, want 3", db.freeListHead)
+	}
+	if _, err := db.Exec("CREATE TABLE t3 (id INT)"); err != nil {
+		t.Fatalf("Exec(create t3) error = %v", err)
+	}
+	if got := db.tables["t3"].RootPageID(); got != 3 {
+		t.Fatalf("t3 rootPageID = %d, want 3", got)
+	}
+}
+
+func TestCreateTableFailsOnMalformedFreePageLinkage(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE t1 (id INT)"); err != nil {
+		t.Fatalf("Exec(create t1) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	page, err := pager.Get(2)
+	if err != nil {
+		t.Fatalf("pager.Get(2) error = %v", err)
+	}
+	clear(page.Data())
+	copy(page.Data(), []byte("not-a-free-page"))
+	pager.MarkDirty(page)
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+	if err := storage.WriteDirectoryFreeListHead(rawDB.File(), 2); err != nil {
+		t.Fatalf("WriteDirectoryFreeListHead() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE t2 (id INT)"); err == nil {
+		t.Fatal("Exec(create t2) error = nil, want malformed free page failure")
+	}
+}
+
 func TestOpenFailsOnJournalPageSizeMismatch(t *testing.T) {
 	path := testDBPath(t)
 
@@ -628,5 +828,20 @@ func TestOpenFailsOnTruncatedWALFrameDuringReplay(t *testing.T) {
 	if err == nil {
 		_ = db.Close()
 		t.Fatal("Open() error = nil, want truncated WAL replay failure")
+	}
+}
+
+func seedFreePageForTest(t *testing.T, pager *storage.Pager, pageID storage.PageID, next storage.PageID) {
+	t.Helper()
+
+	page, err := pager.Get(pageID)
+	if err != nil {
+		t.Fatalf("pager.Get(%d) error = %v", pageID, err)
+	}
+	clear(page.Data())
+	copy(page.Data(), storage.InitFreePage(uint32(pageID), uint32(next)))
+	pager.MarkDirty(page)
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
 	}
 }

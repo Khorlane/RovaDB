@@ -70,6 +70,7 @@ type DB struct {
 
 	pendingPages []stagedPage
 	nextWALLSN   uint64
+	freeListHead uint32
 }
 
 type stagedPage struct {
@@ -95,6 +96,11 @@ func Open(path string) (*DB, error) {
 		return nil, wrapStorageError(err)
 	}
 	if err := storage.EnsureDirectoryPage(file.File()); err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
+	freeListHead, err := storage.ReadDirectoryFreeListHead(file.File())
+	if err != nil {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
@@ -157,13 +163,14 @@ func Open(path string) (*DB, error) {
 	}
 
 	return &DB{
-		path:       path,
-		file:       file,
-		pager:      pager,
-		pool:       pool,
-		tables:     tables,
-		txn:        nil,
-		nextWALLSN: nextWALLSN,
+		path:         path,
+		file:         file,
+		pager:        pager,
+		pool:         pool,
+		tables:       tables,
+		txn:          nil,
+		nextWALLSN:   nextWALLSN,
+		freeListHead: freeListHead,
 	}, nil
 }
 
@@ -908,10 +915,13 @@ func (db *DB) applyStagedCreate(stagedTables map[string]*executor.Table, tableNa
 		return nil
 	}
 
-	rootPageID := db.pager.NextPageID()
+	rootPageID, isNew, err := db.allocatePageID()
+	if err != nil {
+		return err
+	}
 	table.SetStorageMeta(rootPageID, 0)
 
-	catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
+	catalogData, err := db.buildCatalogPageData(stagedTables)
 	if err != nil {
 		return wrapStorageError(err)
 	}
@@ -923,7 +933,7 @@ func (db *DB) applyStagedCreate(stagedTables map[string]*executor.Table, tableNa
 	if err := db.stageDirtyState(catalogData, []stagedPage{{
 		id:    rootPageID,
 		data:  rootPageData,
-		isNew: true,
+		isNew: isNew,
 	}}); err != nil {
 		return err
 	}
@@ -972,7 +982,7 @@ func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, t
 	}
 	pages = append(pages, indexPages...)
 
-	catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
+	catalogData, err := db.buildCatalogPageData(stagedTables)
 	if err != nil {
 		return wrapStorageError(err)
 	}
@@ -1013,7 +1023,7 @@ func (db *DB) applyStagedInsert(stagedTables map[string]*executor.Table, tableNa
 	}
 	pages = append(pages, indexPages...)
 
-	catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
+	catalogData, err := db.buildCatalogPageData(stagedTables)
 	if err != nil {
 		return wrapStorageError(err)
 	}
@@ -1028,7 +1038,7 @@ func (db *DB) applyStagedCatalogOnly(stagedTables map[string]*executor.Table) er
 	// Schema metadata changes such as ALTER TABLE ... ADD COLUMN are catalog-only
 	// here. Existing stored rows are not rewritten; older rows are padded in
 	// memory when materialized against the wider schema.
-	catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
+	catalogData, err := db.buildCatalogPageData(stagedTables)
 	if err != nil {
 		return wrapStorageError(err)
 	}
@@ -1051,7 +1061,10 @@ func (db *DB) applyStagedIndexCreate(stagedTables map[string]*executor.Table, ta
 
 	var pages []stagedPage
 	if indexDef.RootPageID == 0 {
-		rootPageID := db.pager.NextPageID()
+		rootPageID, isNew, err := db.allocatePageID()
+		if err != nil {
+			return err
+		}
 		indexDef.RootPageID = uint32(rootPageID)
 		if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok {
 			if index := table.Indexes[columnName]; index != nil {
@@ -1061,11 +1074,11 @@ func (db *DB) applyStagedIndexCreate(stagedTables map[string]*executor.Table, ta
 		pages = append(pages, stagedPage{
 			id:    rootPageID,
 			data:  storage.InitIndexLeafPage(uint32(rootPageID)),
-			isNew: true,
+			isNew: isNew,
 		})
 	}
 
-	catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
+	catalogData, err := db.buildCatalogPageData(stagedTables)
 	if err != nil {
 		return wrapStorageError(err)
 	}
@@ -1094,6 +1107,57 @@ func (db *DB) stageDirtyState(catalogData []byte, pages []stagedPage) error {
 		return err
 	}
 	return nil
+}
+
+func (db *DB) buildCatalogPageData(stagedTables map[string]*executor.Table) ([]byte, error) {
+	if db == nil {
+		return nil, ErrInvalidArgument
+	}
+	return storage.BuildCatalogPageDataWithFreeListHead(catalogFromTables(stagedTables), db.freeListHead)
+}
+
+func (db *DB) setFreeListHead(head uint32) error {
+	if db == nil {
+		return ErrInvalidArgument
+	}
+	db.freeListHead = head
+	return nil
+}
+
+func (db *DB) allocatePageID() (storage.PageID, bool, error) {
+	if db == nil || db.pager == nil {
+		return 0, false, ErrInvalidArgument
+	}
+	nextFreshID := db.pager.NextPageID()
+	return db.allocatePageIDFrom(&nextFreshID)
+}
+
+func (db *DB) allocatePageIDFrom(nextFreshID *storage.PageID) (storage.PageID, bool, error) {
+	if db == nil || db.pager == nil || nextFreshID == nil {
+		return 0, false, ErrInvalidArgument
+	}
+	allocator := storage.PageAllocator{
+		NextPageID: uint32(*nextFreshID),
+		FreePage: storage.FreePageState{
+			HeadPageID: db.freeListHead,
+		},
+		ReadFreeNext: func(pageID uint32) (uint32, error) {
+			pageData, err := db.pager.ReadPage(storage.PageID(pageID))
+			if err != nil {
+				return 0, err
+			}
+			return storage.FreePageNext(pageData)
+		},
+	}
+	allocated, reused, err := allocator.Allocate()
+	if err != nil {
+		return 0, false, wrapStorageError(err)
+	}
+	if err := db.setFreeListHead(allocator.FreePage.HeadPageID); err != nil {
+		return 0, false, err
+	}
+	*nextFreshID = storage.PageID(allocator.NextPageID)
+	return storage.PageID(allocated), !reused, nil
 }
 
 func (db *DB) finalCommittedPageImages() []stagedPage {
@@ -1368,16 +1432,18 @@ func cloneIndexDefs(indexDefs []storage.CatalogIndex) []storage.CatalogIndex {
 }
 
 type indexPageStager struct {
-	pages    map[storage.PageID]stagedPage
-	order    []storage.PageID
-	nextPage storage.PageID
+	pages       map[storage.PageID]stagedPage
+	order       []storage.PageID
+	allocate    func() (storage.PageID, bool, error)
+	nextFreshID storage.PageID
 }
 
-func newIndexPageStager(nextPage storage.PageID) *indexPageStager {
+func newIndexPageStager(nextPage storage.PageID, allocate func() (storage.PageID, bool, error)) *indexPageStager {
 	return &indexPageStager{
-		pages:    make(map[storage.PageID]stagedPage),
-		order:    nil,
-		nextPage: nextPage,
+		pages:       make(map[storage.PageID]stagedPage),
+		order:       nil,
+		allocate:    allocate,
+		nextFreshID: nextPage,
 	}
 }
 
@@ -1391,13 +1457,16 @@ func (s *indexPageStager) stage(page stagedPage) {
 	s.pages[page.id] = page
 }
 
-func (s *indexPageStager) allocatePageID() storage.PageID {
+func (s *indexPageStager) allocatePageID() (storage.PageID, bool, error) {
 	if s == nil {
-		return 0
+		return 0, false, nil
 	}
-	pageID := s.nextPage
-	s.nextPage++
-	return pageID
+	if s.allocate == nil {
+		pageID := s.nextFreshID
+		s.nextFreshID++
+		return pageID, true, nil
+	}
+	return s.allocate()
 }
 
 func (s *indexPageStager) finalizedPages() []stagedPage {
@@ -1416,7 +1485,10 @@ func (db *DB) buildInsertedIndexPages(table *executor.Table, row []parser.Value,
 		return nil, nil
 	}
 
-	stager := newIndexPageStager(db.pager.NextPageID())
+	nextFreshID := db.pager.NextPageID()
+	stager := newIndexPageStager(nextFreshID, func() (storage.PageID, bool, error) {
+		return db.allocatePageIDFrom(&nextFreshID)
+	})
 	for i := range table.IndexDefs {
 		indexDef := &table.IndexDefs[i]
 		if indexDef.RootPageID == 0 {
@@ -1442,7 +1514,10 @@ func (db *DB) buildRebuiltIndexPages(table *executor.Table, rows [][]parser.Valu
 		return nil, newStorageError("row locator mismatch")
 	}
 
-	stager := newIndexPageStager(db.pager.NextPageID())
+	nextFreshID := db.pager.NextPageID()
+	stager := newIndexPageStager(nextFreshID, func() (storage.PageID, bool, error) {
+		return db.allocatePageIDFrom(&nextFreshID)
+	})
 	for i := range table.IndexDefs {
 		indexDef := &table.IndexDefs[i]
 		if indexDef.RootPageID == 0 {
@@ -1537,7 +1612,10 @@ func (db *DB) insertIndexRecord(table *executor.Table, indexDef *storage.Catalog
 	if err != nil {
 		return wrapStorageError(err)
 	}
-	rightPageID := stager.allocatePageID()
+	rightPageID, rightIsNew, err := stager.allocatePageID()
+	if err != nil {
+		return err
+	}
 	leftPageData, err = storage.BuildIndexLeafPageData(uint32(leafPageID), leftRecords, uint32(rightPageID))
 	if err != nil {
 		return wrapStorageError(err)
@@ -1547,7 +1625,7 @@ func (db *DB) insertIndexRecord(table *executor.Table, indexDef *storage.Catalog
 		return wrapStorageError(err)
 	}
 	stager.stage(stagedPage{id: leafPageID, data: leftPageData})
-	stager.stage(stagedPage{id: rightPageID, data: rightPageData, isNew: true})
+	stager.stage(stagedPage{id: rightPageID, data: rightPageData, isNew: rightIsNew})
 
 	return db.propagateIndexSplit(table, indexDef, path, leafPageID, rightPageID, separatorKey, stager)
 }
@@ -1595,7 +1673,10 @@ func (db *DB) propagateIndexSplit(table *executor.Table, indexDef *storage.Catal
 		if err != nil {
 			return wrapStorageError(err)
 		}
-		newRightPageID := stager.allocatePageID()
+		newRightPageID, newRightIsNew, err := stager.allocatePageID()
+		if err != nil {
+			return err
+		}
 		leftPageData, err := storage.BuildIndexInternalPageData(uint32(parent.pageID), leftRecords)
 		if err != nil {
 			return wrapStorageError(err)
@@ -1605,14 +1686,17 @@ func (db *DB) propagateIndexSplit(table *executor.Table, indexDef *storage.Catal
 			return wrapStorageError(err)
 		}
 		stager.stage(stagedPage{id: parent.pageID, data: leftPageData})
-		stager.stage(stagedPage{id: newRightPageID, data: rightPageData, isNew: true})
+		stager.stage(stagedPage{id: newRightPageID, data: rightPageData, isNew: newRightIsNew})
 
 		leftPageID = parent.pageID
 		rightPageID = newRightPageID
 		separatorKey = nextSeparatorKey
 	}
 
-	newRootPageID := stager.allocatePageID()
+	newRootPageID, newRootIsNew, err := stager.allocatePageID()
+	if err != nil {
+		return err
+	}
 	newRootRecords := []storage.IndexInternalRecord{
 		{Key: append([]byte(nil), separatorKey...), ChildPageID: uint32(leftPageID)},
 		{Key: append([]byte(nil), separatorKey...), ChildPageID: uint32(rightPageID)},
@@ -1621,7 +1705,7 @@ func (db *DB) propagateIndexSplit(table *executor.Table, indexDef *storage.Catal
 	if err != nil {
 		return wrapStorageError(err)
 	}
-	stager.stage(stagedPage{id: newRootPageID, data: newRootPageData, isNew: true})
+	stager.stage(stagedPage{id: newRootPageID, data: newRootPageData, isNew: newRootIsNew})
 	indexDef.RootPageID = uint32(newRootPageID)
 	if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok {
 		if index := table.Indexes[columnName]; index != nil {

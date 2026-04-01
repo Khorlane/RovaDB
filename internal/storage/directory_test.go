@@ -138,3 +138,58 @@ func TestEnsureDirectoryPageUpgradesLegacyCatalogPage(t *testing.T) {
 		t.Fatalf("catalog = %#v, want upgraded users table metadata", catalog)
 	}
 }
+
+func TestDirectoryFreeListHeadRoundTripDurably(t *testing.T) {
+	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "directory-head.db"))
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
+		t.Fatalf("EnsureDirectoryPage() error = %v", err)
+	}
+	if err := WriteDirectoryFreeListHead(dbFile.File(), 19); err != nil {
+		t.Fatalf("WriteDirectoryFreeListHead() error = %v", err)
+	}
+
+	got, err := ReadDirectoryFreeListHead(dbFile.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryFreeListHead() error = %v", err)
+	}
+	if got != 19 {
+		t.Fatalf("ReadDirectoryFreeListHead() = %d, want 19", got)
+	}
+}
+
+func TestDirectoryFreeListHeadPersistsAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "directory-reopen.db")
+
+	dbFile, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
+		t.Fatalf("EnsureDirectoryPage() error = %v", err)
+	}
+	if err := WriteDirectoryFreeListHead(dbFile.File(), 23); err != nil {
+		t.Fatalf("WriteDirectoryFreeListHead() error = %v", err)
+	}
+	if err := dbFile.Close(); err != nil {
+		t.Fatalf("dbFile.Close() error = %v", err)
+	}
+
+	dbFile, err = OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("reopen OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	got, err := ReadDirectoryFreeListHead(dbFile.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryFreeListHead() error = %v", err)
+	}
+	if got != 23 {
+		t.Fatalf("ReadDirectoryFreeListHead() = %d, want 23", got)
+	}
+}

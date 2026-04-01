@@ -87,8 +87,7 @@ func EnsureDirectoryPage(file *os.File) error {
 		return errCorruptedDirectoryPage
 	}
 
-	page := make([]byte, PageSize)
-	n, err := file.ReadAt(page, pageOffset(DirectoryControlPageID))
+	page, n, err := readDirectoryPage(file)
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return err
 	}
@@ -108,6 +107,47 @@ func EnsureDirectoryPage(file *os.File) error {
 		return err
 	}
 	return writeDirectoryPage(file, upgraded)
+}
+
+// ReadDirectoryPage reads and validates the durable directory page.
+func ReadDirectoryPage(file *os.File) ([]byte, error) {
+	page, _, err := readDirectoryPage(file)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, err
+	}
+	if err := ValidateDirectoryPage(page); err != nil {
+		return nil, err
+	}
+	return page, nil
+}
+
+// WriteDirectoryPage rewrites the durable directory page in place.
+func WriteDirectoryPage(file *os.File, page []byte) error {
+	if err := ValidateDirectoryPage(page); err != nil {
+		return err
+	}
+	return writeDirectoryPage(file, page)
+}
+
+// ReadDirectoryFreeListHead reads the durable free-list head from the directory page.
+func ReadDirectoryFreeListHead(file *os.File) (uint32, error) {
+	page, err := ReadDirectoryPage(file)
+	if err != nil {
+		return 0, err
+	}
+	return DirectoryFreeListHead(page)
+}
+
+// WriteDirectoryFreeListHead persists the durable free-list head in the directory page.
+func WriteDirectoryFreeListHead(file *os.File, head uint32) error {
+	page, err := ReadDirectoryPage(file)
+	if err != nil {
+		return err
+	}
+	if err := SetDirectoryFreeListHead(page, head); err != nil {
+		return err
+	}
+	return WriteDirectoryPage(file, page)
 }
 
 func buildDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, freeListHead uint32) ([]byte, error) {
@@ -132,4 +172,10 @@ func writeDirectoryPage(file *os.File, page []byte) error {
 		return err
 	}
 	return file.Sync()
+}
+
+func readDirectoryPage(file *os.File) ([]byte, int, error) {
+	page := make([]byte, PageSize)
+	n, err := file.ReadAt(page, pageOffset(DirectoryControlPageID))
+	return page, n, err
 }

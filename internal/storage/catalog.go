@@ -172,12 +172,18 @@ func loadCatalogPayload(pageData []byte) (*CatalogData, error) {
 
 // SaveCatalog encodes the catalog into page 0.
 func SaveCatalog(pager *Pager, cat *CatalogData) error {
-	buf, err := BuildCatalogPageData(cat)
+	page, err := pager.Get(catalogPageID)
 	if err != nil {
 		return err
 	}
-
-	page, err := pager.Get(catalogPageID)
+	freeListHead := uint32(0)
+	if ValidateDirectoryPage(page.Data()) == nil {
+		freeListHead, err = DirectoryFreeListHead(page.Data())
+		if err != nil {
+			return err
+		}
+	}
+	buf, err := BuildCatalogPageDataWithFreeListHead(cat, freeListHead)
 	if err != nil {
 		return err
 	}
@@ -191,6 +197,11 @@ func SaveCatalog(pager *Pager, cat *CatalogData) error {
 
 // BuildCatalogPageData encodes the catalog into a full catalog page image.
 func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
+	return BuildCatalogPageDataWithFreeListHead(cat, 0)
+}
+
+// BuildCatalogPageDataWithFreeListHead encodes the catalog into the directory-wrapped page 0 image.
+func BuildCatalogPageDataWithFreeListHead(cat *CatalogData, freeListHead uint32) ([]byte, error) {
 	if cat == nil {
 		cat = &CatalogData{}
 	}
@@ -235,7 +246,7 @@ func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
 		}
 	}
 
-	return buildDirectoryCatalogPage(buf, version, 0)
+	return buildDirectoryCatalogPage(buf, version, freeListHead)
 }
 
 func isZeroPage(data []byte) bool {
