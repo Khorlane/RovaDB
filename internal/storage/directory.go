@@ -18,6 +18,7 @@ const (
 	directoryBodyOffsetRootMapCount  = directoryPageHeaderSize + 8
 	directoryBodyOffsetRootMapBytes  = directoryPageHeaderSize + 12
 	directoryCatalogOffset           = directoryPageHeaderSize + 16
+	directoryCheckpointMetadataSize  = 16
 )
 
 const (
@@ -31,6 +32,13 @@ type DirectoryRootMapping struct {
 	TableName  string
 	IndexName  string
 	RootPageID uint32
+}
+
+// DirectoryCheckpointMetadata is the durable checkpoint control state.
+type DirectoryCheckpointMetadata struct {
+	LastCheckpointLSN       uint64
+	LastCheckpointPageCount uint32
+	ReservedCheckpoint      uint32
 }
 
 // InitDirectoryPage initializes the durable directory/control page.
@@ -167,6 +175,44 @@ func WriteDirectoryFreeListHead(file *os.File, head uint32) error {
 	return WriteDirectoryPage(file, page)
 }
 
+// DirectoryLastCheckpointLSN returns the durable last checkpoint LSN.
+func DirectoryLastCheckpointLSN(page []byte) (uint64, error) {
+	meta, err := directoryCheckpointMetadata(page)
+	if err != nil {
+		return 0, err
+	}
+	return meta.LastCheckpointLSN, nil
+}
+
+// SetDirectoryLastCheckpointLSN updates the durable last checkpoint LSN.
+func SetDirectoryLastCheckpointLSN(page []byte, lsn uint64) error {
+	meta, err := directoryCheckpointMetadata(page)
+	if err != nil {
+		return err
+	}
+	meta.LastCheckpointLSN = lsn
+	return rewriteDirectoryCheckpointMetadata(page, meta)
+}
+
+// DirectoryLastCheckpointPageCount returns the durable last checkpoint page count.
+func DirectoryLastCheckpointPageCount(page []byte) (uint32, error) {
+	meta, err := directoryCheckpointMetadata(page)
+	if err != nil {
+		return 0, err
+	}
+	return meta.LastCheckpointPageCount, nil
+}
+
+// SetDirectoryLastCheckpointPageCount updates the durable last checkpoint page count.
+func SetDirectoryLastCheckpointPageCount(page []byte, n uint32) error {
+	meta, err := directoryCheckpointMetadata(page)
+	if err != nil {
+		return err
+	}
+	meta.LastCheckpointPageCount = n
+	return rewriteDirectoryCheckpointMetadata(page, meta)
+}
+
 // ReadDirectoryRootMappings reads the durable root mappings from the directory page.
 func ReadDirectoryRootMappings(file *os.File) ([]DirectoryRootMapping, error) {
 	page, err := ReadDirectoryPage(file)
@@ -174,6 +220,15 @@ func ReadDirectoryRootMappings(file *os.File) ([]DirectoryRootMapping, error) {
 		return nil, err
 	}
 	return directoryRootMappings(page)
+}
+
+// ReadDirectoryCheckpointMetadata reads the durable checkpoint metadata from the directory page.
+func ReadDirectoryCheckpointMetadata(file *os.File) (DirectoryCheckpointMetadata, error) {
+	page, err := ReadDirectoryPage(file)
+	if err != nil {
+		return DirectoryCheckpointMetadata{}, err
+	}
+	return directoryCheckpointMetadata(page)
 }
 
 // WriteDirectoryRootMappings rewrites the durable root mappings while preserving other directory state.
@@ -190,7 +245,11 @@ func WriteDirectoryRootMappings(file *os.File, mappings []DirectoryRootMapping) 
 	if err != nil {
 		return err
 	}
-	rebuilt, err := buildDirectoryCatalogPage(catalogPayload, version, freeListHead, mappings)
+	checkpointMeta, err := directoryCheckpointMetadata(page)
+	if err != nil {
+		return err
+	}
+	rebuilt, err := buildDirectoryCatalogPage(catalogPayload, version, freeListHead, mappings, checkpointMeta)
 	if err != nil {
 		return err
 	}
@@ -304,12 +363,12 @@ func ApplyDirectoryRootMappings(cat *CatalogData, mappings []DirectoryRootMappin
 	return applied, nil
 }
 
-func buildDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, freeListHead uint32, mappings []DirectoryRootMapping) ([]byte, error) {
+func buildDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, freeListHead uint32, mappings []DirectoryRootMapping, checkpointMeta DirectoryCheckpointMetadata) ([]byte, error) {
 	rootMapPayload, err := encodeDirectoryRootMappings(mappings)
 	if err != nil {
 		return nil, err
 	}
-	if len(catalogPayload)+len(rootMapPayload) > PageSize-directoryCatalogOffset {
+	if len(catalogPayload)+len(rootMapPayload)+directoryCheckpointMetadataSize > PageSize-directoryCatalogOffset {
 		return nil, errCatalogTooLarge
 	}
 	page := InitDirectoryPage(uint32(DirectoryControlPageID), formatVersion)
@@ -317,7 +376,12 @@ func buildDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, free
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetRootMapCount:directoryBodyOffsetRootMapCount+4], uint32(len(mappings)))
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetRootMapBytes:directoryBodyOffsetRootMapBytes+4], uint32(len(rootMapPayload)))
 	copy(page[directoryCatalogOffset:], rootMapPayload)
-	copy(page[directoryCatalogOffset+len(rootMapPayload):], catalogPayload)
+	catalogStart := directoryCatalogOffset + len(rootMapPayload)
+	copy(page[catalogStart:], catalogPayload)
+	checkpointOffset := catalogStart + len(catalogPayload)
+	binary.LittleEndian.PutUint64(page[checkpointOffset:checkpointOffset+8], checkpointMeta.LastCheckpointLSN)
+	binary.LittleEndian.PutUint32(page[checkpointOffset+8:checkpointOffset+12], checkpointMeta.LastCheckpointPageCount)
+	binary.LittleEndian.PutUint32(page[checkpointOffset+12:checkpointOffset+16], checkpointMeta.ReservedCheckpoint)
 	return page, nil
 }
 
@@ -436,4 +500,49 @@ func encodeDirectoryRootMappings(mappings []DirectoryRootMapping) ([]byte, error
 		buf = appendUint32(buf, mapping.RootPageID)
 	}
 	return buf, nil
+}
+
+func directoryCheckpointMetadata(page []byte) (DirectoryCheckpointMetadata, error) {
+	if err := ValidateDirectoryPage(page); err != nil {
+		return DirectoryCheckpointMetadata{}, err
+	}
+	offset, err := directoryCheckpointOffset(page)
+	if err != nil {
+		return DirectoryCheckpointMetadata{}, err
+	}
+	if offset < 0 || PageSize-offset < directoryCheckpointMetadataSize {
+		return DirectoryCheckpointMetadata{}, nil
+	}
+	return DirectoryCheckpointMetadata{
+		LastCheckpointLSN:       binary.LittleEndian.Uint64(page[offset : offset+8]),
+		LastCheckpointPageCount: binary.LittleEndian.Uint32(page[offset+8 : offset+12]),
+		ReservedCheckpoint:      binary.LittleEndian.Uint32(page[offset+12 : offset+16]),
+	}, nil
+}
+
+func rewriteDirectoryCheckpointMetadata(page []byte, meta DirectoryCheckpointMetadata) error {
+	if err := ValidateDirectoryPage(page); err != nil {
+		return err
+	}
+	offset, err := directoryCheckpointOffset(page)
+	if err != nil {
+		return err
+	}
+	if offset < 0 || PageSize-offset < directoryCheckpointMetadataSize {
+		return errCatalogTooLarge
+	}
+	binary.LittleEndian.PutUint64(page[offset:offset+8], meta.LastCheckpointLSN)
+	binary.LittleEndian.PutUint32(page[offset+8:offset+12], meta.LastCheckpointPageCount)
+	binary.LittleEndian.PutUint32(page[offset+12:offset+16], meta.ReservedCheckpoint)
+	return nil
+}
+
+func directoryCheckpointOffset(page []byte) (int, error) {
+	rootMapBytes := binary.LittleEndian.Uint32(page[directoryBodyOffsetRootMapBytes : directoryBodyOffsetRootMapBytes+4])
+	start := directoryCatalogOffset + int(rootMapBytes)
+	length, _, err := decodeCatalogPayload(page[start:])
+	if err != nil {
+		return 0, err
+	}
+	return start + length, nil
 }

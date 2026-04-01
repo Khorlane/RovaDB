@@ -1226,6 +1226,52 @@ func TestSuccessfulRollbackLeavesNoTxnAndNoTracking(t *testing.T) {
 	}
 }
 
+func TestSuccessfulCommitPersistsDirectoryCheckpointMetadata(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if db.lastCheckpointLSN == 0 {
+		t.Fatal("db.lastCheckpointLSN = 0, want non-zero after checkpointed commit")
+	}
+	if db.lastCheckpointPageCount != 2 {
+		t.Fatalf("db.lastCheckpointPageCount = %d, want 2", db.lastCheckpointPageCount)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, _ := openRawStorage(t, path)
+	meta, err := storage.ReadDirectoryCheckpointMetadata(rawDB.File())
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("ReadDirectoryCheckpointMetadata() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+	if meta.LastCheckpointLSN == 0 {
+		t.Fatal("meta.LastCheckpointLSN = 0, want non-zero")
+	}
+	if meta.LastCheckpointPageCount != 2 {
+		t.Fatalf("meta.LastCheckpointPageCount = %d, want 2", meta.LastCheckpointPageCount)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+	if db.lastCheckpointLSN != meta.LastCheckpointLSN {
+		t.Fatalf("reopened db.lastCheckpointLSN = %d, want %d", db.lastCheckpointLSN, meta.LastCheckpointLSN)
+	}
+	if db.lastCheckpointPageCount != meta.LastCheckpointPageCount {
+		t.Fatalf("reopened db.lastCheckpointPageCount = %d, want %d", db.lastCheckpointPageCount, meta.LastCheckpointPageCount)
+	}
+}
+
 func TestBoolRollbackCloseReopenKeepsCommittedState(t *testing.T) {
 	path := testDBPath(t)
 

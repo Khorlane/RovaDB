@@ -71,6 +71,9 @@ type DB struct {
 	pendingPages []stagedPage
 	nextWALLSN   uint64
 	freeListHead uint32
+
+	lastCheckpointLSN       uint64
+	lastCheckpointPageCount uint32
 }
 
 type stagedPage struct {
@@ -113,6 +116,11 @@ func Open(path string) (*DB, error) {
 		return nil, wrapStorageError(err)
 	}
 	rootMappings, err := storage.ReadDirectoryRootMappings(file.File())
+	if err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
+	checkpointMeta, err := storage.ReadDirectoryCheckpointMetadata(file.File())
 	if err != nil {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
@@ -174,14 +182,16 @@ func Open(path string) (*DB, error) {
 	}
 
 	return &DB{
-		path:         path,
-		file:         file,
-		pager:        pager,
-		pool:         pool,
-		tables:       tables,
-		txn:          nil,
-		nextWALLSN:   nextWALLSN,
-		freeListHead: freeListHead,
+		path:                    path,
+		file:                    file,
+		pager:                   pager,
+		pool:                    pool,
+		tables:                  tables,
+		txn:                     nil,
+		nextWALLSN:              nextWALLSN,
+		freeListHead:            freeListHead,
+		lastCheckpointLSN:       checkpointMeta.LastCheckpointLSN,
+		lastCheckpointPageCount: checkpointMeta.LastCheckpointPageCount,
 	}, nil
 }
 
@@ -842,8 +852,12 @@ func (db *DB) commitTxn() error {
 		return newExecError("invalid transaction state")
 	}
 	durable := false
+	var commitLSN uint64
+	var checkpointPageCount uint32
 	if db.txn.IsDirty() {
-		if err := db.appendPendingPagesToWAL(); err != nil {
+		var err error
+		commitLSN, checkpointPageCount, err = db.appendPendingPagesToWAL()
+		if err != nil {
 			return err
 		}
 		durable = true
@@ -859,6 +873,11 @@ func (db *DB) commitTxn() error {
 	}
 	var checkpointErr error
 	if durable {
+		if err := db.updatePendingCheckpointMetadata(commitLSN, checkpointPageCount); err != nil {
+			checkpointErr = err
+		}
+	}
+	if durable && checkpointErr == nil {
 		checkpointErr = db.checkpointCommittedPages()
 		if checkpointErr == nil {
 			if err := resetWAL(db.path, storage.DBFormatVersion()); err != nil {
@@ -1174,7 +1193,10 @@ func (db *DB) buildCatalogPageData(stagedTables map[string]*executor.Table) ([]b
 	if db == nil {
 		return nil, ErrInvalidArgument
 	}
-	return storage.BuildCatalogPageDataWithFreeListHead(catalogFromTables(stagedTables), db.freeListHead)
+	return storage.BuildCatalogPageDataWithDirectoryState(catalogFromTables(stagedTables), db.freeListHead, storage.DirectoryCheckpointMetadata{
+		LastCheckpointLSN:       db.lastCheckpointLSN,
+		LastCheckpointPageCount: db.lastCheckpointPageCount,
+	})
 }
 
 func (db *DB) setFreeListHead(head uint32) error {
@@ -1214,6 +1236,44 @@ func (db *DB) buildFreedPages(pageIDs ...storage.PageID) ([]stagedPage, error) {
 		}
 	}
 	return pages, nil
+}
+
+func (db *DB) updatePendingCheckpointMetadata(commitLSN uint64, pageCount uint32) error {
+	if db == nil {
+		return ErrInvalidArgument
+	}
+	if commitLSN == 0 {
+		return nil
+	}
+
+	pageData := append([]byte(nil), db.pendingPageData(0)...)
+	if len(pageData) == 0 {
+		return nil
+	}
+	if err := storage.SetDirectoryLastCheckpointLSN(pageData, commitLSN); err != nil {
+		return wrapStorageError(err)
+	}
+	if err := storage.SetDirectoryLastCheckpointPageCount(pageData, pageCount); err != nil {
+		return wrapStorageError(err)
+	}
+	if err := db.updatePendingPageImage(0, pageData); err != nil {
+		return err
+	}
+	db.lastCheckpointLSN = commitLSN
+	db.lastCheckpointPageCount = pageCount
+	return nil
+}
+
+func (db *DB) pendingPageData(pageID storage.PageID) []byte {
+	if db == nil {
+		return nil
+	}
+	for _, staged := range db.pendingPages {
+		if staged.id == pageID {
+			return staged.data
+		}
+	}
+	return nil
 }
 
 func (db *DB) allocatePageID() (storage.PageID, bool, error) {
@@ -1291,9 +1351,9 @@ func (db *DB) nextWALRecordLSN() uint64 {
 	return lsn
 }
 
-func (db *DB) appendPendingPagesToWAL() error {
+func (db *DB) appendPendingPagesToWAL() (uint64, uint32, error) {
 	if db == nil {
-		return ErrInvalidArgument
+		return 0, 0, ErrInvalidArgument
 	}
 
 	finalPages := db.finalCommittedPageImages()
@@ -1302,14 +1362,14 @@ func (db *DB) appendPendingPagesToWAL() error {
 		pageData := append([]byte(nil), staged.data...)
 		if staged.id != 0 {
 			if err := storage.SetPageLSN(pageData, frameLSN); err != nil {
-				return wrapStorageError(err)
+				return 0, 0, wrapStorageError(err)
 			}
 			if err := storage.RecomputePageChecksum(pageData); err != nil {
-				return wrapStorageError(err)
+				return 0, 0, wrapStorageError(err)
 			}
 		}
 		if err := db.updatePendingPageImage(staged.id, pageData); err != nil {
-			return err
+			return 0, 0, err
 		}
 
 		var frame storage.WALFrame
@@ -1318,18 +1378,18 @@ func (db *DB) appendPendingPagesToWAL() error {
 		frame.PageLSN = frameLSN
 		copy(frame.PageData[:], pageData)
 		if err := appendWALFrameRecord(db.path, frame); err != nil {
-			return wrapStorageError(err)
+			return 0, 0, wrapStorageError(err)
 		}
 	}
 
 	commitLSN := db.nextWALRecordLSN()
 	if err := appendWALCommitRecord(db.path, storage.WALCommitRecord{CommitLSN: commitLSN}); err != nil {
-		return wrapStorageError(err)
+		return 0, 0, wrapStorageError(err)
 	}
 	if err := syncWAL(db.path); err != nil {
-		return wrapStorageError(err)
+		return 0, 0, wrapStorageError(err)
 	}
-	return nil
+	return commitLSN, uint32(len(finalPages)), nil
 }
 
 func (db *DB) updatePendingPageImage(pageID storage.PageID, pageData []byte) error {

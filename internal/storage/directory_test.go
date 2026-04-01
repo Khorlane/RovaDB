@@ -59,6 +59,132 @@ func TestDirectoryFreeListHeadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDirectoryCheckpointMetadataRoundTrip(t *testing.T) {
+	page, err := BuildCatalogPageData(&CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				RootPageID: 1,
+				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildCatalogPageData() error = %v", err)
+	}
+
+	if err := SetDirectoryLastCheckpointLSN(page, 41); err != nil {
+		t.Fatalf("SetDirectoryLastCheckpointLSN() error = %v", err)
+	}
+	if err := SetDirectoryLastCheckpointPageCount(page, 7); err != nil {
+		t.Fatalf("SetDirectoryLastCheckpointPageCount() error = %v", err)
+	}
+
+	lsn, err := DirectoryLastCheckpointLSN(page)
+	if err != nil {
+		t.Fatalf("DirectoryLastCheckpointLSN() error = %v", err)
+	}
+	if lsn != 41 {
+		t.Fatalf("DirectoryLastCheckpointLSN() = %d, want 41", lsn)
+	}
+	pageCount, err := DirectoryLastCheckpointPageCount(page)
+	if err != nil {
+		t.Fatalf("DirectoryLastCheckpointPageCount() error = %v", err)
+	}
+	if pageCount != 7 {
+		t.Fatalf("DirectoryLastCheckpointPageCount() = %d, want 7", pageCount)
+	}
+}
+
+func TestOlderWrappedDirectoryPayloadDefaultsCheckpointMetadataToZero(t *testing.T) {
+	catalogPayload := buildCatalogPageDataV1(&CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				RootPageID: 1,
+				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
+			},
+		},
+	})
+	page := InitDirectoryPage(uint32(DirectoryControlPageID), version)
+	copy(page[directoryCatalogOffset:], catalogPayload)
+
+	lsn, err := DirectoryLastCheckpointLSN(page)
+	if err != nil {
+		t.Fatalf("DirectoryLastCheckpointLSN() error = %v", err)
+	}
+	if lsn != 0 {
+		t.Fatalf("DirectoryLastCheckpointLSN() = %d, want 0", lsn)
+	}
+	pageCount, err := DirectoryLastCheckpointPageCount(page)
+	if err != nil {
+		t.Fatalf("DirectoryLastCheckpointPageCount() error = %v", err)
+	}
+	if pageCount != 0 {
+		t.Fatalf("DirectoryLastCheckpointPageCount() = %d, want 0", pageCount)
+	}
+}
+
+func TestReadDirectoryCheckpointMetadataPersistsAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "directory-checkpoint.db")
+
+	dbFile, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
+		t.Fatalf("EnsureDirectoryPage() error = %v", err)
+	}
+	pager, err := NewPager(dbFile.File())
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+	if err := SaveCatalog(pager, &CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				RootPageID: 1,
+				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SaveCatalog() error = %v", err)
+	}
+	if err := pager.FlushDirty(); err != nil {
+		t.Fatalf("pager.FlushDirty() error = %v", err)
+	}
+	page, err := ReadDirectoryPage(dbFile.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryPage() error = %v", err)
+	}
+	if err := SetDirectoryLastCheckpointLSN(page, 99); err != nil {
+		t.Fatalf("SetDirectoryLastCheckpointLSN() error = %v", err)
+	}
+	if err := SetDirectoryLastCheckpointPageCount(page, 3); err != nil {
+		t.Fatalf("SetDirectoryLastCheckpointPageCount() error = %v", err)
+	}
+	if err := WriteDirectoryPage(dbFile.File(), page); err != nil {
+		t.Fatalf("WriteDirectoryPage() error = %v", err)
+	}
+	if err := dbFile.Close(); err != nil {
+		t.Fatalf("dbFile.Close() error = %v", err)
+	}
+
+	dbFile, err = OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("reopen OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	meta, err := ReadDirectoryCheckpointMetadata(dbFile.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryCheckpointMetadata() error = %v", err)
+	}
+	if meta.LastCheckpointLSN != 99 || meta.LastCheckpointPageCount != 3 {
+		t.Fatalf("checkpoint metadata = %#v, want LSN=99 pageCount=3", meta)
+	}
+}
+
 func TestValidateDirectoryPageRejectsWrongPageType(t *testing.T) {
 	page := InitDirectoryPage(uint32(DirectoryControlPageID), version)
 	page[pageHeaderOffsetPageType] = byte(PageTypeTable)
@@ -210,7 +336,7 @@ func TestDirectoryRootMappingsRoundTrip(t *testing.T) {
 		},
 	}
 
-	page, err := buildDirectoryCatalogPage([]byte{1, 2, 3}, version, 19, mappings)
+	page, err := buildDirectoryCatalogPage([]byte{1, 2, 3}, version, 19, mappings, DirectoryCheckpointMetadata{})
 	if err != nil {
 		t.Fatalf("buildDirectoryCatalogPage() error = %v", err)
 	}
@@ -230,7 +356,7 @@ func TestDirectoryRootMappingsRoundTrip(t *testing.T) {
 }
 
 func TestReadDirectoryRootMappingsEmptyRoundTrip(t *testing.T) {
-	page, err := buildDirectoryCatalogPage([]byte{1, 2, 3}, version, 0, nil)
+	page, err := buildDirectoryCatalogPage([]byte{1, 2, 3}, version, 0, nil, DirectoryCheckpointMetadata{})
 	if err != nil {
 		t.Fatalf("buildDirectoryCatalogPage() error = %v", err)
 	}

@@ -182,13 +182,18 @@ func SaveCatalog(pager *Pager, cat *CatalogData) error {
 		return err
 	}
 	freeListHead := uint32(0)
+	checkpointMeta := DirectoryCheckpointMetadata{}
 	if ValidateDirectoryPage(page.Data()) == nil {
 		freeListHead, err = DirectoryFreeListHead(page.Data())
 		if err != nil {
 			return err
 		}
+		checkpointMeta, err = directoryCheckpointMetadata(page.Data())
+		if err != nil {
+			return err
+		}
 	}
-	buf, err := BuildCatalogPageDataWithFreeListHead(cat, freeListHead)
+	buf, err := BuildCatalogPageDataWithDirectoryState(cat, freeListHead, checkpointMeta)
 	if err != nil {
 		return err
 	}
@@ -202,11 +207,16 @@ func SaveCatalog(pager *Pager, cat *CatalogData) error {
 
 // BuildCatalogPageData encodes the catalog into a full catalog page image.
 func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
-	return BuildCatalogPageDataWithFreeListHead(cat, 0)
+	return BuildCatalogPageDataWithDirectoryState(cat, 0, DirectoryCheckpointMetadata{})
 }
 
 // BuildCatalogPageDataWithFreeListHead encodes the catalog into the directory-wrapped page 0 image.
 func BuildCatalogPageDataWithFreeListHead(cat *CatalogData, freeListHead uint32) ([]byte, error) {
+	return BuildCatalogPageDataWithDirectoryState(cat, freeListHead, DirectoryCheckpointMetadata{})
+}
+
+// BuildCatalogPageDataWithDirectoryState encodes the wrapped page 0 image with directory state.
+func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint32, checkpointMeta DirectoryCheckpointMetadata) ([]byte, error) {
 	if cat == nil {
 		cat = &CatalogData{}
 	}
@@ -216,7 +226,7 @@ func BuildCatalogPageDataWithFreeListHead(cat *CatalogData, freeListHead uint32)
 		return nil, err
 	}
 
-	maxCatalogPayloadSize := PageSize - directoryCatalogOffset - len(rootMapPayload)
+	maxCatalogPayloadSize := PageSize - directoryCatalogOffset - len(rootMapPayload) - directoryCheckpointMetadataSize
 	buf := make([]byte, 0, maxCatalogPayloadSize)
 	buf = appendUint32(buf, catalogVersion)
 	buf = appendUint32(buf, uint32(len(cat.Tables)))
@@ -256,7 +266,7 @@ func BuildCatalogPageDataWithFreeListHead(cat *CatalogData, freeListHead uint32)
 		}
 	}
 
-	return buildDirectoryCatalogPage(buf, version, freeListHead, rootMappings)
+	return buildDirectoryCatalogPage(buf, version, freeListHead, rootMappings, checkpointMeta)
 }
 
 func isZeroPage(data []byte) bool {
