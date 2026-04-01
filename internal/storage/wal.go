@@ -565,6 +565,10 @@ func validateWALPageImage(pageID uint32, pageLSN uint64, pageData []byte) error 
 		if err := validateIndexPage(pageData); err != nil {
 			return errCorruptedWALFrame
 		}
+	case PageTypeFreePage:
+		if err := validateFreePage(pageData); err != nil {
+			return errCorruptedWALFrame
+		}
 	default:
 		return errCorruptedWALFrame
 	}

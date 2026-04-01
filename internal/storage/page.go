@@ -25,6 +25,7 @@ const (
 	PageTypeTable PageType = 1 + iota
 	PageTypeIndexLeaf
 	PageTypeIndexInternal
+	PageTypeFreePage
 )
 
 // Page is a fixed-size in-memory page buffer. Dirty/original tracking is used
@@ -96,7 +97,7 @@ func pageOffset(id PageID) int64 {
 
 func IsValidPageType(pageType PageType) bool {
 	switch pageType {
-	case PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal:
+	case PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal, PageTypeFreePage:
 		return true
 	default:
 		return false

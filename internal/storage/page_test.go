@@ -1,5 +1,7 @@
 package storage
 
+import "encoding/binary"
+
 import "testing"
 
 func TestNewPage(t *testing.T) {
@@ -44,7 +46,7 @@ func TestPageOffset(t *testing.T) {
 }
 
 func TestIsValidPageType(t *testing.T) {
-	valid := []PageType{PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal}
+	valid := []PageType{PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal, PageTypeFreePage}
 	for _, pageType := range valid {
 		if !IsValidPageType(pageType) {
 			t.Fatalf("IsValidPageType(%d) = false, want true", pageType)
@@ -52,6 +54,33 @@ func TestIsValidPageType(t *testing.T) {
 	}
 	if IsValidPageType(PageType(99)) {
 		t.Fatal("IsValidPageType(99) = true, want false")
+	}
+}
+
+func TestFreePageIsNotIndexPageType(t *testing.T) {
+	if IsIndexPageType(PageTypeFreePage) {
+		t.Fatal("IsIndexPageType(PageTypeFreePage) = true, want false")
+	}
+}
+
+func TestStampedPageHelpersSupportFreePage(t *testing.T) {
+	page := InitFreePage(9, 12)
+
+	if err := SetPageLSN(page, 42); err != nil {
+		t.Fatalf("SetPageLSN() error = %v", err)
+	}
+	if err := RecomputePageChecksum(page); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
+	lsn, err := PageLSN(page)
+	if err != nil {
+		t.Fatalf("PageLSN() error = %v", err)
+	}
+	if lsn != 42 {
+		t.Fatalf("PageLSN() = %d, want 42", lsn)
+	}
+	if got := PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType : pageHeaderOffsetPageType+2])); got != PageTypeFreePage {
+		t.Fatalf("pageType = %d, want %d", got, PageTypeFreePage)
 	}
 }
 
