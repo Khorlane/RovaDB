@@ -39,6 +39,21 @@ func newCommittedFrame(pageID PageID, data []byte) (*Frame, error) {
 	return frame, nil
 }
 
+func newPrivateFrame(committed *Frame) (*Frame, error) {
+	if committed == nil {
+		return nil, nil
+	}
+
+	frame := &Frame{
+		PageID:    committed.PageID,
+		PageType:  committed.PageType,
+		PageLSN:   committed.PageLSN,
+		FrameType: FramePrivate,
+	}
+	copy(frame.Data[:], committed.Data[:])
+	return frame, nil
+}
+
 func (bp *BufferPool) loadCommittedFrame(pageID PageID) (*Frame, error) {
 	if bp == nil || bp.loader == nil {
 		return nil, nil
@@ -49,4 +64,23 @@ func (bp *BufferPool) loadCommittedFrame(pageID PageID) (*Frame, error) {
 		return nil, err
 	}
 	return newCommittedFrame(pageID, data)
+}
+
+func (bp *BufferPool) createPrivateFrame(pageID PageID) (*Frame, error) {
+	if bp == nil {
+		return nil, nil
+	}
+	if frame, ok := bp.getPrivateFrame(pageID); ok {
+		return frame, nil
+	}
+
+	committed, err := bp.getOrLoadCommittedFrameUnlatched(pageID)
+	if err != nil {
+		return nil, err
+	}
+	private, err := newPrivateFrame(committed)
+	if err != nil {
+		return nil, err
+	}
+	return bp.trackPrivateFrame(private), nil
 }

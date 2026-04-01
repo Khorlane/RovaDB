@@ -9,6 +9,7 @@ var errNoEvictableFrame = errors.New("bufferpool: no evictable frame available")
 
 type BufferPool struct {
 	committed map[PageID]*Frame
+	private   map[PageID]*Frame
 	order     []PageID
 	capacity  int
 	loader    PageLoader
@@ -24,6 +25,7 @@ func New(size int, loader PageLoader) *BufferPool {
 	}
 	return &BufferPool{
 		committed: make(map[PageID]*Frame),
+		private:   make(map[PageID]*Frame),
 		order:     make([]PageID, 0, size),
 		capacity:  size,
 		loader:    loader,
@@ -49,11 +51,34 @@ func (bp *BufferPool) trackCommittedFrame(frame *Frame) *Frame {
 	return frame
 }
 
+func (bp *BufferPool) getPrivateFrame(pageID PageID) (*Frame, bool) {
+	if bp == nil {
+		return nil, false
+	}
+	frame, ok := bp.private[pageID]
+	return frame, ok
+}
+
+func (bp *BufferPool) trackPrivateFrame(frame *Frame) *Frame {
+	if bp == nil || frame == nil {
+		return nil
+	}
+	bp.private[frame.PageID] = frame
+	return frame
+}
+
 func (bp *BufferPool) committedFrameCount() int {
 	if bp == nil {
 		return 0
 	}
 	return len(bp.committed)
+}
+
+func (bp *BufferPool) privateFrameCount() int {
+	if bp == nil {
+		return 0
+	}
+	return len(bp.private)
 }
 
 func (bp *BufferPool) DirtyFrames() []*Frame {

@@ -653,3 +653,163 @@ func TestCapacityNormalizesToAtLeastOne(t *testing.T) {
 		t.Fatalf("capacity = %d, want 1", pool.capacity)
 	}
 }
+
+func TestGetPrivatePageCreatesIndependentPrivateFrame(t *testing.T) {
+	loader := &stubLoader{
+		pages: map[PageID][]byte{
+			21: bytes.Repeat([]byte{0x21}, PageSize),
+		},
+	}
+	pool := New(2, loader)
+
+	committed, err := pool.GetCommittedPage(21)
+	if err != nil {
+		t.Fatalf("GetCommittedPage() error = %v", err)
+	}
+	pool.UnlatchShared(committed)
+	pool.Unpin(committed)
+
+	private, err := pool.GetPrivatePage(21)
+	if err != nil {
+		t.Fatalf("GetPrivatePage() error = %v", err)
+	}
+	if private == nil {
+		t.Fatal("GetPrivatePage() = nil, want frame")
+	}
+	if private == committed {
+		t.Fatal("private frame pointer matches committed frame")
+	}
+	if private.FrameType != FramePrivate {
+		t.Fatalf("private.FrameType = %d, want %d", private.FrameType, FramePrivate)
+	}
+	if private.Dirty {
+		t.Fatal("new private frame starts dirty, want clean")
+	}
+	if private.PinCount != 1 {
+		t.Fatalf("private.PinCount = %d, want 1", private.PinCount)
+	}
+	if !bytes.Equal(private.Data[:], committed.Data[:]) {
+		t.Fatal("private frame data mismatch at creation")
+	}
+	if got := pool.privateFrameCount(); got != 1 {
+		t.Fatalf("privateFrameCount() = %d, want 1", got)
+	}
+
+	private.Data[0] = 0x99
+	if committed.Data[0] != 0x21 {
+		t.Fatalf("committed.Data[0] = 0x%02x, want 0x21", committed.Data[0])
+	}
+
+	pool.UnlatchExclusive(private)
+	pool.Unpin(private)
+}
+
+func TestGetPrivatePageReturnsTrackedPrivateFrameOnRepeat(t *testing.T) {
+	loader := &stubLoader{
+		pages: map[PageID][]byte{
+			22: bytes.Repeat([]byte{0x22}, PageSize),
+		},
+	}
+	pool := New(2, loader)
+
+	private, err := pool.GetPrivatePage(22)
+	if err != nil {
+		t.Fatalf("first GetPrivatePage() error = %v", err)
+	}
+	pool.UnlatchExclusive(private)
+
+	again, err := pool.GetPrivatePage(22)
+	if err != nil {
+		t.Fatalf("second GetPrivatePage() error = %v", err)
+	}
+	if again != private {
+		t.Fatal("second GetPrivatePage() returned different private frame")
+	}
+	if private.PinCount != 2 {
+		t.Fatalf("private.PinCount = %d, want 2", private.PinCount)
+	}
+	if got := loader.reads[22]; got != 1 {
+		t.Fatalf("loader reads = %d, want 1", got)
+	}
+
+	pool.UnlatchExclusive(private)
+	pool.Unpin(private)
+	pool.Unpin(private)
+}
+
+func TestCommittedReadsStillReturnCommittedFrameWhenPrivateExists(t *testing.T) {
+	loader := &stubLoader{
+		pages: map[PageID][]byte{
+			23: bytes.Repeat([]byte{0x23}, PageSize),
+		},
+	}
+	pool := New(2, loader)
+
+	private, err := pool.GetPrivatePage(23)
+	if err != nil {
+		t.Fatalf("GetPrivatePage() error = %v", err)
+	}
+	private.Data[1] = 0xFE
+	pool.MarkDirty(private)
+	pool.UnlatchExclusive(private)
+	pool.Unpin(private)
+
+	committed, err := pool.GetCommittedPage(23)
+	if err != nil {
+		t.Fatalf("GetCommittedPage() error = %v", err)
+	}
+	if committed.FrameType != FrameCommitted {
+		t.Fatalf("committed.FrameType = %d, want %d", committed.FrameType, FrameCommitted)
+	}
+	if committed == private {
+		t.Fatal("GetCommittedPage() returned private frame")
+	}
+	if committed.Data[1] != 0x23 {
+		t.Fatalf("committed.Data[1] = 0x%02x, want 0x23", committed.Data[1])
+	}
+	if got := pool.committedFrameCount(); got != 1 {
+		t.Fatalf("committedFrameCount() = %d, want 1", got)
+	}
+	if len(pool.DirtyFrames()) != 0 {
+		t.Fatalf("len(DirtyFrames()) = %d, want 0 for committed-only enumeration", len(pool.DirtyFrames()))
+	}
+
+	pool.UnlatchShared(committed)
+	pool.Unpin(committed)
+}
+
+func TestPrivateFramesAreNotEvictionCandidates(t *testing.T) {
+	loader := &stubLoader{
+		pages: map[PageID][]byte{
+			24: bytes.Repeat([]byte{0x24}, PageSize),
+			25: bytes.Repeat([]byte{0x25}, PageSize),
+		},
+	}
+	pool := New(1, loader)
+
+	private, err := pool.GetPrivatePage(24)
+	if err != nil {
+		t.Fatalf("GetPrivatePage(24) error = %v", err)
+	}
+	pool.UnlatchExclusive(private)
+	pool.Unpin(private)
+
+	committed25, err := pool.GetCommittedPage(25)
+	if err != nil {
+		t.Fatalf("GetCommittedPage(25) error = %v", err)
+	}
+	if _, ok := pool.getPrivateFrame(24); !ok {
+		t.Fatal("private frame for page 24 missing after committed eviction path")
+	}
+	if _, ok := pool.getCommittedFrame(24); ok {
+		t.Fatal("committed frame for page 24 still tracked after eviction")
+	}
+	pool.UnlatchShared(committed25)
+	pool.Unpin(committed25)
+}
+
+func TestUnlatchExclusiveNilIsNoOp(t *testing.T) {
+	pool := New(2, nil)
+
+	pool.UnlatchExclusive(nil)
+}

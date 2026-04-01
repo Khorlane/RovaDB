@@ -5,11 +5,19 @@ func (bp *BufferPool) GetCommittedPage(pageID PageID) (*Frame, error) {
 }
 
 func (bp *BufferPool) getOrLoadCommittedFrame(pageID PageID) (*Frame, error) {
+	frame, err := bp.getOrLoadCommittedFrameUnlatched(pageID)
+	if err != nil {
+		return nil, err
+	}
+	return bp.pinSharedLatchAndReturn(frame), nil
+}
+
+func (bp *BufferPool) getOrLoadCommittedFrameUnlatched(pageID PageID) (*Frame, error) {
 	if bp == nil {
 		return nil, nil
 	}
 	if f, ok := bp.getCommittedFrame(pageID); ok {
-		return bp.pinLatchAndReturn(f), nil
+		return f, nil
 	}
 	if err := bp.ensureCapacity(); err != nil {
 		return nil, err
@@ -18,7 +26,18 @@ func (bp *BufferPool) getOrLoadCommittedFrame(pageID PageID) (*Frame, error) {
 	if err != nil {
 		return nil, err
 	}
-	return bp.pinLatchAndReturn(bp.trackCommittedFrame(frame)), nil
+	return bp.trackCommittedFrame(frame), nil
+}
+
+func (bp *BufferPool) GetPrivatePage(pageID PageID) (*Frame, error) {
+	if bp == nil {
+		return nil, nil
+	}
+	frame, err := bp.createPrivateFrame(pageID)
+	if err != nil {
+		return nil, err
+	}
+	return bp.pinExclusiveLatchAndReturn(frame), nil
 }
 
 func (bp *BufferPool) GetPage(pageID PageID) (*Frame, error) {
@@ -29,14 +48,23 @@ func (bp *BufferPool) PutPage(f *Frame) {
 	if bp == nil || f == nil {
 		return
 	}
-	if f.FrameType == FrameCommitted {
+	switch f.FrameType {
+	case FrameCommitted:
 		bp.trackCommittedFrame(f)
+	case FramePrivate:
+		bp.trackPrivateFrame(f)
 	}
 }
 
-func (bp *BufferPool) pinLatchAndReturn(f *Frame) *Frame {
+func (bp *BufferPool) pinSharedLatchAndReturn(f *Frame) *Frame {
 	bp.Pin(f)
 	bp.LatchShared(f)
+	return f
+}
+
+func (bp *BufferPool) pinExclusiveLatchAndReturn(f *Frame) *Frame {
+	bp.Pin(f)
+	bp.LatchExclusive(f)
 	return f
 }
 
