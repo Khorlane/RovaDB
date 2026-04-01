@@ -54,6 +54,19 @@ func newPrivateFrame(committed *Frame) (*Frame, error) {
 	return frame, nil
 }
 
+func newPrivateFrameFromData(pageID PageID, data []byte) (*Frame, error) {
+	if len(data) != PageSize {
+		return nil, errInvalidPageSize
+	}
+
+	frame := &Frame{
+		PageID:    pageID,
+		FrameType: FramePrivate,
+	}
+	copy(frame.Data[:], data)
+	return frame, nil
+}
+
 func (bp *BufferPool) loadCommittedFrame(pageID PageID) (*Frame, error) {
 	if bp == nil || bp.loader == nil {
 		return nil, nil

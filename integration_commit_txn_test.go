@@ -1,10 +1,12 @@
 package rovadb
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"testing"
 
+	"github.com/Khorlane/RovaDB/internal/bufferpool"
 	"github.com/Khorlane/RovaDB/internal/executor"
 	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/storage"
@@ -352,6 +354,72 @@ func TestSequentialWritesStillWorkWithWriterGate(t *testing.T) {
 	}
 
 	assertSelectIntRows(t, db, "SELECT * FROM t", 1, 2)
+}
+
+func TestStageDirtyStateUsesPrivateFramesAndLeavesCommittedReadUnchanged(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rootPageID := db.tables["t"].RootPageID()
+	committedBefore, err := readCommittedPageData(db.pool, rootPageID)
+	if err != nil {
+		t.Fatalf("readCommittedPageData(before) error = %v", err)
+	}
+
+	if err := db.beginTxn(); err != nil {
+		t.Fatalf("beginTxn() error = %v", err)
+	}
+	stagedTables := cloneTables(db.tables)
+	if err := db.loadRowsIntoTables(stagedTables, "t"); err != nil {
+		t.Fatalf("loadRowsIntoTables() error = %v", err)
+	}
+	stagedTables["t"].Rows[0][0] = parser.Int64Value(2)
+
+	if err := db.applyStagedTableRewrite(stagedTables, "t"); err != nil {
+		t.Fatalf("applyStagedTableRewrite() error = %v", err)
+	}
+
+	committedDuring, err := readCommittedPageData(db.pool, rootPageID)
+	if err != nil {
+		t.Fatalf("readCommittedPageData(during) error = %v", err)
+	}
+	if !bytes.Equal(committedDuring, committedBefore) {
+		t.Fatal("committed page bytes changed during active staged write")
+	}
+
+	privateFrame, err := db.pool.GetPrivatePage(bufferpool.PageID(rootPageID))
+	if err != nil {
+		t.Fatalf("GetPrivatePage() error = %v", err)
+	}
+	if !db.pool.IsDirty(privateFrame) {
+		t.Fatal("private frame is clean, want dirty after staged write")
+	}
+	privateRows, err := storage.ReadSlottedRowsFromTablePageData(privateFrame.Data[:], []uint8{storage.CatalogColumnTypeInt})
+	if err != nil {
+		t.Fatalf("ReadSlottedRowsFromTablePageData(private) error = %v", err)
+	}
+	if len(privateRows) != 1 || privateRows[0][0] != parser.Int64Value(2) {
+		t.Fatalf("private rows = %#v, want [[2]]", privateRows)
+	}
+	db.pool.UnlatchExclusive(privateFrame)
+	db.pool.Unpin(privateFrame)
+
+	if err := db.rollbackTxn(); err != nil {
+		t.Fatalf("rollbackTxn() error = %v", err)
+	}
+	db.clearTxn()
 }
 
 func TestRollbackRestoresDirtyPages(t *testing.T) {

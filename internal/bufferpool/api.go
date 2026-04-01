@@ -40,6 +40,17 @@ func (bp *BufferPool) GetPrivatePage(pageID PageID) (*Frame, error) {
 	return bp.pinExclusiveLatchAndReturn(frame), nil
 }
 
+func (bp *BufferPool) InstallPrivatePage(pageID PageID, data []byte) (*Frame, error) {
+	if bp == nil {
+		return nil, nil
+	}
+	frame, err := newPrivateFrameFromData(pageID, data)
+	if err != nil {
+		return nil, err
+	}
+	return bp.pinExclusiveLatchAndReturn(bp.trackPrivateFrame(frame)), nil
+}
+
 func (bp *BufferPool) GetPage(pageID PageID) (*Frame, error) {
 	return bp.GetCommittedPage(pageID)
 }

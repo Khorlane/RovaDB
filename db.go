@@ -42,6 +42,8 @@ type DB struct {
 
 	writerMu     sync.Mutex
 	writerActive bool
+
+	pendingPages []stagedPage
 }
 
 type stagedPage struct {
@@ -609,6 +611,7 @@ func (db *DB) beginTxn() error {
 		return ErrTxnAlreadyActive
 	}
 	db.txn = txn.NewTxn()
+	db.pendingPages = nil
 	return nil
 }
 
@@ -617,6 +620,7 @@ func (db *DB) clearTxn() {
 		return
 	}
 	db.txn = nil
+	db.pendingPages = nil
 }
 
 func (db *DB) beginWriteTxn() error {
@@ -963,7 +967,59 @@ func (db *DB) stageDirtyState(catalogData []byte, pages []stagedPage) error {
 		return nil
 	}
 
-	for _, staged := range pages {
+	stagedPages := make([]stagedPage, 0, len(pages)+1)
+	stagedPages = append(stagedPages, pages...)
+	stagedPages = append(stagedPages, stagedPage{id: 0, data: catalogData})
+
+	for _, staged := range stagedPages {
+		if err := db.stagePrivatePageData(staged); err != nil {
+			return err
+		}
+	}
+	db.pendingPages = stagedPages
+	if err := db.materializePendingPages(); err != nil {
+		return err
+	}
+	db.pendingPages = nil
+	return nil
+}
+
+func (db *DB) stagePrivatePageData(staged stagedPage) error {
+	if db == nil || db.pool == nil {
+		return nil
+	}
+
+	var (
+		frame *bufferpool.Frame
+		err   error
+	)
+	if staged.isNew {
+		frame, err = db.pool.InstallPrivatePage(bufferpool.PageID(staged.id), staged.data)
+	} else {
+		frame, err = db.pool.GetPrivatePage(bufferpool.PageID(staged.id))
+		if err == nil && frame != nil {
+			clear(frame.Data[:])
+			copy(frame.Data[:], staged.data)
+		}
+	}
+	if err != nil {
+		return wrapStorageError(err)
+	}
+	if frame == nil {
+		return newStorageError("corrupted page")
+	}
+	db.pool.MarkDirty(frame)
+	db.pool.UnlatchExclusive(frame)
+	db.pool.Unpin(frame)
+	return nil
+}
+
+func (db *DB) materializePendingPages() error {
+	if db == nil || db.pager == nil || len(db.pendingPages) == 0 {
+		return nil
+	}
+
+	for _, staged := range db.pendingPages {
 		var page *storage.Page
 		if staged.isNew {
 			page = db.pager.NewPage()
@@ -979,20 +1035,20 @@ func (db *DB) stageDirtyState(catalogData []byte, pages []stagedPage) error {
 			}
 		}
 
+		frame, err := db.pool.GetPrivatePage(bufferpool.PageID(staged.id))
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		if frame == nil {
+			return newStorageError("corrupted page")
+		}
+
 		db.pager.MarkDirtyWithOriginal(page)
 		clear(page.Data())
-		copy(page.Data(), staged.data)
+		copy(page.Data(), frame.Data[:])
+		db.pool.UnlatchExclusive(frame)
+		db.pool.Unpin(frame)
 	}
-
-	catalogPage, err := db.pager.Get(0)
-	if err != nil {
-		return wrapStorageError(err)
-	}
-	db.pager.MarkDirtyWithOriginal(catalogPage)
-	clear(catalogPage.Data())
-	copy(catalogPage.Data(), catalogData)
-	// Page mutation requires explicit dirty marking; commit-oriented flush
-	// eligibility is driven by dirty tracking.
 	return nil
 }
 
