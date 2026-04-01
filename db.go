@@ -125,6 +125,14 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
+	if err := storage.ValidateDirectoryControlState(file.File(), storage.DirectoryControlState{
+		FreeListHead:   freeListHead,
+		RootMappings:   rootMappings,
+		CheckpointMeta: checkpointMeta,
+	}); err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
 	pager, err := storage.NewPager(file.File())
 	if err != nil {
 		_ = file.Close()

@@ -417,6 +417,111 @@ func TestOpenFailsOnDirectoryRootMappingMismatch(t *testing.T) {
 	}
 }
 
+func TestOpenFailsWhenFreeListHeadPointsToNonFreePage(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, _ := openRawStorage(t, path)
+	if err := storage.WriteDirectoryFreeListHead(rawDB.File(), 1); err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("WriteDirectoryFreeListHead() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want invalid free-list head failure")
+	}
+}
+
+func TestOpenFailsWhenTableRootMappingPointsToIndexPage(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	indexRoot := db.tables["users"].IndexDefinition("idx_users_name").RootPageID
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, _ := openRawStorage(t, path)
+	if err := storage.WriteDirectoryRootMappings(rawDB.File(), []storage.DirectoryRootMapping{{
+		ObjectType: storage.DirectoryRootMappingObjectTable,
+		TableName:  "users",
+		RootPageID: indexRoot,
+	}}); err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want invalid table root mapping failure")
+	}
+}
+
+func TestOpenFailsWhenIndexRootMappingPointsToTablePage(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	tableRoot := uint32(db.tables["users"].RootPageID())
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, _ := openRawStorage(t, path)
+	if err := storage.WriteDirectoryRootMappings(rawDB.File(), []storage.DirectoryRootMapping{
+		{ObjectType: storage.DirectoryRootMappingObjectTable, TableName: "users", RootPageID: tableRoot},
+		{ObjectType: storage.DirectoryRootMappingObjectIndex, TableName: "users", IndexName: "idx_users_name", RootPageID: tableRoot},
+	}); err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want invalid index root mapping failure")
+	}
+}
+
 func TestOpenLoadsDurableFreeListHead(t *testing.T) {
 	path := testDBPath(t)
 

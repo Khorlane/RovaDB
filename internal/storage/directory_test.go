@@ -467,3 +467,142 @@ func TestApplyDirectoryRootMappingsFallsBackWhenEmpty(t *testing.T) {
 		t.Fatalf("got.Tables[0].RootPageID = %d, want 5", got.Tables[0].RootPageID)
 	}
 }
+
+func TestValidateDirectoryControlStateRejectsInvalidFreeListHeadPageType(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "directory-validate-free-head.db")
+	dbFile, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
+		t.Fatalf("EnsureDirectoryPage() error = %v", err)
+	}
+	if _, err := dbFile.File().WriteAt(InitializeTablePage(2), pageOffset(2)); err != nil {
+		t.Fatalf("WriteAt() error = %v", err)
+	}
+
+	err = ValidateDirectoryControlState(dbFile.File(), DirectoryControlState{
+		FreeListHead: 2,
+	})
+	if !errors.Is(err, errCorruptedDirectoryPage) {
+		t.Fatalf("ValidateDirectoryControlState() error = %v, want %v", err, errCorruptedDirectoryPage)
+	}
+}
+
+func TestValidateDirectoryControlStateRejectsInvalidTableRootPageType(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "directory-validate-table-root.db")
+	dbFile, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
+		t.Fatalf("EnsureDirectoryPage() error = %v", err)
+	}
+	if _, err := dbFile.File().WriteAt(InitFreePage(2, 0), pageOffset(2)); err != nil {
+		t.Fatalf("WriteAt() error = %v", err)
+	}
+
+	err = ValidateDirectoryControlState(dbFile.File(), DirectoryControlState{
+		RootMappings: []DirectoryRootMapping{{
+			ObjectType: DirectoryRootMappingObjectTable,
+			TableName:  "users",
+			RootPageID: 2,
+		}},
+	})
+	if !errors.Is(err, errCorruptedTablePage) {
+		t.Fatalf("ValidateDirectoryControlState() error = %v, want %v", err, errCorruptedTablePage)
+	}
+}
+
+func TestValidateDirectoryControlStateRejectsInvalidIndexRootPageType(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "directory-validate-index-root.db")
+	dbFile, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
+		t.Fatalf("EnsureDirectoryPage() error = %v", err)
+	}
+	if _, err := dbFile.File().WriteAt(InitializeTablePage(2), pageOffset(2)); err != nil {
+		t.Fatalf("WriteAt() error = %v", err)
+	}
+
+	err = ValidateDirectoryControlState(dbFile.File(), DirectoryControlState{
+		RootMappings: []DirectoryRootMapping{{
+			ObjectType: DirectoryRootMappingObjectIndex,
+			TableName:  "users",
+			IndexName:  "idx_users_name",
+			RootPageID: 2,
+		}},
+	})
+	if !errors.Is(err, errCorruptedIndexPage) {
+		t.Fatalf("ValidateDirectoryControlState() error = %v, want %v", err, errCorruptedIndexPage)
+	}
+}
+
+func TestValidateDirectoryControlStateRejectsDuplicateMappings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "directory-validate-duplicates.db")
+	dbFile, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
+		t.Fatalf("EnsureDirectoryPage() error = %v", err)
+	}
+	if _, err := dbFile.File().WriteAt(InitializeTablePage(2), pageOffset(2)); err != nil {
+		t.Fatalf("WriteAt(table) error = %v", err)
+	}
+	indexPage := InitIndexLeafPage(3)
+	if _, err := dbFile.File().WriteAt(indexPage, pageOffset(3)); err != nil {
+		t.Fatalf("WriteAt(index) error = %v", err)
+	}
+	err = ValidateDirectoryControlState(dbFile.File(), DirectoryControlState{
+		RootMappings: []DirectoryRootMapping{
+			{ObjectType: DirectoryRootMappingObjectTable, TableName: "users", RootPageID: 2},
+			{ObjectType: DirectoryRootMappingObjectTable, TableName: "users", RootPageID: 2},
+		},
+	})
+	if !errors.Is(err, errCorruptedDirectoryPage) {
+		t.Fatalf("ValidateDirectoryControlState(table dup) error = %v, want %v", err, errCorruptedDirectoryPage)
+	}
+
+	err = ValidateDirectoryControlState(dbFile.File(), DirectoryControlState{
+		RootMappings: []DirectoryRootMapping{
+			{ObjectType: DirectoryRootMappingObjectIndex, TableName: "users", IndexName: "idx_users_name", RootPageID: 3},
+			{ObjectType: DirectoryRootMappingObjectIndex, TableName: "users", IndexName: "idx_users_name", RootPageID: 3},
+		},
+	})
+	if !errors.Is(err, errCorruptedDirectoryPage) {
+		t.Fatalf("ValidateDirectoryControlState(index dup) error = %v, want %v", err, errCorruptedDirectoryPage)
+	}
+}
+
+func TestValidateDirectoryControlStateRejectsUnsupportedObjectType(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "directory-validate-object-type.db")
+	dbFile, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
+		t.Fatalf("EnsureDirectoryPage() error = %v", err)
+	}
+	if _, err := dbFile.File().WriteAt(InitializeTablePage(2), pageOffset(2)); err != nil {
+		t.Fatalf("WriteAt() error = %v", err)
+	}
+
+	err = ValidateDirectoryControlState(dbFile.File(), DirectoryControlState{
+		RootMappings: []DirectoryRootMapping{{
+			ObjectType: 99,
+			TableName:  "users",
+			RootPageID: 2,
+		}},
+	})
+	if !errors.Is(err, errCorruptedDirectoryPage) {
+		t.Fatalf("ValidateDirectoryControlState() error = %v, want %v", err, errCorruptedDirectoryPage)
+	}
+}

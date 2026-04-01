@@ -41,6 +41,13 @@ type DirectoryCheckpointMetadata struct {
 	ReservedCheckpoint      uint32
 }
 
+// DirectoryControlState is the decoded durable control-plane state from page 0.
+type DirectoryControlState struct {
+	FreeListHead   uint32
+	RootMappings   []DirectoryRootMapping
+	CheckpointMeta DirectoryCheckpointMetadata
+}
+
 // InitDirectoryPage initializes the durable directory/control page.
 func InitDirectoryPage(pageID uint32, formatVersion uint32) []byte {
 	page := make([]byte, PageSize)
@@ -231,6 +238,73 @@ func ReadDirectoryCheckpointMetadata(file *os.File) (DirectoryCheckpointMetadata
 	return directoryCheckpointMetadata(page)
 }
 
+// ValidateDirectoryControlState validates the currently loaded directory/control metadata against disk pages.
+func ValidateDirectoryControlState(file *os.File, state DirectoryControlState) error {
+	if file == nil {
+		return errCorruptedDirectoryPage
+	}
+	if state.FreeListHead != 0 {
+		page, err := readStoragePage(file, PageID(state.FreeListHead))
+		if err != nil {
+			return err
+		}
+		pageType := PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType : pageHeaderOffsetPageType+2]))
+		if IsValidPageType(pageType) && pageType != PageTypeFreePage {
+			return errCorruptedDirectoryPage
+		}
+	}
+
+	seenTableMappings := make(map[string]struct{}, len(state.RootMappings))
+	seenIndexMappings := make(map[string]struct{}, len(state.RootMappings))
+	for _, mapping := range state.RootMappings {
+		if mapping.RootPageID == 0 {
+			return errCorruptedDirectoryPage
+		}
+		if mapping.RootPageID == uint32(DirectoryControlPageID) {
+			return errCorruptedDirectoryPage
+		}
+
+		page, err := readStoragePage(file, PageID(mapping.RootPageID))
+		if err != nil {
+			return err
+		}
+		pageType := PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType : pageHeaderOffsetPageType+2]))
+
+		switch mapping.ObjectType {
+		case DirectoryRootMappingObjectTable:
+			if mapping.TableName == "" || mapping.IndexName != "" {
+				return errCorruptedDirectoryPage
+			}
+			if IsValidPageType(pageType) && pageType != PageTypeTable {
+				return errCorruptedTablePage
+			}
+			if _, exists := seenTableMappings[mapping.TableName]; exists {
+				return errCorruptedDirectoryPage
+			}
+			seenTableMappings[mapping.TableName] = struct{}{}
+		case DirectoryRootMappingObjectIndex:
+			if mapping.TableName == "" || mapping.IndexName == "" {
+				return errCorruptedDirectoryPage
+			}
+			if IsValidPageType(pageType) && pageType != PageTypeIndexLeaf && pageType != PageTypeIndexInternal {
+				return errCorruptedIndexPage
+			}
+			key := mapping.TableName + "\x00" + mapping.IndexName
+			if _, exists := seenIndexMappings[key]; exists {
+				return errCorruptedDirectoryPage
+			}
+			seenIndexMappings[key] = struct{}{}
+		default:
+			return errCorruptedDirectoryPage
+		}
+	}
+
+	if state.CheckpointMeta.LastCheckpointPageCount == 0 && state.CheckpointMeta.ReservedCheckpoint != 0 {
+		return errCorruptedDirectoryPage
+	}
+	return nil
+}
+
 // WriteDirectoryRootMappings rewrites the durable root mappings while preserving other directory state.
 func WriteDirectoryRootMappings(file *os.File, mappings []DirectoryRootMapping) error {
 	page, err := ReadDirectoryPage(file)
@@ -409,6 +483,26 @@ func readDirectoryPage(file *os.File) ([]byte, int, error) {
 	page := make([]byte, PageSize)
 	n, err := file.ReadAt(page, pageOffset(DirectoryControlPageID))
 	return page, n, err
+}
+
+func readStoragePage(file *os.File, pageID PageID) ([]byte, error) {
+	if file == nil || pageID == 0 {
+		return nil, errCorruptedDirectoryPage
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	offset := pageOffset(pageID)
+	if info.Size() < offset+PageSize {
+		return nil, errCorruptedDirectoryPage
+	}
+
+	page := make([]byte, PageSize)
+	if _, err := file.ReadAt(page, offset); err != nil {
+		return nil, errCorruptedDirectoryPage
+	}
+	return page, nil
 }
 
 func directoryRootMappings(page []byte) ([]DirectoryRootMapping, error) {
