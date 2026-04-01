@@ -99,16 +99,21 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
-	freeListHead, err := storage.ReadDirectoryFreeListHead(file.File())
-	if err != nil {
-		_ = file.Close()
-		return nil, wrapStorageError(err)
-	}
 	if err := storage.EnsureWALFile(path, storage.DBFormatVersion()); err != nil {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
 	if err := replayCommittedWAL(path); err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
+	freeListHead, err := storage.ReadDirectoryFreeListHead(file.File())
+	if err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
+	rootMappings, err := storage.ReadDirectoryRootMappings(file.File())
+	if err != nil {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
@@ -122,6 +127,12 @@ func Open(path string) (*DB, error) {
 	catalog, err := storage.LoadCatalog(storage.PageReaderFunc(func(pageID storage.PageID) ([]byte, error) {
 		return readCommittedPageData(pool, pageID)
 	}))
+	if err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
+	catalog, err = storage.ApplyDirectoryRootMappings(catalog, rootMappings)
 	if err != nil {
 		_ = pager.Close()
 		_ = file.Close()

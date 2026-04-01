@@ -277,6 +277,146 @@ func TestOpenFailsOnMalformedDirectoryPage(t *testing.T) {
 	}
 }
 
+func TestDirectoryRootMappingsPersistTableRootAcrossReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	usersRoot := uint32(db.tables["users"].RootPageID())
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, _ := openRawStorage(t, path)
+	mappings, err := storage.ReadDirectoryRootMappings(rawDB.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryRootMappings() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	found := false
+	for _, mapping := range mappings {
+		if mapping.ObjectType == storage.DirectoryRootMappingObjectTable && mapping.TableName == "users" {
+			found = true
+			if mapping.RootPageID != usersRoot {
+				t.Fatalf("users table root mapping = %d, want %d", mapping.RootPageID, usersRoot)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("users table root mapping not found")
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+	if got := uint32(db.tables["users"].RootPageID()); got != usersRoot {
+		t.Fatalf("reopened users.RootPageID() = %d, want %d", got, usersRoot)
+	}
+}
+
+func TestDirectoryRootMappingsPersistIndexRootAcrossReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	indexRoot := db.tables["users"].IndexDefinition("idx_users_name").RootPageID
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, _ := openRawStorage(t, path)
+	mappings, err := storage.ReadDirectoryRootMappings(rawDB.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryRootMappings() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	found := false
+	for _, mapping := range mappings {
+		if mapping.ObjectType == storage.DirectoryRootMappingObjectIndex && mapping.TableName == "users" && mapping.IndexName == "idx_users_name" {
+			found = true
+			if mapping.RootPageID != indexRoot {
+				t.Fatalf("users index root mapping = %d, want %d", mapping.RootPageID, indexRoot)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("users index root mapping not found")
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+	if got := db.tables["users"].IndexDefinition("idx_users_name").RootPageID; got != indexRoot {
+		t.Fatalf("reopened index RootPageID = %d, want %d", got, indexRoot)
+	}
+}
+
+func TestOpenFailsOnDirectoryRootMappingMismatch(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("os.OpenFile() error = %v", err)
+	}
+	page := make([]byte, storage.PageSize)
+	if _, err := file.ReadAt(page, storage.HeaderSize); err != nil {
+		_ = file.Close()
+		t.Fatalf("file.ReadAt() error = %v", err)
+	}
+	rootMapBytes := binary.LittleEndian.Uint32(page[44:48])
+	catalogOffset := 48 + int(rootMapBytes)
+	nameLen := int(binary.LittleEndian.Uint16(page[catalogOffset+8 : catalogOffset+10]))
+	rootPageOffset := catalogOffset + 10 + nameLen
+	binary.LittleEndian.PutUint32(page[rootPageOffset:rootPageOffset+4], 999)
+	if _, err := file.WriteAt(page, storage.HeaderSize); err != nil {
+		_ = file.Close()
+		t.Fatalf("file.WriteAt() error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("file.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want directory root mapping mismatch failure")
+	}
+}
+
 func TestOpenLoadsDurableFreeListHead(t *testing.T) {
 	path := testDBPath(t)
 

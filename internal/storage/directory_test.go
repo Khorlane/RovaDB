@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/binary"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -191,5 +192,152 @@ func TestDirectoryFreeListHeadPersistsAcrossReopen(t *testing.T) {
 	}
 	if got != 23 {
 		t.Fatalf("ReadDirectoryFreeListHead() = %d, want 23", got)
+	}
+}
+
+func TestDirectoryRootMappingsRoundTrip(t *testing.T) {
+	mappings := []DirectoryRootMapping{
+		{
+			ObjectType: DirectoryRootMappingObjectTable,
+			TableName:  "users",
+			RootPageID: 7,
+		},
+		{
+			ObjectType: DirectoryRootMappingObjectIndex,
+			TableName:  "users",
+			IndexName:  "idx_users_name",
+			RootPageID: 11,
+		},
+	}
+
+	page, err := buildDirectoryCatalogPage([]byte{1, 2, 3}, version, 19, mappings)
+	if err != nil {
+		t.Fatalf("buildDirectoryCatalogPage() error = %v", err)
+	}
+
+	got, err := directoryRootMappings(page)
+	if err != nil {
+		t.Fatalf("directoryRootMappings() error = %v", err)
+	}
+	if len(got) != len(mappings) {
+		t.Fatalf("len(directoryRootMappings()) = %d, want %d", len(got), len(mappings))
+	}
+	for i := range mappings {
+		if got[i] != mappings[i] {
+			t.Fatalf("mapping[%d] = %#v, want %#v", i, got[i], mappings[i])
+		}
+	}
+}
+
+func TestReadDirectoryRootMappingsEmptyRoundTrip(t *testing.T) {
+	page, err := buildDirectoryCatalogPage([]byte{1, 2, 3}, version, 0, nil)
+	if err != nil {
+		t.Fatalf("buildDirectoryCatalogPage() error = %v", err)
+	}
+
+	got, err := directoryRootMappings(page)
+	if err != nil {
+		t.Fatalf("directoryRootMappings() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("len(directoryRootMappings()) = %d, want 0", len(got))
+	}
+}
+
+func TestReadDirectoryRootMappingsRejectsMalformedPayload(t *testing.T) {
+	page := InitDirectoryPage(uint32(DirectoryControlPageID), version)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetRootMapCount:directoryBodyOffsetRootMapCount+4], 1)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetRootMapBytes:directoryBodyOffsetRootMapBytes+4], 2)
+	copy(page[directoryCatalogOffset:], []byte{DirectoryRootMappingObjectTable, 0})
+
+	_, err := directoryRootMappings(page)
+	if !errors.Is(err, errCorruptedDirectoryPage) {
+		t.Fatalf("directoryRootMappings() error = %v, want %v", err, errCorruptedDirectoryPage)
+	}
+}
+
+func TestWriteDirectoryRootMappingsPersistsDurably(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "directory-root-map.db")
+
+	dbFile, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
+		t.Fatalf("EnsureDirectoryPage() error = %v", err)
+	}
+	mappings := []DirectoryRootMapping{
+		{
+			ObjectType: DirectoryRootMappingObjectTable,
+			TableName:  "users",
+			RootPageID: 5,
+		},
+	}
+	if err := WriteDirectoryRootMappings(dbFile.File(), mappings); err != nil {
+		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
+	}
+	if err := dbFile.Close(); err != nil {
+		t.Fatalf("dbFile.Close() error = %v", err)
+	}
+
+	dbFile, err = OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("reopen OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	got, err := ReadDirectoryRootMappings(dbFile.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryRootMappings() error = %v", err)
+	}
+	if len(got) != 1 || got[0] != mappings[0] {
+		t.Fatalf("ReadDirectoryRootMappings() = %#v, want %#v", got, mappings)
+	}
+}
+
+func TestApplyDirectoryRootMappingsRejectsMismatch(t *testing.T) {
+	catalog := &CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				RootPageID: 5,
+				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
+				Indexes: []CatalogIndex{
+					{Name: "idx_users_id", RootPageID: 7, Columns: []CatalogIndexColumn{{Name: "id"}}},
+				},
+			},
+		},
+	}
+	mappings := []DirectoryRootMapping{
+		{
+			ObjectType: DirectoryRootMappingObjectTable,
+			TableName:  "users",
+			RootPageID: 9,
+		},
+	}
+
+	_, err := ApplyDirectoryRootMappings(catalog, mappings)
+	if !errors.Is(err, errCorruptedDirectoryPage) {
+		t.Fatalf("ApplyDirectoryRootMappings() error = %v, want %v", err, errCorruptedDirectoryPage)
+	}
+}
+
+func TestApplyDirectoryRootMappingsFallsBackWhenEmpty(t *testing.T) {
+	catalog := &CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				RootPageID: 5,
+				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
+			},
+		},
+	}
+
+	got, err := ApplyDirectoryRootMappings(catalog, nil)
+	if err != nil {
+		t.Fatalf("ApplyDirectoryRootMappings() error = %v", err)
+	}
+	if got.Tables[0].RootPageID != 5 {
+		t.Fatalf("got.Tables[0].RootPageID = %d, want 5", got.Tables[0].RootPageID)
 	}
 }

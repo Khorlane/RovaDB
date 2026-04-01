@@ -675,6 +675,27 @@ func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
 	if got := storage.PageType(binary.LittleEndian.Uint16(rootPageData[4:6])); got != storage.PageTypeIndexInternal {
 		t.Fatalf("root page type = %d, want %d", got, storage.PageTypeIndexInternal)
 	}
+	rawDB, _ := openRawStorage(t, path)
+	mappings, err := storage.ReadDirectoryRootMappings(rawDB.File())
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("ReadDirectoryRootMappings() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+	foundRootMapping := false
+	for _, mapping := range mappings {
+		if mapping.ObjectType == storage.DirectoryRootMappingObjectIndex && mapping.TableName == "users" && mapping.IndexName == "idx_users_name" {
+			foundRootMapping = true
+			if mapping.RootPageID != indexDef.RootPageID {
+				t.Fatalf("directory index root mapping = %d, want %d", mapping.RootPageID, indexDef.RootPageID)
+			}
+		}
+	}
+	if !foundRootMapping {
+		t.Fatal("directory index root mapping not found after root split")
+	}
 
 	pageReader := func(pageID uint32) ([]byte, error) {
 		return readCommittedPageData(db.pool, storage.PageID(pageID))

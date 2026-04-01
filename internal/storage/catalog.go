@@ -85,37 +85,42 @@ func LoadCatalogPageData(pageData []byte) (*CatalogData, error) {
 }
 
 func loadCatalogPayload(pageData []byte) (*CatalogData, error) {
+	_, cat, err := decodeCatalogPayload(pageData)
+	return cat, err
+}
+
+func decodeCatalogPayload(pageData []byte) (int, *CatalogData, error) {
 	if isZeroPage(pageData) {
-		return &CatalogData{}, nil
+		return 0, &CatalogData{}, nil
 	}
 
 	offset := 0
 	version, ok := readUint32(pageData, &offset)
 	if !ok || (version != catalogVersionV1 && version != catalogVersionV2 && version != catalogVersionV3 && version != catalogVersion) {
-		return nil, errCorruptedCatalogPage
+		return 0, nil, errCorruptedCatalogPage
 	}
 	tableCount, ok := readUint32(pageData, &offset)
 	if !ok {
-		return nil, errCorruptedCatalogPage
+		return 0, nil, errCorruptedCatalogPage
 	}
 
 	cat := &CatalogData{Tables: make([]CatalogTable, 0, tableCount)}
 	for i := uint32(0); i < tableCount; i++ {
 		name, ok := readString(pageData, &offset)
 		if !ok || name == "" {
-			return nil, errCorruptedCatalogPage
+			return 0, nil, errCorruptedCatalogPage
 		}
 		rootPageID, ok := readUint32(pageData, &offset)
 		if !ok || rootPageID < 1 {
-			return nil, errCorruptedCatalogPage
+			return 0, nil, errCorruptedCatalogPage
 		}
 		rowCount, ok := readUint32(pageData, &offset)
 		if !ok {
-			return nil, errCorruptedCatalogPage
+			return 0, nil, errCorruptedCatalogPage
 		}
 		columnCount, ok := readUint16(pageData, &offset)
 		if !ok {
-			return nil, errCorruptedCatalogPage
+			return 0, nil, errCorruptedCatalogPage
 		}
 
 		table := CatalogTable{
@@ -128,18 +133,18 @@ func loadCatalogPayload(pageData []byte) (*CatalogData, error) {
 		for j := uint16(0); j < columnCount; j++ {
 			columnName, ok := readString(pageData, &offset)
 			if !ok || columnName == "" {
-				return nil, errCorruptedCatalogPage
+				return 0, nil, errCorruptedCatalogPage
 			}
 			if offset >= len(pageData) {
-				return nil, errCorruptedCatalogPage
+				return 0, nil, errCorruptedCatalogPage
 			}
 			columnType := pageData[offset]
 			offset++
 			if columnType != CatalogColumnTypeInt && columnType != CatalogColumnTypeText && columnType != CatalogColumnTypeBool && columnType != CatalogColumnTypeReal {
-				return nil, errCorruptedCatalogPage
+				return 0, nil, errCorruptedCatalogPage
 			}
 			if _, exists := columnNames[columnName]; exists {
-				return nil, errCorruptedCatalogPage
+				return 0, nil, errCorruptedCatalogPage
 			}
 			columnNames[columnName] = struct{}{}
 
@@ -151,14 +156,14 @@ func loadCatalogPayload(pageData []byte) (*CatalogData, error) {
 		if version >= catalogVersionV2 {
 			indexCount, ok := readUint16(pageData, &offset)
 			if !ok {
-				return nil, errCorruptedCatalogPage
+				return 0, nil, errCorruptedCatalogPage
 			}
 			table.Indexes = make([]CatalogIndex, 0, indexCount)
 			indexNames := make(map[string]struct{}, indexCount)
 			for j := uint16(0); j < indexCount; j++ {
 				index, err := readCatalogIndex(pageData, &offset, version, columnNames, indexNames)
 				if err != nil {
-					return nil, err
+					return 0, nil, err
 				}
 				table.Indexes = append(table.Indexes, index)
 			}
@@ -167,7 +172,7 @@ func loadCatalogPayload(pageData []byte) (*CatalogData, error) {
 		cat.Tables = append(cat.Tables, table)
 	}
 
-	return cat, nil
+	return offset, cat, nil
 }
 
 // SaveCatalog encodes the catalog into page 0.
@@ -205,8 +210,13 @@ func BuildCatalogPageDataWithFreeListHead(cat *CatalogData, freeListHead uint32)
 	if cat == nil {
 		cat = &CatalogData{}
 	}
+	rootMappings := BuildDirectoryRootMappings(cat)
+	rootMapPayload, err := encodeDirectoryRootMappings(rootMappings)
+	if err != nil {
+		return nil, err
+	}
 
-	maxCatalogPayloadSize := PageSize - directoryCatalogOffset
+	maxCatalogPayloadSize := PageSize - directoryCatalogOffset - len(rootMapPayload)
 	buf := make([]byte, 0, maxCatalogPayloadSize)
 	buf = appendUint32(buf, catalogVersion)
 	buf = appendUint32(buf, uint32(len(cat.Tables)))
@@ -246,7 +256,7 @@ func BuildCatalogPageDataWithFreeListHead(cat *CatalogData, freeListHead uint32)
 		}
 	}
 
-	return buildDirectoryCatalogPage(buf, version, freeListHead)
+	return buildDirectoryCatalogPage(buf, version, freeListHead, rootMappings)
 }
 
 func isZeroPage(data []byte) bool {
