@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/Khorlane/RovaDB/internal/bufferpool"
 	"github.com/Khorlane/RovaDB/internal/executor"
@@ -38,6 +39,9 @@ type DB struct {
 
 	afterJournalWriteHook func() error
 	afterDatabaseSyncHook func() error
+
+	writerMu     sync.Mutex
+	writerActive bool
 }
 
 type stagedPage struct {
@@ -615,6 +619,28 @@ func (db *DB) clearTxn() {
 	db.txn = nil
 }
 
+func (db *DB) beginWriteTxn() error {
+	if db == nil {
+		return ErrInvalidArgument
+	}
+	db.writerMu.Lock()
+	defer db.writerMu.Unlock()
+	if db.writerActive {
+		return newExecError("write conflict")
+	}
+	db.writerActive = true
+	return nil
+}
+
+func (db *DB) endWriteTxn() {
+	if db == nil {
+		return
+	}
+	db.writerMu.Lock()
+	db.writerActive = false
+	db.writerMu.Unlock()
+}
+
 // rollbackTxn restores pre-commit page images in memory. Commit remains the
 // only durability boundary; surviving journals are handled on the next open.
 func (db *DB) rollbackTxn() error {
@@ -654,6 +680,10 @@ func (db *DB) execMutatingStatement(apply func() error) error {
 	if db == nil {
 		return ErrInvalidArgument
 	}
+	if err := db.beginWriteTxn(); err != nil {
+		return err
+	}
+	defer db.endWriteTxn()
 
 	if err := db.beginTxn(); err != nil {
 		return err

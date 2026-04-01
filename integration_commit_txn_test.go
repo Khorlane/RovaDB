@@ -275,6 +275,85 @@ func TestCommitWithoutOriginalPagesSkipsJournal(t *testing.T) {
 	}
 }
 
+func TestSecondWriterAttemptReturnsWriteConflict(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if err := db.beginWriteTxn(); err != nil {
+		t.Fatalf("beginWriteTxn() error = %v", err)
+	}
+	defer db.endWriteTxn()
+
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err == nil {
+		t.Fatal("Exec(create) error = nil, want write conflict")
+	} else if err.Error() != "execution: write conflict" {
+		t.Fatalf("Exec(create) error = %q, want %q", err.Error(), "execution: write conflict")
+	}
+}
+
+func TestReadCanProceedWhileWriterGateActive(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	if err := db.beginWriteTxn(); err != nil {
+		t.Fatalf("beginWriteTxn() error = %v", err)
+	}
+	defer db.endWriteTxn()
+
+	assertSelectIntRows(t, db, "SELECT * FROM t", 1)
+}
+
+func TestWriterGateReleasedAfterMutationFailure(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	wantErr := errors.New("boom")
+	if err := db.execMutatingStatement(func() error {
+		return wantErr
+	}); !errors.Is(err, wantErr) {
+		t.Fatalf("execMutatingStatement() error = %v, want %v", err, wantErr)
+	}
+	if err := db.beginWriteTxn(); err != nil {
+		t.Fatalf("beginWriteTxn() after failure error = %v, want nil", err)
+	}
+	db.endWriteTxn()
+}
+
+func TestSequentialWritesStillWorkWithWriterGate(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
+		t.Fatalf("Exec(first insert) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO t VALUES (2)"); err != nil {
+		t.Fatalf("Exec(second insert) error = %v", err)
+	}
+
+	assertSelectIntRows(t, db, "SELECT * FROM t", 1, 2)
+}
+
 func TestRollbackRestoresDirtyPages(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
