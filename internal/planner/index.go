@@ -16,6 +16,7 @@ type IndexKey string
 type BasicIndex struct {
 	TableName  string
 	ColumnName string
+	IndexID    uint32
 	RootPageID uint32
 	Entries    map[IndexKey][]int
 }

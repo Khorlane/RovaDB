@@ -52,11 +52,17 @@ func TestExecAPICreateIndexSingleColumnPersistsAndSupportsQueryPath(t *testing.T
 	if indexDef.RootPageID == 0 {
 		t.Fatal("IndexDefinition(idx_users_name).RootPageID = 0, want nonzero")
 	}
+	if indexDef.IndexID == 0 {
+		t.Fatal("IndexDefinition(idx_users_name).IndexID = 0, want nonzero")
+	}
 	if table.Indexes["name"] == nil {
 		t.Fatal("table.Indexes[name] = nil, want active BasicIndex")
 	}
 	if table.Indexes["name"].RootPageID != indexDef.RootPageID {
 		t.Fatalf("table.Indexes[name].RootPageID = %d, want %d", table.Indexes["name"].RootPageID, indexDef.RootPageID)
+	}
+	if table.Indexes["name"].IndexID != indexDef.IndexID {
+		t.Fatalf("table.Indexes[name].IndexID = %d, want %d", table.Indexes["name"].IndexID, indexDef.IndexID)
 	}
 
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice' ORDER BY id")

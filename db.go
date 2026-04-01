@@ -190,6 +190,22 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
+	if backfilled, err := backfillStableCatalogIDs(tables); err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, err
+	} else if backfilled {
+		if err := storage.SaveCatalog(pager, catalogFromTables(tables)); err != nil {
+			_ = pager.Close()
+			_ = file.Close()
+			return nil, wrapStorageError(err)
+		}
+		if err := pager.FlushDirty(); err != nil {
+			_ = pager.Close()
+			_ = file.Close()
+			return nil, wrapStorageError(err)
+		}
+	}
 	if err := validatePersistedIndexRoots(pool, tables); err != nil {
 		_ = pager.Close()
 		_ = file.Close()
@@ -656,6 +672,7 @@ func (db *DB) tablesForSelect(plan *planner.SelectPlan) (map[string]*executor.Ta
 		}
 		execTables[table.Name] = &executor.Table{
 			Name:      table.Name,
+			TableID:   table.TableID,
 			Columns:   append([]parser.ColumnDef(nil), table.Columns...),
 			Rows:      rows,
 			Indexes:   table.Indexes,
@@ -984,6 +1001,9 @@ func (db *DB) applyStagedCreate(stagedTables map[string]*executor.Table, tableNa
 	if table == nil {
 		return nil
 	}
+	if table.TableID == 0 {
+		table.TableID = nextTableID(stagedTables)
+	}
 
 	rootPageID, isNew, err := db.allocatePageID()
 	if err != nil {
@@ -1176,6 +1196,14 @@ func (db *DB) applyStagedIndexCreate(stagedTables map[string]*executor.Table, ta
 	if indexDef == nil {
 		return newExecError("index not found")
 	}
+	if indexDef.IndexID == 0 {
+		indexDef.IndexID = nextIndexID(stagedTables)
+	}
+	if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok {
+		if index := table.Indexes[columnName]; index != nil {
+			index.IndexID = indexDef.IndexID
+		}
+	}
 
 	var pages []stagedPage
 	if indexDef.RootPageID == 0 {
@@ -1186,6 +1214,7 @@ func (db *DB) applyStagedIndexCreate(stagedTables map[string]*executor.Table, ta
 		indexDef.RootPageID = uint32(rootPageID)
 		if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok {
 			if index := table.Indexes[columnName]; index != nil {
+				index.IndexID = indexDef.IndexID
 				index.RootPageID = indexDef.RootPageID
 			}
 		}
@@ -1571,6 +1600,7 @@ func cloneTable(table *executor.Table) *executor.Table {
 
 	cloned := &executor.Table{
 		Name:      table.Name,
+		TableID:   table.TableID,
 		Columns:   columns,
 		Rows:      rows,
 		Indexes:   cloneIndexes(table.Indexes),
@@ -1598,6 +1628,7 @@ func cloneIndexes(indexes map[string]*planner.BasicIndex) map[string]*planner.Ba
 			continue
 		}
 		basic := planner.NewBasicIndex(index.TableName, index.ColumnName)
+		basic.IndexID = index.IndexID
 		basic.RootPageID = index.RootPageID
 		cloned[columnName] = basic
 	}
@@ -1614,11 +1645,92 @@ func cloneIndexDefs(indexDefs []storage.CatalogIndex) []storage.CatalogIndex {
 		cloned = append(cloned, storage.CatalogIndex{
 			Name:       indexDef.Name,
 			Unique:     indexDef.Unique,
+			IndexID:    indexDef.IndexID,
 			RootPageID: indexDef.RootPageID,
 			Columns:    append([]storage.CatalogIndexColumn(nil), indexDef.Columns...),
 		})
 	}
 	return cloned
+}
+
+func nextTableID(tables map[string]*executor.Table) uint32 {
+	var maxID uint32
+	for _, table := range tables {
+		if table != nil && table.TableID > maxID {
+			maxID = table.TableID
+		}
+	}
+	if maxID == 0 {
+		return 1
+	}
+	return maxID + 1
+}
+
+func nextIndexID(tables map[string]*executor.Table) uint32 {
+	var maxID uint32
+	for _, table := range tables {
+		if table == nil {
+			continue
+		}
+		for _, indexDef := range table.IndexDefs {
+			if indexDef.IndexID > maxID {
+				maxID = indexDef.IndexID
+			}
+		}
+	}
+	if maxID == 0 {
+		return 1
+	}
+	return maxID + 1
+}
+
+func backfillStableCatalogIDs(tables map[string]*executor.Table) (bool, error) {
+	if len(tables) == 0 {
+		return false, nil
+	}
+
+	changed := false
+	tableNames := make([]string, 0, len(tables))
+	for tableName := range tables {
+		tableNames = append(tableNames, tableName)
+	}
+	sort.Strings(tableNames)
+
+	for _, tableName := range tableNames {
+		table := tables[tableName]
+		if table == nil {
+			continue
+		}
+		if table.TableID == 0 {
+			table.TableID = nextTableID(tables)
+			changed = true
+		}
+
+		indexNames := make([]string, 0, len(table.IndexDefs))
+		indexByName := make(map[string]*storage.CatalogIndex, len(table.IndexDefs))
+		for i := range table.IndexDefs {
+			indexByName[table.IndexDefs[i].Name] = &table.IndexDefs[i]
+			indexNames = append(indexNames, table.IndexDefs[i].Name)
+		}
+		sort.Strings(indexNames)
+		for _, indexName := range indexNames {
+			indexDef := indexByName[indexName]
+			if indexDef == nil {
+				continue
+			}
+			if indexDef.IndexID == 0 {
+				indexDef.IndexID = nextIndexID(tables)
+				changed = true
+			}
+			if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok {
+				if index := table.Indexes[columnName]; index != nil {
+					index.IndexID = indexDef.IndexID
+				}
+			}
+		}
+	}
+
+	return changed, nil
 }
 
 type indexPageStager struct {
@@ -2054,6 +2166,7 @@ func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
 		table := tables[name]
 		entry := storage.CatalogTable{
 			Name:       table.Name,
+			TableID:    table.TableID,
 			RootPageID: uint32(table.RootPageID()),
 			RowCount:   table.PersistedRowCount(),
 			Columns:    make([]storage.CatalogColumn, 0, len(table.Columns)),
@@ -2110,6 +2223,7 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 		}
 		tables[table.Name] = &executor.Table{
 			Name:      table.Name,
+			TableID:   table.TableID,
 			Columns:   columns,
 			Indexes:   make(map[string]*planner.BasicIndex),
 			IndexDefs: cloneIndexDefs(table.Indexes),
@@ -2121,6 +2235,7 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 				continue
 			}
 			basic := planner.NewBasicIndex(table.Name, columnName)
+			basic.IndexID = index.IndexID
 			basic.RootPageID = index.RootPageID
 			tables[table.Name].Indexes[columnName] = basic
 		}

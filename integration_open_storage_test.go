@@ -492,26 +492,17 @@ func TestOpenFailsOnDirectoryRootMappingMismatch(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	file, err := os.OpenFile(path, os.O_RDWR, 0)
-	if err != nil {
-		t.Fatalf("os.OpenFile() error = %v", err)
+	rawDB, _ := openRawStorage(t, path)
+	if err := storage.WriteDirectoryRootMappings(rawDB.File(), []storage.DirectoryRootMapping{{
+		ObjectType: storage.DirectoryRootMappingObjectTable,
+		TableName:  "users",
+		RootPageID: 999,
+	}}); err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
 	}
-	page := make([]byte, storage.PageSize)
-	if _, err := file.ReadAt(page, storage.HeaderSize); err != nil {
-		_ = file.Close()
-		t.Fatalf("file.ReadAt() error = %v", err)
-	}
-	rootMapBytes := binary.LittleEndian.Uint32(page[44:48])
-	catalogOffset := 48 + int(rootMapBytes)
-	nameLen := int(binary.LittleEndian.Uint16(page[catalogOffset+8 : catalogOffset+10]))
-	rootPageOffset := catalogOffset + 10 + nameLen
-	binary.LittleEndian.PutUint32(page[rootPageOffset:rootPageOffset+4], 999)
-	if _, err := file.WriteAt(page, storage.HeaderSize); err != nil {
-		_ = file.Close()
-		t.Fatalf("file.WriteAt() error = %v", err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatalf("file.Close() error = %v", err)
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
 	}
 
 	db, err = Open(path)

@@ -20,6 +20,7 @@ var (
 // Table is the tiny in-memory table catalog entry.
 type Table struct {
 	Name              string
+	TableID           uint32
 	Columns           []parser.ColumnDef
 	Rows              [][]parser.Value // transient operation rows; persisted storage is authoritative
 	Indexes           map[string]*planner.BasicIndex

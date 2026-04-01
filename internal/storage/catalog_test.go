@@ -23,6 +23,7 @@ func TestCatalogRoundTripIncludesStorageMetadata(t *testing.T) {
 		Tables: []CatalogTable{
 			{
 				Name:       "users",
+				TableID:    7,
 				RootPageID: 1,
 				RowCount:   0,
 				Columns: []CatalogColumn{
@@ -33,6 +34,7 @@ func TestCatalogRoundTripIncludesStorageMetadata(t *testing.T) {
 					{
 						Name:       "idx_users_id_name",
 						Unique:     true,
+						IndexID:    11,
 						RootPageID: 9,
 						Columns: []CatalogIndexColumn{
 							{Name: "id"},
@@ -66,6 +68,9 @@ func TestCatalogRoundTripIncludesStorageMetadata(t *testing.T) {
 	if table.RootPageID != 1 {
 		t.Fatalf("table.RootPageID = %d, want 1", table.RootPageID)
 	}
+	if table.TableID != 7 {
+		t.Fatalf("table.TableID = %d, want 7", table.TableID)
+	}
 	if table.RowCount != 0 {
 		t.Fatalf("table.RowCount = %d, want 0", table.RowCount)
 	}
@@ -77,6 +82,9 @@ func TestCatalogRoundTripIncludesStorageMetadata(t *testing.T) {
 	}
 	if table.Indexes[0].RootPageID != 9 {
 		t.Fatalf("table.Indexes[0].RootPageID = %d, want 9", table.Indexes[0].RootPageID)
+	}
+	if table.Indexes[0].IndexID != 11 {
+		t.Fatalf("table.Indexes[0].IndexID = %d, want 11", table.Indexes[0].IndexID)
 	}
 	if len(table.Indexes[0].Columns) != 2 || table.Indexes[0].Columns[0].Name != "id" || table.Indexes[0].Columns[1].Name != "name" || !table.Indexes[0].Columns[1].Desc {
 		t.Fatalf("table.Indexes[0].Columns = %#v, want [id name DESC]", table.Indexes[0].Columns)
@@ -282,6 +290,55 @@ func TestLoadCatalogV3IndexesRemainCompatibleWithoutRootPageID(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogV4IndexesRemainCompatibleWithoutIDs(t *testing.T) {
+	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_v4.db"))
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+
+	page, err := pager.Get(0)
+	if err != nil {
+		t.Fatalf("pager.Get(0) error = %v", err)
+	}
+	v4 := make([]byte, PageSize)
+	copy(v4, buildCatalogPageDataV4(&CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				RootPageID: 1,
+				RowCount:   0,
+				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
+				Indexes: []CatalogIndex{
+					{Name: "idx_users_id", Unique: false, RootPageID: 9, Columns: []CatalogIndexColumn{{Name: "id"}}},
+				},
+			},
+		},
+	}))
+	clear(page.data)
+	copy(page.data, v4)
+	pager.MarkDirtyWithOriginal(page)
+	if err := pager.FlushDirty(); err != nil {
+		t.Fatalf("pager.FlushDirty() error = %v", err)
+	}
+
+	got, err := LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+	if got.Tables[0].TableID != 0 {
+		t.Fatalf("table.TableID = %d, want 0 for v4 compatibility", got.Tables[0].TableID)
+	}
+	if got.Tables[0].Indexes[0].IndexID != 0 {
+		t.Fatalf("index.IndexID = %d, want 0 for v4 compatibility", got.Tables[0].Indexes[0].IndexID)
+	}
+}
+
 func buildCatalogPageDataV1(cat *CatalogData) []byte {
 	buf := make([]byte, 0, PageSize)
 	buf = appendUint32(buf, catalogVersionV1)
@@ -349,6 +406,44 @@ func buildCatalogPageDataV3(cat *CatalogData) []byte {
 			} else {
 				buf = append(buf, 0)
 			}
+			buf = appendUint16(buf, uint16(len(index.Columns)))
+			for _, column := range index.Columns {
+				buf = appendString(buf, column.Name)
+				if column.Desc {
+					buf = append(buf, 1)
+				} else {
+					buf = append(buf, 0)
+				}
+			}
+		}
+	}
+	page := make([]byte, PageSize)
+	copy(page, buf)
+	return page
+}
+
+func buildCatalogPageDataV4(cat *CatalogData) []byte {
+	buf := make([]byte, 0, PageSize)
+	buf = appendUint32(buf, catalogVersionV4)
+	buf = appendUint32(buf, uint32(len(cat.Tables)))
+	for _, table := range cat.Tables {
+		buf = appendString(buf, table.Name)
+		buf = appendUint32(buf, table.RootPageID)
+		buf = appendUint32(buf, table.RowCount)
+		buf = appendUint16(buf, uint16(len(table.Columns)))
+		for _, column := range table.Columns {
+			buf = appendString(buf, column.Name)
+			buf = append(buf, column.Type)
+		}
+		buf = appendUint16(buf, uint16(len(table.Indexes)))
+		for _, index := range table.Indexes {
+			buf = appendString(buf, index.Name)
+			if index.Unique {
+				buf = append(buf, 1)
+			} else {
+				buf = append(buf, 0)
+			}
+			buf = appendUint32(buf, index.RootPageID)
 			buf = appendUint16(buf, uint16(len(index.Columns)))
 			for _, column := range index.Columns {
 				buf = appendString(buf, column.Name)
