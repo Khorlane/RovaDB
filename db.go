@@ -1372,9 +1372,9 @@ func (db *DB) appendPendingPagesToWAL() (uint64, uint32, error) {
 			if err := storage.SetPageLSN(pageData, frameLSN); err != nil {
 				return 0, 0, wrapStorageError(err)
 			}
-			if err := storage.RecomputePageChecksum(pageData); err != nil {
-				return 0, 0, wrapStorageError(err)
-			}
+		}
+		if err := storage.FinalizePageImage(pageData); err != nil {
+			return 0, 0, wrapStorageError(err)
 		}
 		if err := db.updatePendingPageImage(staged.id, pageData); err != nil {
 			return 0, 0, err

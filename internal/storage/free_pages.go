@@ -51,7 +51,7 @@ func InitFreePage(pageID uint32, nextFreePageID uint32) []byte {
 	binary.LittleEndian.PutUint32(page[pageHeaderOffsetPageID:pageHeaderOffsetPageID+4], pageID)
 	binary.LittleEndian.PutUint16(page[pageHeaderOffsetPageType:pageHeaderOffsetPageType+2], uint16(PageTypeFreePage))
 	binary.LittleEndian.PutUint32(page[freePageOffsetNext:freePageOffsetNext+4], nextFreePageID)
-	_ = RecomputePageChecksum(page)
+	_ = FinalizePageImage(page)
 	return page
 }
 
@@ -69,7 +69,7 @@ func SetFreePageNext(page []byte, next uint32) error {
 		return err
 	}
 	binary.LittleEndian.PutUint32(page[freePageOffsetNext:freePageOffsetNext+4], next)
-	return RecomputePageChecksum(page)
+	return FinalizePageImage(page)
 }
 
 func validateFreePage(page []byte) error {
@@ -79,11 +79,7 @@ func validateFreePage(page []byte) error {
 	if PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType:pageHeaderOffsetPageType+2])) != PageTypeFreePage {
 		return errCorruptedPageHeader
 	}
-	storedChecksum, err := PageChecksum(page)
-	if err != nil {
-		return err
-	}
-	if storedChecksum != pageChecksum(page) {
+	if err := validateStoredPageChecksum(page); err != nil {
 		return errCorruptedPageHeader
 	}
 	return nil

@@ -54,6 +54,7 @@ func InitDirectoryPage(pageID uint32, formatVersion uint32) []byte {
 	binary.LittleEndian.PutUint32(page[pageHeaderOffsetPageID:pageHeaderOffsetPageID+4], pageID)
 	binary.LittleEndian.PutUint16(page[pageHeaderOffsetPageType:pageHeaderOffsetPageType+2], uint16(PageTypeDirectory))
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetFormatVersion:directoryBodyOffsetFormatVersion+4], formatVersion)
+	_ = FinalizePageImage(page)
 	return page
 }
 
@@ -157,7 +158,7 @@ func ReadDirectoryPage(file *os.File) ([]byte, error) {
 
 // WriteDirectoryPage rewrites the durable directory page in place.
 func WriteDirectoryPage(file *os.File, page []byte) error {
-	if err := ValidateDirectoryPage(page); err != nil {
+	if err := FinalizePageImage(page); err != nil {
 		return err
 	}
 	return writeDirectoryPage(file, page)
@@ -458,6 +459,9 @@ func buildDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, free
 	binary.LittleEndian.PutUint64(page[checkpointOffset:checkpointOffset+8], checkpointMeta.LastCheckpointLSN)
 	binary.LittleEndian.PutUint32(page[checkpointOffset+8:checkpointOffset+12], checkpointMeta.LastCheckpointPageCount)
 	binary.LittleEndian.PutUint32(page[checkpointOffset+12:checkpointOffset+16], checkpointMeta.ReservedCheckpoint)
+	if err := FinalizePageImage(page); err != nil {
+		return nil, err
+	}
 	return page, nil
 }
 
@@ -649,4 +653,15 @@ func directoryCheckpointOffset(page []byte) (int, error) {
 		return 0, err
 	}
 	return start + length, nil
+}
+
+func validateDirectoryPageImage(page []byte) error {
+	if err := ValidateDirectoryPage(page); err != nil {
+		return err
+	}
+	storedChecksum := binary.LittleEndian.Uint32(page[pageHeaderOffsetChecksum : pageHeaderOffsetChecksum+4])
+	if storedChecksum != 0 && storedChecksum != pageChecksum(page) {
+		return errCorruptedDirectoryPage
+	}
+	return nil
 }

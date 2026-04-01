@@ -79,7 +79,7 @@ func SetIndexLeafRightSibling(page []byte, pageID uint32) error {
 		return err
 	}
 	binary.LittleEndian.PutUint32(page[indexPageBodyOffsetRightSibling:indexPageBodyOffsetRightSibling+4], pageID)
-	return nil
+	return FinalizePageImage(page)
 }
 
 func IndexPageEntry(page []byte, entryID int) (offset int, length int, err error) {
@@ -224,6 +224,9 @@ func InsertIndexEntry(page []byte, payload []byte) (entryID int, err error) {
 	binary.LittleEndian.PutUint16(page[indexPageBodyOffsetEntryCount:indexPageBodyOffsetEntryCount+2], uint16(entryCount+1))
 	binary.LittleEndian.PutUint16(page[indexPageBodyOffsetFreeStart:indexPageBodyOffsetFreeStart+2], uint16(freeStart+indexPageEntrySize))
 	binary.LittleEndian.PutUint16(page[indexPageBodyOffsetFreeEnd:indexPageBodyOffsetFreeEnd+2], uint16(payloadOffset))
+	if err := FinalizePageImage(page); err != nil {
+		return 0, err
+	}
 	return entryCount, nil
 }
 
@@ -434,11 +437,12 @@ func initIndexPage(pageID uint32, pageType PageType) []byte {
 	binary.LittleEndian.PutUint16(page[indexPageBodyOffsetFreeStart:indexPageBodyOffsetFreeStart+2], indexPageBodyStart)
 	binary.LittleEndian.PutUint16(page[indexPageBodyOffsetFreeEnd:indexPageBodyOffsetFreeEnd+2], PageSize)
 	binary.LittleEndian.PutUint32(page[indexPageBodyOffsetRightSibling:indexPageBodyOffsetRightSibling+4], 0)
+	_ = FinalizePageImage(page)
 	return page
 }
 
 func validateIndexPage(page []byte) error {
-	if len(page) != PageSize {
+	if err := validateStampedPageHeader(page); err != nil {
 		return errCorruptedIndexPage
 	}
 	pageType := PageType(binary.LittleEndian.Uint16(page[indexPageHeaderOffsetPageType : indexPageHeaderOffsetPageType+2]))

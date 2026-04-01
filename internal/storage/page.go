@@ -140,12 +140,53 @@ func PageChecksum(page []byte) (uint32, error) {
 }
 
 func RecomputePageChecksum(page []byte) error {
-	if err := validateStampedPageHeader(page); err != nil {
+	if err := validateChecksumPageHeader(page); err != nil {
 		return err
 	}
 	binary.LittleEndian.PutUint32(page[pageHeaderOffsetChecksum:pageHeaderOffsetChecksum+4], 0)
 	binary.LittleEndian.PutUint32(page[pageHeaderOffsetChecksum:pageHeaderOffsetChecksum+4], pageChecksum(page))
 	return nil
+}
+
+// FinalizePageImage stamps the checksum for a page image that is ready for persistence.
+func FinalizePageImage(page []byte) error {
+	if err := validateChecksumPageHeader(page); err != nil {
+		return err
+	}
+	if err := RecomputePageChecksum(page); err != nil {
+		return err
+	}
+	return ValidatePageImage(page)
+}
+
+// ValidatePageImage validates one full persisted page image.
+func ValidatePageImage(page []byte) error {
+	if len(page) != PageSize {
+		return errCorruptedPageHeader
+	}
+
+	pageType := PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType : pageHeaderOffsetPageType+2]))
+	switch pageType {
+	case PageTypeTable:
+		if err := validateStoredPageChecksum(page); err != nil {
+			return errCorruptedTablePage
+		}
+		return validateSlottedTablePage(page)
+	case PageTypeIndexLeaf, PageTypeIndexInternal:
+		if err := validateStoredPageChecksum(page); err != nil {
+			return errCorruptedIndexPage
+		}
+		return validateIndexPage(page)
+	case PageTypeFreePage:
+		if err := validateStoredPageChecksum(page); err != nil {
+			return errCorruptedPageHeader
+		}
+		return validateFreePage(page)
+	case PageTypeDirectory:
+		return validateDirectoryPageImage(page)
+	default:
+		return errCorruptedPageHeader
+	}
 }
 
 func validateStampedPageHeader(page []byte) error {
@@ -158,6 +199,31 @@ func validateStampedPageHeader(page []byte) error {
 	}
 	pageID := binary.LittleEndian.Uint32(page[pageHeaderOffsetPageID : pageHeaderOffsetPageID+4])
 	if pageID == 0 {
+		return errCorruptedPageHeader
+	}
+	return nil
+}
+
+func validateChecksumPageHeader(page []byte) error {
+	if len(page) != PageSize {
+		return errCorruptedPageHeader
+	}
+	pageType := PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType : pageHeaderOffsetPageType+2]))
+	if !IsValidPageType(pageType) {
+		return errCorruptedPageHeader
+	}
+	pageID := binary.LittleEndian.Uint32(page[pageHeaderOffsetPageID : pageHeaderOffsetPageID+4])
+	if pageID == 0 && pageType != PageTypeDirectory {
+		return errCorruptedPageHeader
+	}
+	return nil
+}
+
+func validateStoredPageChecksum(page []byte) error {
+	if err := validateChecksumPageHeader(page); err != nil {
+		return err
+	}
+	if binary.LittleEndian.Uint32(page[pageHeaderOffsetChecksum:pageHeaderOffsetChecksum+4]) != pageChecksum(page) {
 		return errCorruptedPageHeader
 	}
 	return nil

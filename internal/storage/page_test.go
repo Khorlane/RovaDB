@@ -1,8 +1,9 @@
 package storage
 
-import "encoding/binary"
-
-import "testing"
+import (
+	"encoding/binary"
+	"testing"
+)
 
 func TestNewPage(t *testing.T) {
 	page := NewPage(7)
@@ -152,5 +153,92 @@ func TestStampedPageHelpersRejectInvalidHeader(t *testing.T) {
 	}
 	if err := RecomputePageChecksum(page); err != errCorruptedPageHeader {
 		t.Fatalf("RecomputePageChecksum() error = %v, want %v", err, errCorruptedPageHeader)
+	}
+}
+
+func TestFinalizePageImageStampsValidTableChecksum(t *testing.T) {
+	page := InitializeTablePage(7)
+	if err := ValidatePageImage(page); err != nil {
+		t.Fatalf("ValidatePageImage() error = %v", err)
+	}
+}
+
+func TestFinalizePageImageStampsValidIndexFreeAndDirectoryPages(t *testing.T) {
+	indexLeaf := InitIndexLeafPage(3)
+	if err := ValidatePageImage(indexLeaf); err != nil {
+		t.Fatalf("ValidatePageImage(indexLeaf) error = %v", err)
+	}
+
+	freePage := InitFreePage(4, 0)
+	if err := ValidatePageImage(freePage); err != nil {
+		t.Fatalf("ValidatePageImage(freePage) error = %v", err)
+	}
+
+	directoryPage, err := BuildCatalogPageData(&CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				RootPageID: 1,
+				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildCatalogPageData() error = %v", err)
+	}
+	if err := ValidatePageImage(directoryPage); err != nil {
+		t.Fatalf("ValidatePageImage(directory) error = %v", err)
+	}
+}
+
+func TestValidatePageImageRejectsMutatedStampedPageByte(t *testing.T) {
+	page := InitializeTablePage(7)
+	page[tablePageBodyOffsetFreeEnd] ^= 0x01
+
+	if err := ValidatePageImage(page); err != errCorruptedTablePage {
+		t.Fatalf("ValidatePageImage() error = %v, want %v", err, errCorruptedTablePage)
+	}
+}
+
+func TestValidatePageImageRejectsPageLSNChangeWithoutRestamp(t *testing.T) {
+	page := InitializeTablePage(7)
+	if err := SetPageLSN(page, 42); err != nil {
+		t.Fatalf("SetPageLSN() error = %v", err)
+	}
+
+	if err := ValidatePageImage(page); err != errCorruptedTablePage {
+		t.Fatalf("ValidatePageImage() error = %v, want %v", err, errCorruptedTablePage)
+	}
+}
+
+func TestValidatePageImageRejectsPageIDChangeWithoutRestamp(t *testing.T) {
+	page := InitializeTablePage(7)
+	binary.LittleEndian.PutUint32(page[pageHeaderOffsetPageID:pageHeaderOffsetPageID+4], 8)
+
+	if err := ValidatePageImage(page); err != errCorruptedTablePage {
+		t.Fatalf("ValidatePageImage() error = %v, want %v", err, errCorruptedTablePage)
+	}
+}
+
+func TestFinalizePageImageRestoresValidityAfterPageLSNChange(t *testing.T) {
+	page := InitializeTablePage(7)
+	if err := SetPageLSN(page, 42); err != nil {
+		t.Fatalf("SetPageLSN() error = %v", err)
+	}
+	if err := FinalizePageImage(page); err != nil {
+		t.Fatalf("FinalizePageImage() error = %v", err)
+	}
+
+	if err := ValidatePageImage(page); err != nil {
+		t.Fatalf("ValidatePageImage() error = %v", err)
+	}
+}
+
+func TestValidatePageImageRejectsInvalidPageType(t *testing.T) {
+	page := InitializeTablePage(7)
+	binary.LittleEndian.PutUint16(page[pageHeaderOffsetPageType:pageHeaderOffsetPageType+2], 99)
+
+	if err := ValidatePageImage(page); err != errCorruptedPageHeader {
+		t.Fatalf("ValidatePageImage() error = %v, want %v", err, errCorruptedPageHeader)
 	}
 }

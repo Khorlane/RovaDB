@@ -542,7 +542,13 @@ func validateWALPageImage(pageID uint32, pageLSN uint64, pageData []byte) error 
 	}
 
 	if pageID == catalogPageID {
-		if _, err := LoadCatalogPageData(pageData); err != nil {
+		if binary.LittleEndian.Uint32(pageData[pageHeaderOffsetPageID:pageHeaderOffsetPageID+4]) != uint32(DirectoryControlPageID) {
+			return errCorruptedWALFrame
+		}
+		if PageType(binary.LittleEndian.Uint16(pageData[pageHeaderOffsetPageType:pageHeaderOffsetPageType+2])) != PageTypeDirectory {
+			return errCorruptedWALFrame
+		}
+		if err := ValidatePageImage(pageData); err != nil {
 			return errCorruptedWALFrame
 		}
 		return nil
@@ -555,26 +561,7 @@ func validateWALPageImage(pageID uint32, pageLSN uint64, pageData []byte) error 
 	if err != nil || embeddedPageLSN != pageLSN {
 		return errCorruptedWALFrame
 	}
-	storedChecksum, err := PageChecksum(pageData)
-	if err != nil || storedChecksum != pageChecksum(pageData) {
-		return errCorruptedWALFrame
-	}
-
-	pageType := PageType(binary.LittleEndian.Uint16(pageData[4:6]))
-	switch pageType {
-	case PageTypeTable:
-		if err := validateSlottedTablePage(pageData); err != nil {
-			return errCorruptedWALFrame
-		}
-	case PageTypeIndexLeaf, PageTypeIndexInternal:
-		if err := validateIndexPage(pageData); err != nil {
-			return errCorruptedWALFrame
-		}
-	case PageTypeFreePage:
-		if err := validateFreePage(pageData); err != nil {
-			return errCorruptedWALFrame
-		}
-	default:
+	if err := ValidatePageImage(pageData); err != nil {
 		return errCorruptedWALFrame
 	}
 

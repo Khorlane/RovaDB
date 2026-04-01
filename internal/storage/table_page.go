@@ -182,6 +182,7 @@ func InitializeTablePage(pageID uint32) []byte {
 	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetSlotCount:tablePageBodyOffsetSlotCount+2], 0)
 	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeStart:tablePageBodyOffsetFreeStart+2], tablePageBodyStart)
 	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeEnd:tablePageBodyOffsetFreeEnd+2], PageSize)
+	_ = FinalizePageImage(page)
 	return page
 }
 
@@ -319,6 +320,9 @@ func InsertRowIntoTablePage(page []byte, row []byte) (slotID int, err error) {
 	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetSlotCount:tablePageBodyOffsetSlotCount+2], uint16(slotCount+1))
 	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeStart:tablePageBodyOffsetFreeStart+2], uint16(freeStart+tablePageSlotEntrySize))
 	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeEnd:tablePageBodyOffsetFreeEnd+2], uint16(rowOffset))
+	if err := FinalizePageImage(page); err != nil {
+		return 0, err
+	}
 	return slotCount, nil
 }
 
@@ -446,11 +450,11 @@ func BuildSlottedTablePageDataWithLocators(pageID uint32, rows [][]parser.Value)
 }
 
 func validateSlottedTablePage(page []byte) error {
-	if len(page) != PageSize {
+	if err := validateStampedPageHeader(page); err != nil {
 		return errCorruptedTablePage
 	}
 	pageType := PageType(binary.LittleEndian.Uint16(page[tablePageHeaderOffsetPageType : tablePageHeaderOffsetPageType+2]))
-	if !IsValidPageType(pageType) || pageType != PageTypeTable {
+	if pageType != PageTypeTable {
 		return errCorruptedTablePage
 	}
 
