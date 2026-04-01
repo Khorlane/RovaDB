@@ -25,3 +25,38 @@ func SupportedWALVersion(v uint32) bool {
 func CompatibleWALWithDB(walVersion uint32, dbFormatVersion uint32) bool {
 	return SupportedWALVersion(walVersion) && SupportedDBFormatVersion(dbFormatVersion)
 }
+
+// FormatSignature is the explicit open-time DB/directory/WAL compatibility signature.
+type FormatSignature struct {
+	DBFormatVersion        uint32
+	DirectoryFormatVersion uint32
+	WALVersion             uint32
+	WALDBFormatVersion     uint32
+	PageSize               uint32
+}
+
+// ValidateFormatSignature validates the combined DB, directory, and WAL compatibility contract.
+func ValidateFormatSignature(sig FormatSignature) error {
+	if !SupportedDBFormatVersion(sig.DBFormatVersion) {
+		return errCorruptedDatabaseHeader
+	}
+	if !SupportedDBFormatVersion(sig.DirectoryFormatVersion) {
+		return errCorruptedDirectoryPage
+	}
+	if sig.DBFormatVersion != sig.DirectoryFormatVersion {
+		return errCorruptedDirectoryPage
+	}
+	if !SupportedWALVersion(sig.WALVersion) {
+		return errUnsupportedWALVersion
+	}
+	if sig.PageSize != PageSize {
+		return errWALPageSizeMismatch
+	}
+	if !CompatibleWALWithDB(sig.WALVersion, sig.WALDBFormatVersion) {
+		return errCorruptedWALHeader
+	}
+	if sig.WALDBFormatVersion != sig.DBFormatVersion {
+		return errCorruptedWALHeader
+	}
+	return nil
+}

@@ -106,6 +106,36 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
+	dbFormatVersion, err := storage.ReadDBFormatVersion(file.File())
+	if err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
+	directoryPage, err := storage.ReadDirectoryPage(file.File())
+	if err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
+	directoryFormatVersion, err := storage.DirectoryFormatVersion(directoryPage)
+	if err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
+	walHeader, err := storage.ReadWALHeaderFromPath(path)
+	if err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
+	if err := storage.ValidateFormatSignature(storage.FormatSignature{
+		DBFormatVersion:        dbFormatVersion,
+		DirectoryFormatVersion: directoryFormatVersion,
+		WALVersion:             walHeader.WALVersion,
+		WALDBFormatVersion:     walHeader.DBFormatVersion,
+		PageSize:               walHeader.PageSize,
+	}); err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
 	if err := replayCommittedWAL(path); err != nil {
 		_ = file.Close()
 		return nil, wrapStorageError(err)

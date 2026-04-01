@@ -1,6 +1,9 @@
 package storage
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestSupportedDBFormatVersionAcceptsCurrentVersion(t *testing.T) {
 	if !SupportedDBFormatVersion(CurrentDBFormatVersion) {
@@ -35,5 +38,70 @@ func TestCompatibleWALWithDBRequiresMatchingSupportedVersions(t *testing.T) {
 	}
 	if CompatibleWALWithDB(CurrentWALVersion, CurrentDBFormatVersion+1) {
 		t.Fatal("CompatibleWALWithDB(current wal,unsupported db) = true, want false")
+	}
+}
+
+func TestValidateFormatSignatureAcceptsCurrentMatchingSignature(t *testing.T) {
+	err := ValidateFormatSignature(FormatSignature{
+		DBFormatVersion:        CurrentDBFormatVersion,
+		DirectoryFormatVersion: CurrentDBFormatVersion,
+		WALVersion:             CurrentWALVersion,
+		WALDBFormatVersion:     CurrentDBFormatVersion,
+		PageSize:               PageSize,
+	})
+	if err != nil {
+		t.Fatalf("ValidateFormatSignature() error = %v", err)
+	}
+}
+
+func TestValidateFormatSignatureRejectsDBDirectoryMismatch(t *testing.T) {
+	err := ValidateFormatSignature(FormatSignature{
+		DBFormatVersion:        CurrentDBFormatVersion,
+		DirectoryFormatVersion: CurrentDBFormatVersion + 1,
+		WALVersion:             CurrentWALVersion,
+		WALDBFormatVersion:     CurrentDBFormatVersion,
+		PageSize:               PageSize,
+	})
+	if !errors.Is(err, errCorruptedDirectoryPage) {
+		t.Fatalf("ValidateFormatSignature() error = %v, want %v", err, errCorruptedDirectoryPage)
+	}
+}
+
+func TestValidateFormatSignatureRejectsWALDBFormatMismatch(t *testing.T) {
+	err := ValidateFormatSignature(FormatSignature{
+		DBFormatVersion:        CurrentDBFormatVersion,
+		DirectoryFormatVersion: CurrentDBFormatVersion,
+		WALVersion:             CurrentWALVersion,
+		WALDBFormatVersion:     CurrentDBFormatVersion + 1,
+		PageSize:               PageSize,
+	})
+	if !errors.Is(err, errCorruptedWALHeader) {
+		t.Fatalf("ValidateFormatSignature() error = %v, want %v", err, errCorruptedWALHeader)
+	}
+}
+
+func TestValidateFormatSignatureRejectsUnsupportedDBFormat(t *testing.T) {
+	err := ValidateFormatSignature(FormatSignature{
+		DBFormatVersion:        CurrentDBFormatVersion + 1,
+		DirectoryFormatVersion: CurrentDBFormatVersion + 1,
+		WALVersion:             CurrentWALVersion,
+		WALDBFormatVersion:     CurrentDBFormatVersion + 1,
+		PageSize:               PageSize,
+	})
+	if !errors.Is(err, errCorruptedDatabaseHeader) {
+		t.Fatalf("ValidateFormatSignature() error = %v, want %v", err, errCorruptedDatabaseHeader)
+	}
+}
+
+func TestValidateFormatSignatureRejectsUnsupportedWALVersion(t *testing.T) {
+	err := ValidateFormatSignature(FormatSignature{
+		DBFormatVersion:        CurrentDBFormatVersion,
+		DirectoryFormatVersion: CurrentDBFormatVersion,
+		WALVersion:             CurrentWALVersion + 1,
+		WALDBFormatVersion:     CurrentDBFormatVersion,
+		PageSize:               PageSize,
+	})
+	if !errors.Is(err, errUnsupportedWALVersion) {
+		t.Fatalf("ValidateFormatSignature() error = %v, want %v", err, errUnsupportedWALVersion)
 	}
 }

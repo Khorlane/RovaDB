@@ -118,7 +118,13 @@ func ReadWALHeader(r io.Reader) (WALHeader, error) {
 
 // EnsureWALFile opens or creates a WAL sidecar with a validated header.
 func EnsureWALFile(dbPath string, dbFormatVersion uint32) error {
-	if !CompatibleWALWithDB(CurrentWALVersion, dbFormatVersion) {
+	if err := ValidateFormatSignature(FormatSignature{
+		DBFormatVersion:        dbFormatVersion,
+		DirectoryFormatVersion: dbFormatVersion,
+		WALVersion:             CurrentWALVersion,
+		WALDBFormatVersion:     dbFormatVersion,
+		PageSize:               PageSize,
+	}); err != nil {
 		return errCorruptedWALHeader
 	}
 
@@ -158,10 +164,23 @@ func EnsureWALFile(dbPath string, dbFormatVersion uint32) error {
 	if err != nil {
 		return err
 	}
-	if !CompatibleWALWithDB(header.WALVersion, dbFormatVersion) || header.DBFormatVersion != dbFormatVersion {
-		return errCorruptedWALHeader
+	return ValidateFormatSignature(FormatSignature{
+		DBFormatVersion:        dbFormatVersion,
+		DirectoryFormatVersion: dbFormatVersion,
+		WALVersion:             header.WALVersion,
+		WALDBFormatVersion:     header.DBFormatVersion,
+		PageSize:               header.PageSize,
+	})
+}
+
+// ReadWALHeaderFromPath reads the validated WAL header from the sidecar file path.
+func ReadWALHeaderFromPath(dbPath string) (WALHeader, error) {
+	file, err := os.Open(WALPath(dbPath))
+	if err != nil {
+		return WALHeader{}, err
 	}
-	return nil
+	defer file.Close()
+	return ReadWALHeader(file)
 }
 
 // EncodeWALFrame encodes one fixed-width WAL frame.

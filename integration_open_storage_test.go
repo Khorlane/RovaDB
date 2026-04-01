@@ -140,6 +140,42 @@ func TestOpenInvalidHeader(t *testing.T) {
 	}
 }
 
+func TestOpenFailsOnUnsupportedDBHeaderVersion(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("os.OpenFile() error = %v", err)
+	}
+	var header [storage.HeaderSize]byte
+	if _, err := file.ReadAt(header[:], 0); err != nil {
+		_ = file.Close()
+		t.Fatalf("file.ReadAt() error = %v", err)
+	}
+	binary.LittleEndian.PutUint32(header[8:12], storage.CurrentDBFormatVersion+1)
+	if _, err := file.WriteAt(header[:], 0); err != nil {
+		_ = file.Close()
+		t.Fatalf("file.WriteAt() error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("file.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want unsupported DB header version failure")
+	}
+}
+
 func TestRecoveryOnOpenRestoresLastCommittedState(t *testing.T) {
 	path := testDBPath(t)
 

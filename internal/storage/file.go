@@ -76,25 +76,32 @@ func writeHeader(f *os.File) error {
 }
 
 func readHeader(f *os.File) error {
+	_, err := ReadDBFormatVersion(f)
+	return err
+}
+
+// ReadDBFormatVersion reads and validates the durable DB header version.
+func ReadDBFormatVersion(f *os.File) (uint32, error) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return err
+		return 0, err
 	}
 
 	var header [HeaderSize]byte
 	if _, err := io.ReadFull(f, header[:]); err != nil {
-		return errCorruptedDatabaseHeader
+		return 0, errCorruptedDatabaseHeader
 	}
 	if string(header[:8]) != string(magic[:]) {
-		return errCorruptedDatabaseHeader
+		return 0, errCorruptedDatabaseHeader
 	}
-	if !SupportedDBFormatVersion(binary.LittleEndian.Uint32(header[8:12])) {
-		return errCorruptedDatabaseHeader
+	formatVersion := binary.LittleEndian.Uint32(header[8:12])
+	if !SupportedDBFormatVersion(formatVersion) {
+		return 0, errCorruptedDatabaseHeader
 	}
 	for _, b := range header[12:16] {
 		if b != 0 {
-			return errCorruptedDatabaseHeader
+			return 0, errCorruptedDatabaseHeader
 		}
 	}
 
-	return nil
+	return formatVersion, nil
 }
