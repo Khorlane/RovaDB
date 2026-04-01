@@ -375,6 +375,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		var committedTables map[string]*executor.Table
 		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
+			_, rootPageID := droppedIndexRootForName(stagedTables, stmt.Name)
 
 			var err error
 			rowsAffected, committedTables, err = executeDropIndex(stmt, stagedTables)
@@ -382,7 +383,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 				return err
 			}
 
-			if err := db.applyStagedCatalogOnly(stagedTables); err != nil {
+			if err := db.applyStagedDropIndex(stagedTables, rootPageID); err != nil {
 				return err
 			}
 			return nil
@@ -403,6 +404,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		var committedTables map[string]*executor.Table
 		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
+			droppedRootPageIDs := droppedTableRootPageIDs(stagedTables, stmt.Name)
 
 			var err error
 			rowsAffected, committedTables, err = executeDropTable(stmt, stagedTables)
@@ -410,7 +412,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 				return err
 			}
 
-			if err := db.applyStagedCatalogOnly(stagedTables); err != nil {
+			if err := db.applyStagedDropTable(stagedTables, droppedRootPageIDs); err != nil {
 				return err
 			}
 			return nil
@@ -1056,6 +1058,54 @@ func (db *DB) applyStagedCatalogOnly(stagedTables map[string]*executor.Table) er
 	return db.stageDirtyState(catalogData, nil)
 }
 
+func (db *DB) applyStagedDropIndex(stagedTables map[string]*executor.Table, rootPageID storage.PageID) error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+
+	originalFreeListHead := db.freeListHead
+	pages, err := db.buildFreedPages(rootPageID)
+	if err != nil {
+		db.freeListHead = originalFreeListHead
+		return err
+	}
+
+	catalogData, err := db.buildCatalogPageData(stagedTables)
+	if err != nil {
+		db.freeListHead = originalFreeListHead
+		return wrapStorageError(err)
+	}
+	if err := db.stageDirtyState(catalogData, pages); err != nil {
+		db.freeListHead = originalFreeListHead
+		return err
+	}
+	return nil
+}
+
+func (db *DB) applyStagedDropTable(stagedTables map[string]*executor.Table, rootPageIDs []storage.PageID) error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+
+	originalFreeListHead := db.freeListHead
+	pages, err := db.buildFreedPages(rootPageIDs...)
+	if err != nil {
+		db.freeListHead = originalFreeListHead
+		return err
+	}
+
+	catalogData, err := db.buildCatalogPageData(stagedTables)
+	if err != nil {
+		db.freeListHead = originalFreeListHead
+		return wrapStorageError(err)
+	}
+	if err := db.stageDirtyState(catalogData, pages); err != nil {
+		db.freeListHead = originalFreeListHead
+		return err
+	}
+	return nil
+}
+
 func (db *DB) applyStagedIndexCreate(stagedTables map[string]*executor.Table, tableName, indexName string) error {
 	if db == nil || db.pager == nil {
 		return nil
@@ -1133,6 +1183,37 @@ func (db *DB) setFreeListHead(head uint32) error {
 	}
 	db.freeListHead = head
 	return nil
+}
+
+func (db *DB) buildFreedPages(pageIDs ...storage.PageID) ([]stagedPage, error) {
+	if db == nil {
+		return nil, ErrInvalidArgument
+	}
+	if len(pageIDs) == 0 {
+		return nil, nil
+	}
+
+	pages := make([]stagedPage, 0, len(pageIDs))
+	seen := make(map[storage.PageID]struct{}, len(pageIDs))
+	for _, pageID := range pageIDs {
+		if pageID == 0 {
+			continue
+		}
+		if _, exists := seen[pageID]; exists {
+			continue
+		}
+		seen[pageID] = struct{}{}
+
+		pageData := storage.InitFreePage(uint32(pageID), db.freeListHead)
+		pages = append(pages, stagedPage{
+			id:   pageID,
+			data: pageData,
+		})
+		if err := db.setFreeListHead(uint32(pageID)); err != nil {
+			return nil, err
+		}
+	}
+	return pages, nil
 }
 
 func (db *DB) allocatePageID() (storage.PageID, bool, error) {
@@ -2099,6 +2180,47 @@ func executeDropTable(stmt *parser.DropTableStmt, tables map[string]*executor.Ta
 	}
 	delete(tables, stmt.Name)
 	return 0, tables, nil
+}
+
+func droppedIndexRootForName(tables map[string]*executor.Table, indexName string) (string, storage.PageID) {
+	for tableName, table := range tables {
+		if table == nil {
+			continue
+		}
+		indexDef := table.IndexDefinition(indexName)
+		if indexDef == nil {
+			continue
+		}
+		return tableName, storage.PageID(indexDef.RootPageID)
+	}
+	return "", 0
+}
+
+func droppedTableRootPageIDs(tables map[string]*executor.Table, tableName string) []storage.PageID {
+	table := tables[tableName]
+	if table == nil {
+		return nil
+	}
+
+	indexNames := make([]string, 0, len(table.IndexDefs))
+	indexRoots := make(map[string]storage.PageID, len(table.IndexDefs))
+	for _, indexDef := range table.IndexDefs {
+		if indexDef.RootPageID == 0 {
+			continue
+		}
+		indexNames = append(indexNames, indexDef.Name)
+		indexRoots[indexDef.Name] = storage.PageID(indexDef.RootPageID)
+	}
+	sort.Strings(indexNames)
+
+	pageIDs := make([]storage.PageID, 0, len(indexNames)+1)
+	for _, indexName := range indexNames {
+		pageIDs = append(pageIDs, indexRoots[indexName])
+	}
+	if table.RootPageID() != 0 {
+		pageIDs = append(pageIDs, table.RootPageID())
+	}
+	return pageIDs
 }
 
 func (db *DB) defineLegacyBasicIndex(tableName, columnName string) error {

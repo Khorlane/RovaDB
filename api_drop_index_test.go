@@ -5,6 +5,7 @@ import (
 
 	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/planner"
+	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
 func TestExecAPIDropIndexRemovesDefinitionAndPlannerUse(t *testing.T) {
@@ -120,5 +121,66 @@ func TestExecAPIDropIndexLeavesOtherIndexesIntactAndPersistsAcrossReopen(t *test
 	}
 	if len(table.Indexes) != 0 {
 		t.Fatalf("table.Indexes = %#v, want no legacy index after dropping the only compatible one", table.Indexes)
+	}
+}
+
+func TestExecAPIDropIndexFreesRootPageAndReusesIt(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"CREATE INDEX idx_users_name ON users (name)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	droppedRootPageID := storage.PageID(db.tables["users"].IndexDefinition("idx_users_name").RootPageID)
+
+	if _, err := db.Exec("DROP INDEX idx_users_name"); err != nil {
+		t.Fatalf("Exec(drop index) error = %v", err)
+	}
+	if db.freeListHead != uint32(droppedRootPageID) {
+		t.Fatalf("db.freeListHead = %d, want %d", db.freeListHead, droppedRootPageID)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	freePage, err := pager.Get(droppedRootPageID)
+	if err != nil {
+		t.Fatalf("pager.Get(%d) error = %v", droppedRootPageID, err)
+	}
+	nextFreePageID, err := storage.FreePageNext(freePage.Data())
+	if err != nil {
+		t.Fatalf("FreePageNext() error = %v", err)
+	}
+	if nextFreePageID != 0 {
+		t.Fatalf("FreePageNext() = %d, want 0", nextFreePageID)
+	}
+	head, err := storage.ReadDirectoryFreeListHead(rawDB.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryFreeListHead() error = %v", err)
+	}
+	if head != uint32(droppedRootPageID) {
+		t.Fatalf("ReadDirectoryFreeListHead() = %d, want %d", head, droppedRootPageID)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+	if _, err := db.Exec("CREATE INDEX idx_users_name_again ON users (name)"); err != nil {
+		t.Fatalf("Exec(create replacement index) error = %v", err)
+	}
+	reusedRootPageID := db.tables["users"].IndexDefinition("idx_users_name_again").RootPageID
+	if reusedRootPageID != uint32(droppedRootPageID) {
+		t.Fatalf("replacement index RootPageID = %d, want %d", reusedRootPageID, droppedRootPageID)
 	}
 }
