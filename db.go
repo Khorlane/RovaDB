@@ -26,6 +26,11 @@ var (
 	ErrTxnInvariantViolation    = errors.New("rovadb: transaction invariant violation")
 )
 
+var (
+	appendWALFrameRecord  = storage.AppendWALFrame
+	appendWALCommitRecord = storage.AppendWALCommitRecord
+)
+
 // DB is the top-level handle for a RovaDB database.
 // Mutating statements execute under an internal autocommit discipline.
 type DB struct {
@@ -44,6 +49,7 @@ type DB struct {
 	writerActive bool
 
 	pendingPages []stagedPage
+	nextWALLSN   uint64
 }
 
 type stagedPage struct {
@@ -116,12 +122,13 @@ func Open(path string) (*DB, error) {
 	clearLoadedRows(tables)
 
 	return &DB{
-		path:   path,
-		file:   file,
-		pager:  pager,
-		pool:   pool,
-		tables: tables,
-		txn:    nil,
+		path:       path,
+		file:       file,
+		pager:      pager,
+		pool:       pool,
+		tables:     tables,
+		txn:        nil,
+		nextWALLSN: 1,
 	}, nil
 }
 
@@ -751,6 +758,9 @@ func (db *DB) commitTxn() error {
 		return newExecError("invalid transaction state")
 	}
 	if db.txn.IsDirty() {
+		if err := db.appendPendingPagesToWAL(); err != nil {
+			return err
+		}
 		journalPages := db.pager.DirtyPagesWithOriginals()
 		if len(journalPages) > 0 {
 			if err := storage.WriteRollbackJournal(storage.JournalPath(db.path), db.pager.PageSize(), journalPages); err != nil {
@@ -995,7 +1005,80 @@ func (db *DB) stageDirtyState(catalogData []byte, pages []stagedPage) error {
 	if err := db.materializePendingPages(); err != nil {
 		return err
 	}
-	db.pendingPages = nil
+	return nil
+}
+
+func (db *DB) finalCommittedPageImages() []stagedPage {
+	if db == nil || len(db.pendingPages) == 0 {
+		return nil
+	}
+
+	latestByID := make(map[storage.PageID]stagedPage, len(db.pendingPages))
+	for _, staged := range db.pendingPages {
+		latestByID[staged.id] = stagedPage{
+			id:    staged.id,
+			data:  append([]byte(nil), staged.data...),
+			isNew: staged.isNew,
+		}
+	}
+
+	ids := make([]int, 0, len(latestByID))
+	for pageID := range latestByID {
+		ids = append(ids, int(pageID))
+	}
+	sort.Ints(ids)
+
+	finalPages := make([]stagedPage, 0, len(ids))
+	for _, id := range ids {
+		finalPages = append(finalPages, latestByID[storage.PageID(id)])
+	}
+	return finalPages
+}
+
+func (db *DB) nextWALRecordLSN() uint64 {
+	if db == nil {
+		return 0
+	}
+	lsn := db.nextWALLSN
+	if lsn == 0 {
+		lsn = 1
+	}
+	db.nextWALLSN = lsn + 1
+	return lsn
+}
+
+func (db *DB) appendPendingPagesToWAL() error {
+	if db == nil {
+		return ErrInvalidArgument
+	}
+
+	finalPages := db.finalCommittedPageImages()
+	for _, staged := range finalPages {
+		frameLSN := db.nextWALRecordLSN()
+		pageData := append([]byte(nil), staged.data...)
+		if staged.id != 0 {
+			if err := storage.SetPageLSN(pageData, frameLSN); err != nil {
+				return wrapStorageError(err)
+			}
+			if err := storage.RecomputePageChecksum(pageData); err != nil {
+				return wrapStorageError(err)
+			}
+		}
+
+		var frame storage.WALFrame
+		frame.FrameLSN = frameLSN
+		frame.PageID = uint32(staged.id)
+		frame.PageLSN = frameLSN
+		copy(frame.PageData[:], pageData)
+		if err := appendWALFrameRecord(db.path, frame); err != nil {
+			return wrapStorageError(err)
+		}
+	}
+
+	commitLSN := db.nextWALRecordLSN()
+	if err := appendWALCommitRecord(db.path, storage.WALCommitRecord{CommitLSN: commitLSN}); err != nil {
+		return wrapStorageError(err)
+	}
 	return nil
 }
 

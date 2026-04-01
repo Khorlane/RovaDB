@@ -1,10 +1,18 @@
 package storage
 
+import "encoding/binary"
+
 const (
 	// HeaderSize is the size of the reserved database file header at bytes [0:HeaderSize).
 	HeaderSize = 16
 	// PageSize is the fixed size of each future page after the file header.
 	PageSize = 4096
+
+	pageHeaderOffsetPageID   = 0
+	pageHeaderOffsetPageType = 4
+	pageHeaderOffsetPageLSN  = 8
+	pageHeaderOffsetChecksum = 16
+	pageHeaderSize           = 20
 )
 
 // PageID identifies a fixed-size page in the database file.
@@ -105,4 +113,61 @@ func IsLeafIndexPageType(pageType PageType) bool {
 
 func IsInternalIndexPageType(pageType PageType) bool {
 	return pageType == PageTypeIndexInternal
+}
+
+func PageLSN(page []byte) (uint64, error) {
+	if err := validateStampedPageHeader(page); err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint64(page[pageHeaderOffsetPageLSN : pageHeaderOffsetPageLSN+8]), nil
+}
+
+func SetPageLSN(page []byte, lsn uint64) error {
+	if err := validateStampedPageHeader(page); err != nil {
+		return err
+	}
+	binary.LittleEndian.PutUint64(page[pageHeaderOffsetPageLSN:pageHeaderOffsetPageLSN+8], lsn)
+	return nil
+}
+
+func PageChecksum(page []byte) (uint32, error) {
+	if err := validateStampedPageHeader(page); err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(page[pageHeaderOffsetChecksum : pageHeaderOffsetChecksum+4]), nil
+}
+
+func RecomputePageChecksum(page []byte) error {
+	if err := validateStampedPageHeader(page); err != nil {
+		return err
+	}
+	binary.LittleEndian.PutUint32(page[pageHeaderOffsetChecksum:pageHeaderOffsetChecksum+4], 0)
+	binary.LittleEndian.PutUint32(page[pageHeaderOffsetChecksum:pageHeaderOffsetChecksum+4], pageChecksum(page))
+	return nil
+}
+
+func validateStampedPageHeader(page []byte) error {
+	if len(page) != PageSize {
+		return errCorruptedPageHeader
+	}
+	pageType := PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType : pageHeaderOffsetPageType+2]))
+	if !IsValidPageType(pageType) {
+		return errCorruptedPageHeader
+	}
+	pageID := binary.LittleEndian.Uint32(page[pageHeaderOffsetPageID : pageHeaderOffsetPageID+4])
+	if pageID == 0 {
+		return errCorruptedPageHeader
+	}
+	return nil
+}
+
+func pageChecksum(page []byte) uint32 {
+	var checksum uint32
+	for i, b := range page {
+		if i >= pageHeaderOffsetChecksum && i < pageHeaderOffsetChecksum+4 {
+			continue
+		}
+		checksum = checksum*16777619 ^ uint32(b)
+	}
+	return checksum
 }

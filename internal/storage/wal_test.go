@@ -427,7 +427,9 @@ func buildTestWALFrame(t *testing.T, pageID uint32, frameLSN uint64, reserved ui
 	if _, err := InsertRowIntoTablePage(page, row); err != nil {
 		t.Fatalf("InsertRowIntoTablePage() error = %v", err)
 	}
-	setWALPageChecksum(page)
+	if err := RecomputePageChecksum(page); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
 
 	var frame WALFrame
 	frame.FrameLSN = frameLSN

@@ -78,3 +78,47 @@ func TestIndexPageTypeHelpers(t *testing.T) {
 		t.Fatal("IsInternalIndexPageType(PageTypeIndexLeaf) = true, want false")
 	}
 }
+
+func TestPageLSNAndChecksumHelpers(t *testing.T) {
+	page := InitializeTablePage(7)
+
+	if err := SetPageLSN(page, 42); err != nil {
+		t.Fatalf("SetPageLSN() error = %v", err)
+	}
+	if err := RecomputePageChecksum(page); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
+
+	lsn, err := PageLSN(page)
+	if err != nil {
+		t.Fatalf("PageLSN() error = %v", err)
+	}
+	if lsn != 42 {
+		t.Fatalf("PageLSN() = %d, want 42", lsn)
+	}
+
+	checksum, err := PageChecksum(page)
+	if err != nil {
+		t.Fatalf("PageChecksum() error = %v", err)
+	}
+	if checksum == 0 {
+		t.Fatal("PageChecksum() = 0, want non-zero")
+	}
+}
+
+func TestStampedPageHelpersRejectInvalidHeader(t *testing.T) {
+	page := make([]byte, PageSize)
+
+	if _, err := PageLSN(page); err != errCorruptedPageHeader {
+		t.Fatalf("PageLSN() error = %v, want %v", err, errCorruptedPageHeader)
+	}
+	if err := SetPageLSN(page, 1); err != errCorruptedPageHeader {
+		t.Fatalf("SetPageLSN() error = %v, want %v", err, errCorruptedPageHeader)
+	}
+	if _, err := PageChecksum(page); err != errCorruptedPageHeader {
+		t.Fatalf("PageChecksum() error = %v, want %v", err, errCorruptedPageHeader)
+	}
+	if err := RecomputePageChecksum(page); err != errCorruptedPageHeader {
+		t.Fatalf("RecomputePageChecksum() error = %v, want %v", err, errCorruptedPageHeader)
+	}
+}

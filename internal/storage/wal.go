@@ -226,9 +226,6 @@ func DecodeWALCommitRecord(data []byte) (WALCommitRecord, error) {
 
 // ValidateWALFrame validates a decoded WAL frame and its embedded page image.
 func ValidateWALFrame(frame WALFrame) error {
-	if frame.PageID == 0 {
-		return errCorruptedWALFrame
-	}
 	if err := validateWALPageImage(frame.PageID, frame.PageLSN, frame.PageData[:]); err != nil {
 		return err
 	}
@@ -367,15 +364,22 @@ func validateWALPageImage(pageID uint32, pageLSN uint64, pageData []byte) error 
 		return errCorruptedWALFrame
 	}
 
+	if pageID == catalogPageID {
+		if _, err := LoadCatalogPageData(pageData); err != nil {
+			return errCorruptedWALFrame
+		}
+		return nil
+	}
+
 	if embeddedPageID := binary.LittleEndian.Uint32(pageData[0:4]); embeddedPageID != pageID {
 		return errCorruptedWALFrame
 	}
-	if embeddedPageLSN := binary.LittleEndian.Uint64(pageData[8:16]); embeddedPageLSN != pageLSN {
+	embeddedPageLSN, err := PageLSN(pageData)
+	if err != nil || embeddedPageLSN != pageLSN {
 		return errCorruptedWALFrame
 	}
-
-	storedChecksum := binary.LittleEndian.Uint32(pageData[16:20])
-	if storedChecksum != walPageChecksum(pageData) {
+	storedChecksum, err := PageChecksum(pageData)
+	if err != nil || storedChecksum != pageChecksum(pageData) {
 		return errCorruptedWALFrame
 	}
 
@@ -394,23 +398,4 @@ func validateWALPageImage(pageID uint32, pageLSN uint64, pageData []byte) error 
 	}
 
 	return nil
-}
-
-func walPageChecksum(pageData []byte) uint32 {
-	var checksum uint32
-	for i, b := range pageData {
-		if i >= 16 && i < 20 {
-			continue
-		}
-		checksum = checksum*16777619 ^ uint32(b)
-	}
-	return checksum
-}
-
-func setWALPageChecksum(pageData []byte) {
-	if len(pageData) != PageSize {
-		return
-	}
-	binary.LittleEndian.PutUint32(pageData[16:20], 0)
-	binary.LittleEndian.PutUint32(pageData[16:20], walPageChecksum(pageData))
 }
