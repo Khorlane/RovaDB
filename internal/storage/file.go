@@ -7,10 +7,6 @@ import (
 	"os"
 )
 
-const (
-	version = 1
-)
-
 var magic = [8]byte{'R', 'O', 'V', 'A', 'D', 'B', 0, 0}
 
 // DBFile is the minimal durable database file handle.
@@ -71,7 +67,7 @@ func writeHeader(f *os.File) error {
 
 	var header [HeaderSize]byte
 	copy(header[:8], magic[:])
-	binary.LittleEndian.PutUint32(header[8:12], version)
+	binary.LittleEndian.PutUint32(header[8:12], CurrentDBFormatVersion)
 
 	if _, err := f.Write(header[:]); err != nil {
 		return err
@@ -91,7 +87,7 @@ func readHeader(f *os.File) error {
 	if string(header[:8]) != string(magic[:]) {
 		return errCorruptedDatabaseHeader
 	}
-	if binary.LittleEndian.Uint32(header[8:12]) != version {
+	if !SupportedDBFormatVersion(binary.LittleEndian.Uint32(header[8:12])) {
 		return errCorruptedDatabaseHeader
 	}
 	for _, b := range header[12:16] {

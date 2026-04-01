@@ -103,7 +103,7 @@ func ValidateDirectoryPage(page []byte) error {
 		return errCorruptedDirectoryPage
 	}
 	formatVersion := binary.LittleEndian.Uint32(page[directoryBodyOffsetFormatVersion : directoryBodyOffsetFormatVersion+4])
-	if formatVersion != version {
+	if !SupportedDBFormatVersion(formatVersion) {
 		return errCorruptedDirectoryPage
 	}
 	rootMapBytes := binary.LittleEndian.Uint32(page[directoryBodyOffsetRootMapBytes : directoryBodyOffsetRootMapBytes+4])
@@ -124,10 +124,12 @@ func EnsureDirectoryPage(file *os.File) error {
 		return err
 	}
 	if n == 0 || isZeroPage(page) {
-		return writeDirectoryPage(file, InitDirectoryPage(uint32(DirectoryControlPageID), version))
+		return writeDirectoryPage(file, InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion))
 	}
-	if ValidateDirectoryPage(page) == nil {
+	if err := ValidateDirectoryPage(page); err == nil {
 		return nil
+	} else if looksLikeWrappedDirectoryPage(page) {
+		return err
 	}
 
 	cat, err := loadCatalogPayload(page)
@@ -323,7 +325,7 @@ func WriteDirectoryRootMappings(file *os.File, mappings []DirectoryRootMapping) 
 	if err != nil {
 		return err
 	}
-	rebuilt, err := buildDirectoryCatalogPage(catalogPayload, version, freeListHead, mappings, checkpointMeta)
+	rebuilt, err := buildDirectoryCatalogPage(catalogPayload, CurrentDBFormatVersion, freeListHead, mappings, checkpointMeta)
 	if err != nil {
 		return err
 	}
@@ -503,6 +505,14 @@ func readStoragePage(file *os.File, pageID PageID) ([]byte, error) {
 		return nil, errCorruptedDirectoryPage
 	}
 	return page, nil
+}
+
+func looksLikeWrappedDirectoryPage(page []byte) bool {
+	if len(page) != PageSize {
+		return false
+	}
+	return binary.LittleEndian.Uint32(page[pageHeaderOffsetPageID:pageHeaderOffsetPageID+4]) == uint32(DirectoryControlPageID) &&
+		PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType:pageHeaderOffsetPageType+2])) == PageTypeDirectory
 }
 
 func directoryRootMappings(page []byte) ([]DirectoryRootMapping, error) {

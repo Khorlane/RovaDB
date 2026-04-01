@@ -266,7 +266,7 @@ func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint3
 		}
 	}
 
-	return buildDirectoryCatalogPage(buf, version, freeListHead, rootMappings, checkpointMeta)
+	return buildDirectoryCatalogPage(buf, CurrentDBFormatVersion, freeListHead, rootMappings, checkpointMeta)
 }
 
 func isZeroPage(data []byte) bool {

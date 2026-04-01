@@ -8,7 +8,7 @@ import (
 )
 
 func TestInitDirectoryPageCreatesValidPage(t *testing.T) {
-	page := InitDirectoryPage(uint32(DirectoryControlPageID), version)
+	page := InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion)
 
 	if err := ValidateDirectoryPage(page); err != nil {
 		t.Fatalf("ValidateDirectoryPage() error = %v", err)
@@ -17,8 +17,8 @@ func TestInitDirectoryPageCreatesValidPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DirectoryFormatVersion() error = %v", err)
 	}
-	if formatVersion != version {
-		t.Fatalf("DirectoryFormatVersion() = %d, want %d", formatVersion, version)
+	if formatVersion != CurrentDBFormatVersion {
+		t.Fatalf("DirectoryFormatVersion() = %d, want %d", formatVersion, CurrentDBFormatVersion)
 	}
 	freeListHead, err := DirectoryFreeListHead(page)
 	if err != nil {
@@ -30,22 +30,22 @@ func TestInitDirectoryPageCreatesValidPage(t *testing.T) {
 }
 
 func TestDirectoryFormatVersionRoundTrip(t *testing.T) {
-	page := InitDirectoryPage(uint32(DirectoryControlPageID), version)
+	page := InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion)
 
-	if err := SetDirectoryFormatVersion(page, version); err != nil {
+	if err := SetDirectoryFormatVersion(page, CurrentDBFormatVersion); err != nil {
 		t.Fatalf("SetDirectoryFormatVersion() error = %v", err)
 	}
 	got, err := DirectoryFormatVersion(page)
 	if err != nil {
 		t.Fatalf("DirectoryFormatVersion() error = %v", err)
 	}
-	if got != version {
-		t.Fatalf("DirectoryFormatVersion() = %d, want %d", got, version)
+	if got != CurrentDBFormatVersion {
+		t.Fatalf("DirectoryFormatVersion() = %d, want %d", got, CurrentDBFormatVersion)
 	}
 }
 
 func TestDirectoryFreeListHeadRoundTrip(t *testing.T) {
-	page := InitDirectoryPage(uint32(DirectoryControlPageID), version)
+	page := InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion)
 
 	if err := SetDirectoryFreeListHead(page, 27); err != nil {
 		t.Fatalf("SetDirectoryFreeListHead() error = %v", err)
@@ -106,7 +106,7 @@ func TestOlderWrappedDirectoryPayloadDefaultsCheckpointMetadataToZero(t *testing
 			},
 		},
 	})
-	page := InitDirectoryPage(uint32(DirectoryControlPageID), version)
+	page := InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion)
 	copy(page[directoryCatalogOffset:], catalogPayload)
 
 	lsn, err := DirectoryLastCheckpointLSN(page)
@@ -186,7 +186,7 @@ func TestReadDirectoryCheckpointMetadataPersistsAcrossReopen(t *testing.T) {
 }
 
 func TestValidateDirectoryPageRejectsWrongPageType(t *testing.T) {
-	page := InitDirectoryPage(uint32(DirectoryControlPageID), version)
+	page := InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion)
 	page[pageHeaderOffsetPageType] = byte(PageTypeTable)
 	page[pageHeaderOffsetPageType+1] = 0
 
@@ -198,6 +198,15 @@ func TestValidateDirectoryPageRejectsWrongPageType(t *testing.T) {
 
 func TestValidateDirectoryPageRejectsInvalidSize(t *testing.T) {
 	err := ValidateDirectoryPage(make([]byte, PageSize-1))
+	if !errors.Is(err, errCorruptedDirectoryPage) {
+		t.Fatalf("ValidateDirectoryPage() error = %v, want %v", err, errCorruptedDirectoryPage)
+	}
+}
+
+func TestValidateDirectoryPageRejectsUnsupportedFormatVersion(t *testing.T) {
+	page := InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion+1)
+
+	err := ValidateDirectoryPage(page)
 	if !errors.Is(err, errCorruptedDirectoryPage) {
 		t.Fatalf("ValidateDirectoryPage() error = %v, want %v", err, errCorruptedDirectoryPage)
 	}
@@ -336,7 +345,7 @@ func TestDirectoryRootMappingsRoundTrip(t *testing.T) {
 		},
 	}
 
-	page, err := buildDirectoryCatalogPage([]byte{1, 2, 3}, version, 19, mappings, DirectoryCheckpointMetadata{})
+	page, err := buildDirectoryCatalogPage([]byte{1, 2, 3}, CurrentDBFormatVersion, 19, mappings, DirectoryCheckpointMetadata{})
 	if err != nil {
 		t.Fatalf("buildDirectoryCatalogPage() error = %v", err)
 	}
@@ -356,7 +365,7 @@ func TestDirectoryRootMappingsRoundTrip(t *testing.T) {
 }
 
 func TestReadDirectoryRootMappingsEmptyRoundTrip(t *testing.T) {
-	page, err := buildDirectoryCatalogPage([]byte{1, 2, 3}, version, 0, nil, DirectoryCheckpointMetadata{})
+	page, err := buildDirectoryCatalogPage([]byte{1, 2, 3}, CurrentDBFormatVersion, 0, nil, DirectoryCheckpointMetadata{})
 	if err != nil {
 		t.Fatalf("buildDirectoryCatalogPage() error = %v", err)
 	}
@@ -371,7 +380,7 @@ func TestReadDirectoryRootMappingsEmptyRoundTrip(t *testing.T) {
 }
 
 func TestReadDirectoryRootMappingsRejectsMalformedPayload(t *testing.T) {
-	page := InitDirectoryPage(uint32(DirectoryControlPageID), version)
+	page := InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion)
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetRootMapCount:directoryBodyOffsetRootMapCount+4], 1)
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetRootMapBytes:directoryBodyOffsetRootMapBytes+4], 2)
 	copy(page[directoryCatalogOffset:], []byte{DirectoryRootMappingObjectTable, 0})

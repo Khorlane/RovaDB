@@ -39,8 +39,8 @@ func TestEnsureWALFileCreatesValidHeader(t *testing.T) {
 	if header.Magic != walMagic {
 		t.Fatalf("header.Magic = %q, want %q", header.Magic, walMagic)
 	}
-	if header.WALVersion != walVersion {
-		t.Fatalf("header.WALVersion = %d, want %d", header.WALVersion, walVersion)
+	if header.WALVersion != CurrentWALVersion {
+		t.Fatalf("header.WALVersion = %d, want %d", header.WALVersion, CurrentWALVersion)
 	}
 	if header.DBFormatVersion != DBFormatVersion() {
 		t.Fatalf("header.DBFormatVersion = %d, want %d", header.DBFormatVersion, DBFormatVersion())
@@ -65,7 +65,7 @@ func TestReadWALHeaderRejectsBadMagic(t *testing.T) {
 	var buf bytes.Buffer
 	if err := WriteWALHeader(&buf, WALHeader{
 		Magic:           [8]byte{'B', 'A', 'D', 'W', 'A', 'L', '0', '0'},
-		WALVersion:      walVersion,
+		WALVersion:      CurrentWALVersion,
 		DBFormatVersion: DBFormatVersion(),
 		PageSize:        PageSize,
 	}); err != nil {
@@ -89,7 +89,7 @@ func TestReadWALHeaderRejectsWrongPageSize(t *testing.T) {
 	var buf bytes.Buffer
 	if err := WriteWALHeader(&buf, WALHeader{
 		Magic:           walMagic,
-		WALVersion:      walVersion,
+		WALVersion:      CurrentWALVersion,
 		DBFormatVersion: DBFormatVersion(),
 		PageSize:        2048,
 	}); err != nil {
@@ -106,7 +106,7 @@ func TestReadWALHeaderRejectsUnsupportedVersion(t *testing.T) {
 	var buf bytes.Buffer
 	if err := WriteWALHeader(&buf, WALHeader{
 		Magic:           walMagic,
-		WALVersion:      walVersion + 1,
+		WALVersion:      CurrentWALVersion + 1,
 		DBFormatVersion: DBFormatVersion(),
 		PageSize:        PageSize,
 	}); err != nil {
@@ -119,6 +119,23 @@ func TestReadWALHeaderRejectsUnsupportedVersion(t *testing.T) {
 	}
 }
 
+func TestReadWALHeaderRejectsUnsupportedDBFormatVersion(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteWALHeader(&buf, WALHeader{
+		Magic:           walMagic,
+		WALVersion:      CurrentWALVersion,
+		DBFormatVersion: CurrentDBFormatVersion + 1,
+		PageSize:        PageSize,
+	}); err != nil {
+		t.Fatalf("WriteWALHeader() error = %v", err)
+	}
+
+	_, err := ReadWALHeader(&buf)
+	if !errors.Is(err, errCorruptedWALHeader) {
+		t.Fatalf("ReadWALHeader() error = %v, want %v", err, errCorruptedWALHeader)
+	}
+}
+
 func TestEnsureWALFileRejectsWrongDBFormatVersion(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
@@ -127,6 +144,14 @@ func TestEnsureWALFileRejectsWrongDBFormatVersion(t *testing.T) {
 	}
 
 	if err := EnsureWALFile(dbPath, DBFormatVersion()+1); !errors.Is(err, errCorruptedWALHeader) {
+		t.Fatalf("EnsureWALFile() error = %v, want %v", err, errCorruptedWALHeader)
+	}
+}
+
+func TestEnsureWALFileRejectsUnsupportedDBFormatVersionOnCreate(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	if err := EnsureWALFile(dbPath, CurrentDBFormatVersion+1); !errors.Is(err, errCorruptedWALHeader) {
 		t.Fatalf("EnsureWALFile() error = %v, want %v", err, errCorruptedWALHeader)
 	}
 }

@@ -9,7 +9,6 @@ import (
 )
 
 const (
-	walVersion           = 1
 	walHeaderSize        = 20
 	walRecordTypeSize    = 4
 	walFramePayloadSize  = 24 + PageSize
@@ -65,18 +64,13 @@ func WALPath(dbPath string) string {
 	return dbPath + ".wal"
 }
 
-// DBFormatVersion reports the current durable database file format version.
-func DBFormatVersion() uint32 {
-	return version
-}
-
 // WriteWALHeader writes the fixed WAL header.
 func WriteWALHeader(w io.Writer, h WALHeader) error {
 	if h.Magic == ([8]byte{}) {
 		h.Magic = walMagic
 	}
 	if h.WALVersion == 0 {
-		h.WALVersion = walVersion
+		h.WALVersion = CurrentWALVersion
 	}
 
 	var raw [walHeaderSize]byte
@@ -106,7 +100,7 @@ func ReadWALHeader(r io.Reader) (WALHeader, error) {
 	}
 
 	h.WALVersion = binary.LittleEndian.Uint32(raw[8:12])
-	if h.WALVersion != walVersion {
+	if !SupportedWALVersion(h.WALVersion) {
 		return WALHeader{}, errUnsupportedWALVersion
 	}
 
@@ -115,12 +109,19 @@ func ReadWALHeader(r io.Reader) (WALHeader, error) {
 	if h.PageSize != PageSize {
 		return WALHeader{}, errWALPageSizeMismatch
 	}
+	if !CompatibleWALWithDB(h.WALVersion, h.DBFormatVersion) {
+		return WALHeader{}, errCorruptedWALHeader
+	}
 
 	return h, nil
 }
 
 // EnsureWALFile opens or creates a WAL sidecar with a validated header.
 func EnsureWALFile(dbPath string, dbFormatVersion uint32) error {
+	if !CompatibleWALWithDB(CurrentWALVersion, dbFormatVersion) {
+		return errCorruptedWALHeader
+	}
+
 	path := WALPath(dbPath)
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
@@ -129,7 +130,7 @@ func EnsureWALFile(dbPath string, dbFormatVersion uint32) error {
 		}
 		if err := WriteWALHeader(file, WALHeader{
 			Magic:           walMagic,
-			WALVersion:      walVersion,
+			WALVersion:      CurrentWALVersion,
 			DBFormatVersion: dbFormatVersion,
 			PageSize:        PageSize,
 		}); err != nil {
@@ -157,7 +158,7 @@ func EnsureWALFile(dbPath string, dbFormatVersion uint32) error {
 	if err != nil {
 		return err
 	}
-	if header.DBFormatVersion != dbFormatVersion {
+	if !CompatibleWALWithDB(header.WALVersion, dbFormatVersion) || header.DBFormatVersion != dbFormatVersion {
 		return errCorruptedWALHeader
 	}
 	return nil
@@ -298,6 +299,10 @@ func SyncWALFile(dbPath string) error {
 
 // ResetWALFile rewrites the WAL sidecar to a valid header-only state.
 func ResetWALFile(dbPath string, dbFormatVersion uint32) error {
+	if !CompatibleWALWithDB(CurrentWALVersion, dbFormatVersion) {
+		return errCorruptedWALHeader
+	}
+
 	path := WALPath(dbPath)
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
@@ -319,7 +324,7 @@ func ResetWALFile(dbPath string, dbFormatVersion uint32) error {
 	}
 	if err := WriteWALHeader(file, WALHeader{
 		Magic:           walMagic,
-		WALVersion:      walVersion,
+		WALVersion:      CurrentWALVersion,
 		DBFormatVersion: dbFormatVersion,
 		PageSize:        PageSize,
 	}); err != nil {

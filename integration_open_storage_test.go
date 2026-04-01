@@ -245,6 +245,74 @@ func TestOpenFailsOnMalformedWAL(t *testing.T) {
 	}
 }
 
+func TestOpenFailsOnUnsupportedDirectoryFormatVersion(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, _ := openRawStorage(t, path)
+	page, err := storage.ReadDirectoryPage(rawDB.File())
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("ReadDirectoryPage() error = %v", err)
+	}
+	binary.LittleEndian.PutUint32(page[32:36], storage.CurrentDBFormatVersion+1)
+	if _, err := rawDB.File().WriteAt(page, storage.HeaderSize); err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("WriteAt() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want unsupported directory format failure")
+	}
+}
+
+func TestOpenFailsOnWALDBFormatVersionMismatch(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	walFile, err := os.OpenFile(storage.WALPath(path), os.O_RDWR|os.O_TRUNC, 0)
+	if err != nil {
+		t.Fatalf("os.OpenFile() error = %v", err)
+	}
+	if err := storage.WriteWALHeader(walFile, storage.WALHeader{
+		Magic:           [8]byte{'R', 'O', 'V', 'A', 'W', 'A', 'L', '1'},
+		WALVersion:      storage.CurrentWALVersion,
+		DBFormatVersion: storage.CurrentDBFormatVersion + 1,
+		PageSize:        storage.PageSize,
+	}); err != nil {
+		_ = walFile.Close()
+		t.Fatalf("WriteWALHeader() error = %v", err)
+	}
+	if err := walFile.Close(); err != nil {
+		t.Fatalf("walFile.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want WAL/DB format mismatch failure")
+	}
+}
+
 func TestOpenFailsOnMalformedDirectoryPage(t *testing.T) {
 	path := testDBPath(t)
 
