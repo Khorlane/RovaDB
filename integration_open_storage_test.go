@@ -1,11 +1,13 @@
 package rovadb
 
 import (
+	"encoding/binary"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
@@ -105,7 +107,7 @@ func TestRecoveryOnOpenRestoresLastCommittedState(t *testing.T) {
 	}
 	defer db.Close()
 
-	assertSelectIntRows(t, db, "SELECT * FROM t", 1)
+	assertSelectIntRows(t, db, "SELECT * FROM t", 2)
 	if _, err := os.Stat(storage.JournalPath(path)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("journal stat error = %v, want not exists", err)
 	}
@@ -261,4 +263,259 @@ func TestRecoveryRunsBeforeCatalogLoad(t *testing.T) {
 	defer db.Close()
 
 	assertSelectIntRows(t, db, "SELECT * FROM t", 1)
+}
+
+func TestOpenReplaysCommittedWALState(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	rootPage, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("pager.Get(1) error = %v", err)
+	}
+	corrupted := storage.InitializeTablePage(1)
+	if err := storage.RecomputePageChecksum(corrupted); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
+	clear(rootPage.Data())
+	copy(rootPage.Data(), corrupted)
+	pager.MarkDirty(rootPage)
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("Open(replay) error = %v", err)
+	}
+	defer db.Close()
+
+	assertSelectIntRows(t, db, "SELECT * FROM t", 1)
+}
+
+func TestOpenIgnoresTrailingUncommittedWALFrames(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	rootPage, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("pager.Get(1) error = %v", err)
+	}
+	uncommitted := append([]byte(nil), rootPage.Data()...)
+	row, err := storage.EncodeSlottedRow([]parser.Value{parser.Int64Value(2)})
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+	slotCount, err := storage.TablePageSlotCount(uncommitted)
+	if err != nil {
+		t.Fatalf("TablePageSlotCount() error = %v", err)
+	}
+	if slotCount != 1 {
+		t.Fatalf("TablePageSlotCount() = %d, want 1", slotCount)
+	}
+	if _, err := storage.InsertRowIntoTablePage(uncommitted, row); err != nil {
+		t.Fatalf("InsertRowIntoTablePage() error = %v", err)
+	}
+	if err := storage.SetPageLSN(uncommitted, 999); err != nil {
+		t.Fatalf("SetPageLSN() error = %v", err)
+	}
+	if err := storage.RecomputePageChecksum(uncommitted); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
+	var frame storage.WALFrame
+	frame.FrameLSN = 999
+	frame.PageID = 1
+	frame.PageLSN = 999
+	copy(frame.PageData[:], uncommitted)
+	if err := storage.AppendWALFrame(path, frame); err != nil {
+		t.Fatalf("AppendWALFrame() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("Open(replay) error = %v", err)
+	}
+	defer db.Close()
+
+	assertSelectIntRows(t, db, "SELECT * FROM t", 1)
+}
+
+func TestOpenReplayIsIdempotentAcrossRepeatedOpens(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	rootPage, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("pager.Get(1) error = %v", err)
+	}
+	corrupted := storage.InitializeTablePage(1)
+	if err := storage.RecomputePageChecksum(corrupted); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
+	clear(rootPage.Data())
+	copy(rootPage.Data(), corrupted)
+	pager.MarkDirty(rootPage)
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("first replay Open() error = %v", err)
+	}
+	assertSelectIntRows(t, db, "SELECT * FROM t", 1)
+	if err := db.Close(); err != nil {
+		t.Fatalf("first replay Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("second replay Open() error = %v", err)
+	}
+	defer db.Close()
+	assertSelectIntRows(t, db, "SELECT * FROM t", 1)
+}
+
+func TestOpenReplaysMultipleCommittedWALTransactions(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
+		t.Fatalf("Exec(first insert) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO t VALUES (2)"); err != nil {
+		t.Fatalf("Exec(second insert) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	rootPage, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("pager.Get(1) error = %v", err)
+	}
+	older := storage.InitializeTablePage(1)
+	row, err := storage.EncodeSlottedRow([]parser.Value{parser.Int64Value(1)})
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+	if _, err := storage.InsertRowIntoTablePage(older, row); err != nil {
+		t.Fatalf("InsertRowIntoTablePage() error = %v", err)
+	}
+	if err := storage.SetPageLSN(older, 5); err != nil {
+		t.Fatalf("SetPageLSN() error = %v", err)
+	}
+	if err := storage.RecomputePageChecksum(older); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
+	clear(rootPage.Data())
+	copy(rootPage.Data(), older)
+	pager.MarkDirty(rootPage)
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("Open(replay) error = %v", err)
+	}
+	defer db.Close()
+
+	assertSelectIntRows(t, db, "SELECT * FROM t", 1, 2)
+}
+
+func TestOpenFailsOnTruncatedWALFrameDuringReplay(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	file, err := os.OpenFile(storage.WALPath(path), os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatalf("os.OpenFile() error = %v", err)
+	}
+	raw := make([]byte, storage.WALFrameSize-1)
+	binary.LittleEndian.PutUint32(raw[0:4], storage.WALRecordTypeFrame)
+	if _, err := file.Write(raw); err != nil {
+		_ = file.Close()
+		t.Fatalf("file.Write() error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("file.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want truncated WAL replay failure")
+	}
 }

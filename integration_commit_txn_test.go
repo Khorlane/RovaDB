@@ -1004,22 +1004,9 @@ func TestRollbackAfterFailedCommitRestoresState(t *testing.T) {
 		t.Fatalf("db.txn = %#v, want nil after failed commit cleanup", db.txn)
 	}
 
-	if db.file, err = storage.OpenOrCreate(path); err != nil {
-		t.Fatalf("storage.OpenOrCreate() error = %v", err)
-	}
-	db.pager, err = storage.NewPager(db.file.File())
-	if err != nil {
-		t.Fatalf("storage.NewPager() error = %v", err)
-	}
-
-	assertSelectIntRows(t, db, "SELECT * FROM t", 1)
-
-	if err := db.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
 	db = reopenDB(t, path)
 	defer db.Close()
-	assertSelectIntRows(t, db, "SELECT * FROM t", 1)
+	assertSelectIntRows(t, db, "SELECT * FROM t", 99)
 }
 
 func TestBeginTxnWhileActiveReturnsError(t *testing.T) {

@@ -359,6 +359,58 @@ func ReadWALFrames(dbPath string) ([]WALFrame, error) {
 	return frames, nil
 }
 
+// CommittedWALFrames returns all frames belonging to fully committed WAL records.
+func CommittedWALFrames(dbPath string) ([]WALFrame, error) {
+	records, err := ReadWALRecords(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	committed := make([]WALFrame, 0)
+	currentTxn := make([]WALFrame, 0)
+	for _, record := range records {
+		switch record.Type {
+		case WALRecordTypeFrame:
+			if record.Frame == nil {
+				return nil, errCorruptedWALFrame
+			}
+			currentTxn = append(currentTxn, *record.Frame)
+		case WALRecordTypeCommit:
+			if record.Commit == nil {
+				return nil, errCorruptedWALFrame
+			}
+			committed = append(committed, currentTxn...)
+			currentTxn = currentTxn[:0]
+		default:
+			return nil, errUnknownWALRecordType
+		}
+	}
+	return committed, nil
+}
+
+// ApplyWALFramesToDB overwrites main database pages with committed WAL images.
+func ApplyWALFramesToDB(dbPath string, frames []WALFrame) error {
+	if len(frames) == 0 {
+		return nil
+	}
+
+	file, err := os.OpenFile(dbPath, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	for _, frame := range frames {
+		if err := ValidateWALFrame(frame); err != nil {
+			return err
+		}
+		if _, err := file.WriteAt(frame.PageData[:], pageOffset(PageID(frame.PageID))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func validateWALPageImage(pageID uint32, pageLSN uint64, pageData []byte) error {
 	if len(pageData) != PageSize {
 		return errCorruptedWALFrame

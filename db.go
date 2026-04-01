@@ -78,6 +78,10 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
+	if err := replayCommittedWAL(path); err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
 	pager, err := storage.NewPager(file.File())
 	if err != nil {
 		_ = file.Close()
@@ -151,6 +155,14 @@ func (db *DB) Close() error {
 		return db.file.Close()
 	}
 	return nil
+}
+
+func replayCommittedWAL(path string) error {
+	frames, err := storage.CommittedWALFrames(path)
+	if err != nil {
+		return err
+	}
+	return storage.ApplyWALFramesToDB(path, frames)
 }
 
 // Exec executes a non-SELECT statement and returns a write result.

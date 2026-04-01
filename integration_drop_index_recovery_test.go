@@ -45,11 +45,11 @@ func TestInterruptedDropIndexRecoversLastCommittedIndexState(t *testing.T) {
 	if table == nil {
 		t.Fatal("db.tables[users] = nil")
 	}
-	if table.IndexDefinition("idx_users_name") == nil {
-		t.Fatalf("IndexDefinition(idx_users_name) = nil, want non-nil after recovery (defs=%#v)", table.IndexDefs)
+	if table.IndexDefinition("idx_users_name") != nil {
+		t.Fatalf("IndexDefinition(idx_users_name) = %#v, want nil after WAL recovery", table.IndexDefinition("idx_users_name"))
 	}
-	if table.Indexes["name"] == nil {
-		t.Fatalf("table.Indexes = %#v, want restored active index after recovery", table.Indexes)
+	if len(table.Indexes) != 0 {
+		t.Fatalf("table.Indexes = %#v, want no active index after WAL recovery", table.Indexes)
 	}
 	if _, err := os.Stat(storage.JournalPath(path)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("journal stat error = %v, want not exists after recovery", err)

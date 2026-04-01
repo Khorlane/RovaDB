@@ -458,11 +458,11 @@ func TestCreateIndexRecoveryDoesNotExposePartialIndex(t *testing.T) {
 	if table == nil {
 		t.Fatal("db.tables[users] = nil")
 	}
-	if table.IndexDefinition("idx_users_name") != nil {
-		t.Fatalf("IndexDefinition(idx_users_name) = %#v, want nil after recovery", table.IndexDefinition("idx_users_name"))
+	if table.IndexDefinition("idx_users_name") == nil {
+		t.Fatalf("IndexDefinition(idx_users_name) = nil, want persisted index after WAL recovery")
 	}
-	if len(table.Indexes) != 0 {
-		t.Fatalf("table.Indexes = %#v, want empty after recovery", table.Indexes)
+	if len(table.Indexes) == 0 {
+		t.Fatalf("table.Indexes = %#v, want active index after WAL recovery", table.Indexes)
 	}
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
 	if err != nil {

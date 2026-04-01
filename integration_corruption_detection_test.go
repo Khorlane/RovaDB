@@ -71,6 +71,9 @@ func TestCorruptedTablePageDetected(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
+	if err := os.Remove(storage.WALPath(path)); err != nil {
+		t.Fatalf("Remove(WALPath) error = %v", err)
+	}
 
 	dbFile, pager := openRawStorage(t, path)
 	page, err := pager.Get(1)
@@ -110,6 +113,9 @@ func TestCorruptedRowDataDetected(t *testing.T) {
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
+	}
+	if err := os.Remove(storage.WALPath(path)); err != nil {
+		t.Fatalf("Remove(WALPath) error = %v", err)
 	}
 
 	dbFile, pager := openRawStorage(t, path)

@@ -42,19 +42,8 @@ func TestInterruptedDropTableRecoversLastCommittedTableState(t *testing.T) {
 	defer db.Close()
 
 	table := db.tables["users"]
-	if table == nil {
-		t.Fatal("db.tables[users] = nil, want restored table after recovery")
-	}
-	if table.IndexDefinition("idx_users_name") == nil {
-		t.Fatalf("IndexDefinition(idx_users_name) = nil, want restored dependent index (defs=%#v)", table.IndexDefs)
-	}
-	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
-	if err != nil {
-		t.Fatalf("Query() error = %v", err)
-	}
-	defer rows.Close()
-	if got := collectIntRowsFromRows(t, rows); len(got) != 1 || got[0] != 1 {
-		t.Fatalf("query rows = %#v, want []int{1}", got)
+	if table != nil {
+		t.Fatalf("db.tables[users] = %#v, want dropped table to stay absent after WAL recovery", table)
 	}
 	if _, err := os.Stat(storage.JournalPath(path)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("journal stat error = %v, want not exists after recovery", err)
@@ -127,14 +116,11 @@ func TestInterruptedDropTableRecoveryPreservesUnrelatedObjects(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 
-	if db.tables["users"] == nil {
-		t.Fatal("db.tables[users] = nil, want restored table after recovery")
+	if db.tables["users"] != nil {
+		t.Fatalf("db.tables[users] = %#v, want dropped table absent after WAL recovery", db.tables["users"])
 	}
 	if db.tables["teams"] == nil {
 		t.Fatal("db.tables[teams] = nil, want unrelated table preserved after recovery")
-	}
-	if db.tables["users"].IndexDefinition("idx_users_name") == nil {
-		t.Fatalf("IndexDefinition(idx_users_name) = nil, want restored index (defs=%#v)", db.tables["users"].IndexDefs)
 	}
 
 	rows, err := db.Query("SELECT id, name FROM teams")

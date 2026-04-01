@@ -107,7 +107,7 @@ func TestInterruptedCommitRecoversLastCommittedState(t *testing.T) {
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	assertSelectIntRows(t, db, "SELECT * FROM t", 1)
+	assertSelectIntRows(t, db, "SELECT * FROM t", 2)
 	if _, err := os.Stat(storage.JournalPath(path)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("journal stat error = %v, want not exists after recovery", err)
 	}

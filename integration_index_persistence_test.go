@@ -3,6 +3,7 @@ package rovadb
 import (
 	"bytes"
 	"encoding/binary"
+	"os"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
@@ -618,6 +619,36 @@ func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
 	if err := pager.FlushDirty(); err != nil {
 		t.Fatalf("pager.FlushDirty() error = %v", err)
 	}
+	walFrames := make([]storage.WALFrame, 0, len(leafPageIDs)+1)
+	for i, pageID := range leafPageIDs {
+		var pageData []byte
+		var rightSibling uint32
+		if i+1 < len(leafPageIDs) {
+			rightSibling = leafPageIDs[i+1]
+		}
+		if i == len(leafPageIDs)-1 {
+			records := make([]storage.IndexLeafRecord, 0, 7)
+			for j := 0; j < 7; j++ {
+				records = append(records, storage.IndexLeafRecord{
+					Key:     append([]byte(nil), insertedKey...),
+					Locator: storage.RowLocator{PageID: uint32(table.RootPageID()), SlotID: uint16(j)},
+				})
+			}
+			pageData, err = storage.BuildIndexLeafPageData(pageID, records, rightSibling)
+		} else {
+			pageData, err = storage.BuildIndexLeafPageData(pageID, []storage.IndexLeafRecord{
+				{Key: append([]byte(nil), separatorKeys[i]...), Locator: storage.RowLocator{PageID: uint32(table.RootPageID()), SlotID: uint16(i)}},
+			}, rightSibling)
+		}
+		if err != nil {
+			t.Fatalf("BuildIndexLeafPageData(%d for wal) error = %v", pageID, err)
+		}
+		walFrames = append(walFrames, stagedWALFrame(storage.PageID(pageID), pageData, uint64(1100+i)))
+	}
+	walFrames = append(walFrames, stagedWALFrame(storage.PageID(indexDef.RootPageID), rootPageData, 1200))
+	if err := appendCommittedWALFramesForTest(path, walFrames...); err != nil {
+		t.Fatalf("appendCommittedWALFramesForTest() error = %v", err)
+	}
 	if err := dbFile.Close(); err != nil {
 		t.Fatalf("dbFile.Close() error = %v", err)
 	}
@@ -750,6 +781,13 @@ func TestSplitIndexLookupSurvivesReopen(t *testing.T) {
 	if err := pager.FlushDirty(); err != nil {
 		t.Fatalf("pager.FlushDirty() error = %v", err)
 	}
+	if err := appendCommittedWALFramesForTest(path,
+		stagedWALFrame(leftLeafPage.ID(), leftLeafData, 1000),
+		stagedWALFrame(rightLeafPage.ID(), rightLeafData, 1001),
+		stagedWALFrame(storage.PageID(indexDef.RootPageID), rootPageData, 1002),
+	); err != nil {
+		t.Fatalf("appendCommittedWALFramesForTest() error = %v", err)
+	}
 	if err := dbFile.Close(); err != nil {
 		t.Fatalf("dbFile.Close() error = %v", err)
 	}
@@ -811,6 +849,9 @@ func TestOpenFailsWhenPersistedIndexRootHasWrongPageType(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
+	if err := os.Remove(storage.WALPath(path)); err != nil {
+		t.Fatalf("Remove(WALPath) error = %v", err)
+	}
 
 	dbFile, pager := openRawStorage(t, path)
 	catalog, err := storage.LoadCatalog(pager)
@@ -841,6 +882,40 @@ func TestOpenFailsWhenPersistedIndexRootHasWrongPageType(t *testing.T) {
 	if err.Error() != "storage: corrupted index page" {
 		t.Fatalf("Open() error = %q, want %q", err.Error(), "storage: corrupted index page")
 	}
+}
+
+func appendCommittedWALFramesForTest(path string, frames ...storage.WALFrame) error {
+	if len(frames) == 0 {
+		return nil
+	}
+	var maxLSN uint64
+	for _, frame := range frames {
+		if err := storage.AppendWALFrame(path, frame); err != nil {
+			return err
+		}
+		if frame.FrameLSN > maxLSN {
+			maxLSN = frame.FrameLSN
+		}
+	}
+	return storage.AppendWALCommitRecord(path, storage.WALCommitRecord{CommitLSN: maxLSN + 1})
+}
+
+func stagedWALFrame(pageID storage.PageID, pageData []byte, lsn uint64) storage.WALFrame {
+	cloned := append([]byte(nil), pageData...)
+	if pageID != 0 {
+		if err := storage.SetPageLSN(cloned, lsn); err != nil {
+			panic(err)
+		}
+		if err := storage.RecomputePageChecksum(cloned); err != nil {
+			panic(err)
+		}
+	}
+	var frame storage.WALFrame
+	frame.FrameLSN = lsn
+	frame.PageID = uint32(pageID)
+	frame.PageLSN = lsn
+	copy(frame.PageData[:], cloned)
+	return frame
 }
 
 func assertIndexedRowLookup(t *testing.T, db *DB, tableName, indexName string, keyValues []parser.Value, wantRows [][]parser.Value) [][]parser.Value {
