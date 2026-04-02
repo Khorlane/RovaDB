@@ -99,6 +99,38 @@ func TestExplainQueryPathSurvivesReopen(t *testing.T) {
 	}
 }
 
+func TestExplainQueryPathRejectsIndexScanWithNonIndexRoot(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"INSERT INTO users VALUES (1, 'alice')",
+		"CREATE INDEX idx_users_name ON users (name)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	table := db.tables["users"]
+	index := table.Indexes["name"]
+	indexDef := table.IndexDefinition("idx_users_name")
+	if table == nil || index == nil || indexDef == nil {
+		t.Fatalf("index setup failed: table=%v index=%v indexDef=%v", table, index, indexDef)
+	}
+	index.RootPageID = uint32(table.RootPageID())
+	indexDef.RootPageID = uint32(table.RootPageID())
+
+	_, err = db.ExplainQueryPath("SELECT id FROM users WHERE name = 'alice'")
+	if err == nil || err.Error() != "storage: corrupted index page" {
+		t.Fatalf("ExplainQueryPath() error = %v, want %q", err, "storage: corrupted index page")
+	}
+}
+
 func TestExplainQueryPathOnClosedDBReturnsErrClosed(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

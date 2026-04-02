@@ -812,18 +812,16 @@ func (db *DB) lookupIndexedLocators(table *executor.Table, idx *planner.BasicInd
 	if db == nil || table == nil || idx == nil {
 		return nil, ErrInvalidArgument
 	}
-	if err := validateIndexLookupMetadata(table, idx); err != nil {
+	indexDef, err := db.validateIndexLookupMetadata(table, idx)
+	if err != nil {
 		return nil, err
-	}
-	if idx.RootPageID == 0 {
-		return nil, newStorageError("corrupted index page")
 	}
 
 	searchKey, err := storage.EncodeIndexKey([]parser.Value{searchValue})
 	if err != nil {
 		return nil, wrapStorageError(err)
 	}
-	locators, err := storage.LookupIndexExact(db.pageReaderForLookup, idx.RootPageID, searchKey)
+	locators, err := storage.LookupIndexExact(db.pageReaderForLookup, indexDef.RootPageID, searchKey)
 	if err != nil {
 		return nil, wrapStorageError(err)
 	}
@@ -846,33 +844,65 @@ func (db *DB) countIndexedRows(table *executor.Table, idx *planner.BasicIndex, s
 	return count, nil
 }
 
-func validateIndexLookupMetadata(table *executor.Table, idx *planner.BasicIndex) error {
-	if table == nil || idx == nil {
-		return ErrInvalidArgument
+func (db *DB) validateIndexLookupMetadata(table *executor.Table, idx *planner.BasicIndex) (*storage.CatalogIndex, error) {
+	if db == nil || table == nil || idx == nil {
+		return nil, ErrInvalidArgument
 	}
-	if idx.TableName != table.Name || idx.ColumnName == "" {
-		return newExecError("index/table mismatch")
+	if db.pool == nil || table.Name == "" || table.TableID == 0 || idx.TableName != table.Name || idx.ColumnName == "" {
+		return nil, newExecError("index/table mismatch")
 	}
+	if !tableHasColumn(table, idx.ColumnName) {
+		return nil, newExecError("index/table mismatch")
+	}
+
 	var indexDef *storage.CatalogIndex
 	for i := range table.IndexDefs {
 		columnName, ok := executor.LegacyBasicIndexColumn(table.IndexDefs[i])
-		if ok && columnName == idx.ColumnName {
-			if indexDef != nil {
-				return newExecError("index/table mismatch")
-			}
-			indexDef = &table.IndexDefs[i]
+		if !ok || columnName != idx.ColumnName {
+			continue
+		}
+		if indexDef != nil {
+			return nil, newExecError("index/table mismatch")
+		}
+		indexDef = &table.IndexDefs[i]
+	}
+	if indexDef == nil || indexDef.IndexID == 0 || indexDef.RootPageID == 0 {
+		return nil, newExecError("index/table mismatch")
+	}
+	if idx.IndexID == 0 || idx.RootPageID == 0 {
+		return nil, newExecError("index/table mismatch")
+	}
+	if idx.IndexID != indexDef.IndexID || idx.RootPageID != indexDef.RootPageID {
+		return nil, newExecError("index/table mismatch")
+	}
+
+	pageData, err := readCommittedPageData(db.pool, storage.PageID(indexDef.RootPageID))
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+	if pageData == nil {
+		return nil, newStorageError("corrupted index page")
+	}
+	if err := storage.ValidatePageImage(pageData); err != nil {
+		return nil, wrapStorageError(err)
+	}
+	pageType := pageTypeOf(pageData)
+	if pageType != storage.PageTypeIndexLeaf && pageType != storage.PageTypeIndexInternal {
+		return nil, newStorageError("corrupted index page")
+	}
+	return indexDef, nil
+}
+
+func tableHasColumn(table *executor.Table, columnName string) bool {
+	if table == nil || columnName == "" {
+		return false
+	}
+	for _, column := range table.Columns {
+		if column.Name == columnName {
+			return true
 		}
 	}
-	if indexDef == nil {
-		return newExecError("index/table mismatch")
-	}
-	if indexDef.RootPageID == 0 || idx.RootPageID != indexDef.RootPageID {
-		return newExecError("index/table mismatch")
-	}
-	if idx.IndexID != 0 && indexDef.IndexID != 0 && idx.IndexID != indexDef.IndexID {
-		return newExecError("index/table mismatch")
-	}
-	return nil
+	return false
 }
 
 func (db *DB) pageReaderForLookup(pageID uint32) ([]byte, error) {

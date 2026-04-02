@@ -120,6 +120,49 @@ func TestQueryRejectsLegacyIndexWithoutMatchingDefinition(t *testing.T) {
 	}
 }
 
+func TestQueryRejectsIndexScanWhenRootPageIsNotAnIndexPage(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"INSERT INTO users VALUES (1, 'alice')",
+		"CREATE INDEX idx_users_name ON users (name)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil")
+	}
+	index := table.Indexes["name"]
+	indexDef := table.IndexDefinition("idx_users_name")
+	if index == nil || indexDef == nil {
+		t.Fatalf("index setup failed: index=%v indexDef=%v", index, indexDef)
+	}
+	index.RootPageID = uint32(table.RootPageID())
+	indexDef.RootPageID = uint32(table.RootPageID())
+
+	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() == nil || rows.Err().Error() != "storage: corrupted index page" {
+		t.Fatalf("Rows.Err() = %v, want %q", rows.Err(), "storage: corrupted index page")
+	}
+}
+
 func TestQueryRejectsInvalidTransactionState(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

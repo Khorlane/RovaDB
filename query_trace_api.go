@@ -3,7 +3,6 @@ package rovadb
 import (
 	"strings"
 
-	"github.com/Khorlane/RovaDB/internal/executor"
 	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/planner"
 )
@@ -64,9 +63,21 @@ func (db *DB) ExplainQueryPath(sql string, args ...any) (QueryExecutionTrace, er
 		trace.ScanType = "table"
 		trace.TableName = plan.Stmt.TableName
 	case planner.ScanTypeIndex:
+		table := db.tables[plan.IndexScan.TableName]
+		if table == nil {
+			return QueryExecutionTrace{}, newExecError("table not found: " + plan.IndexScan.TableName)
+		}
+		index := table.Indexes[plan.IndexScan.ColumnName]
+		if index == nil {
+			return QueryExecutionTrace{}, newExecError("invalid select plan")
+		}
+		indexDef, err := db.validateIndexLookupMetadata(table, index)
+		if err != nil {
+			return QueryExecutionTrace{}, err
+		}
 		trace.ScanType = "index"
 		trace.TableName = plan.IndexScan.TableName
-		trace.IndexName = explainIndexName(db.tables[plan.IndexScan.TableName], plan.IndexScan.ColumnName)
+		trace.IndexName = indexDef.Name
 		trace.UsesBTree = true
 	case planner.ScanTypeJoin:
 		trace.ScanType = "join"
@@ -75,17 +86,4 @@ func (db *DB) ExplainQueryPath(sql string, args ...any) (QueryExecutionTrace, er
 	}
 
 	return trace, nil
-}
-
-func explainIndexName(table *executor.Table, columnName string) string {
-	if table == nil || columnName == "" {
-		return ""
-	}
-	for _, indexDef := range table.IndexDefs {
-		legacyColumnName, ok := executor.LegacyBasicIndexColumn(indexDef)
-		if ok && legacyColumnName == columnName {
-			return indexDef.Name
-		}
-	}
-	return ""
 }
