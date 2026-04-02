@@ -76,10 +76,11 @@ func TestCatalogRoundTripPreservesIndexMetadataForOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCatalog() error = %v", err)
 	}
-	if len(catalog.Tables) != 1 || len(catalog.Tables[0].Indexes) != 1 {
+	usersTable := findCatalogTableByName(catalog, "users")
+	if usersTable == nil || len(usersTable.Indexes) != 1 {
 		t.Fatalf("catalog.Tables = %#v, want one persisted users index", catalog.Tables)
 	}
-	index := catalog.Tables[0].Indexes[0]
+	index := usersTable.Indexes[0]
 	if index.Name != "id" || index.Unique || len(index.Columns) != 1 || index.Columns[0].Name != "id" || index.Columns[0].Desc {
 		t.Fatalf("catalog.Tables[0].Indexes[0] = %#v, want named single-column ASC non-unique id index", index)
 	}
@@ -539,7 +540,8 @@ func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCatalog() error = %v", err)
 	}
-	if len(catalog.Tables) != 1 || len(catalog.Tables[0].Indexes) != 1 {
+	usersTable := findCatalogTableByName(catalog, "users")
+	if usersTable == nil || len(usersTable.Indexes) != 1 {
 		t.Fatalf("catalog = %#v, want one table with one index", catalog)
 	}
 
@@ -879,7 +881,11 @@ func TestOpenFailsWhenPersistedIndexRootHasWrongPageType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCatalog() error = %v", err)
 	}
-	rootPageID := storage.PageID(catalog.Tables[0].Indexes[0].RootPageID)
+	usersTable := findCatalogTableByName(catalog, "users")
+	if usersTable == nil || len(usersTable.Indexes) == 0 {
+		t.Fatalf("catalog = %#v, want users table with persisted index", catalog)
+	}
+	rootPageID := storage.PageID(usersTable.Indexes[0].RootPageID)
 	rootPage, err := pager.Get(rootPageID)
 	if err != nil {
 		t.Fatalf("pager.Get(index root) error = %v", err)
@@ -903,6 +909,18 @@ func TestOpenFailsWhenPersistedIndexRootHasWrongPageType(t *testing.T) {
 	if err.Error() != "storage: corrupted index page" {
 		t.Fatalf("Open() error = %q, want %q", err.Error(), "storage: corrupted index page")
 	}
+}
+
+func findCatalogTableByName(catalog *storage.CatalogData, name string) *storage.CatalogTable {
+	if catalog == nil {
+		return nil
+	}
+	for i := range catalog.Tables {
+		if catalog.Tables[i].Name == name {
+			return &catalog.Tables[i]
+		}
+	}
+	return nil
 }
 
 func appendCommittedWALFramesForTest(path string, frames ...storage.WALFrame) error {

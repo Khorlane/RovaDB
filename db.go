@@ -190,20 +190,33 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
-	if backfilled, err := backfillStableCatalogIDs(tables); err != nil {
+	db := &DB{
+		path:                    path,
+		file:                    file,
+		pager:                   pager,
+		pool:                    pool,
+		tables:                  tables,
+		freeListHead:            freeListHead,
+		lastCheckpointLSN:       checkpointMeta.LastCheckpointLSN,
+		lastCheckpointPageCount: checkpointMeta.LastCheckpointPageCount,
+	}
+	backfilled, err := backfillStableCatalogIDs(tables)
+	if err != nil {
 		_ = pager.Close()
 		_ = file.Close()
 		return nil, err
-	} else if backfilled {
-		if err := storage.SaveCatalog(pager, catalogFromTables(tables)); err != nil {
+	}
+	systemPages, bootstrapped, err := db.ensureSystemCatalogTables(tables)
+	if err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, err
+	}
+	if backfilled || bootstrapped {
+		if err := db.persistCatalogState(tables, systemPages); err != nil {
 			_ = pager.Close()
 			_ = file.Close()
-			return nil, wrapStorageError(err)
-		}
-		if err := pager.FlushDirty(); err != nil {
-			_ = pager.Close()
-			_ = file.Close()
-			return nil, wrapStorageError(err)
+			return nil, err
 		}
 	}
 	if err := validatePersistedIndexRoots(pool, tables); err != nil {
@@ -235,18 +248,8 @@ func Open(path string) (*DB, error) {
 		return nil, wrapStorageError(err)
 	}
 
-	return &DB{
-		path:                    path,
-		file:                    file,
-		pager:                   pager,
-		pool:                    pool,
-		tables:                  tables,
-		txn:                     nil,
-		nextWALLSN:              nextWALLSN,
-		freeListHead:            freeListHead,
-		lastCheckpointLSN:       checkpointMeta.LastCheckpointLSN,
-		lastCheckpointPageCount: checkpointMeta.LastCheckpointPageCount,
-	}, nil
+	db.nextWALLSN = nextWALLSN
+	return db, nil
 }
 
 // Close releases database resources.
@@ -673,6 +676,7 @@ func (db *DB) tablesForSelect(plan *planner.SelectPlan) (map[string]*executor.Ta
 		execTables[table.Name] = &executor.Table{
 			Name:      table.Name,
 			TableID:   table.TableID,
+			IsSystem:  table.IsSystem,
 			Columns:   append([]parser.ColumnDef(nil), table.Columns...),
 			Rows:      rows,
 			Indexes:   table.Indexes,
@@ -1266,6 +1270,43 @@ func (db *DB) buildCatalogPageData(stagedTables map[string]*executor.Table) ([]b
 	})
 }
 
+func (db *DB) persistCatalogState(stagedTables map[string]*executor.Table, pages []stagedPage) error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+
+	catalogData, err := db.buildCatalogPageData(stagedTables)
+	if err != nil {
+		return wrapStorageError(err)
+	}
+
+	stagedPages := make([]stagedPage, 0, len(pages)+1)
+	stagedPages = append(stagedPages, pages...)
+	stagedPages = append(stagedPages, stagedPage{id: 0, data: catalogData})
+	for _, staged := range stagedPages {
+		var page *storage.Page
+		if staged.isNew {
+			page = db.pager.NewPage()
+			if page.ID() != staged.id {
+				db.pager.DiscardNewPage(page.ID())
+				return wrapStorageError(newStorageError("unexpected new page id"))
+			}
+		} else {
+			page, err = db.pager.Get(staged.id)
+			if err != nil {
+				return wrapStorageError(err)
+			}
+		}
+		db.pager.MarkDirtyWithOriginal(page)
+		clear(page.Data())
+		copy(page.Data(), staged.data)
+	}
+	if err := db.pager.FlushDirty(); err != nil {
+		return wrapStorageError(err)
+	}
+	return nil
+}
+
 func (db *DB) setFreeListHead(head uint32) error {
 	if db == nil {
 		return ErrInvalidArgument
@@ -1601,6 +1642,7 @@ func cloneTable(table *executor.Table) *executor.Table {
 	cloned := &executor.Table{
 		Name:      table.Name,
 		TableID:   table.TableID,
+		IsSystem:  table.IsSystem,
 		Columns:   columns,
 		Rows:      rows,
 		Indexes:   cloneIndexes(table.Indexes),
@@ -2224,6 +2266,7 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 		tables[table.Name] = &executor.Table{
 			Name:      table.Name,
 			TableID:   table.TableID,
+			IsSystem:  isSystemCatalogTableName(table.Name),
 			Columns:   columns,
 			Indexes:   make(map[string]*planner.BasicIndex),
 			IndexDefs: cloneIndexDefs(table.Indexes),

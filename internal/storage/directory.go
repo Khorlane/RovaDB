@@ -399,6 +399,7 @@ func ApplyDirectoryRootMappings(cat *CatalogData, mappings []DirectoryRootMappin
 	for _, table := range cat.Tables {
 		cloned := CatalogTable{
 			Name:       table.Name,
+			TableID:    table.TableID,
 			RootPageID: table.RootPageID,
 			RowCount:   table.RowCount,
 			Columns:    append([]CatalogColumn(nil), table.Columns...),
@@ -417,6 +418,7 @@ func ApplyDirectoryRootMappings(cat *CatalogData, mappings []DirectoryRootMappin
 			clonedIndex := CatalogIndex{
 				Name:       index.Name,
 				Unique:     index.Unique,
+				IndexID:    index.IndexID,
 				RootPageID: index.RootPageID,
 				Columns:    append([]CatalogIndexColumn(nil), index.Columns...),
 			}

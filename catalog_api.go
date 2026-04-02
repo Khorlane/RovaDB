@@ -71,7 +71,7 @@ func publicTableInfos(tables map[string]*executor.Table) []TableInfo {
 	info := make([]TableInfo, 0, len(names))
 	for _, name := range names {
 		table := tables[name]
-		if table == nil {
+		if table == nil || table.IsSystem {
 			continue
 		}
 		info = append(info, publicTableInfo(table))
@@ -85,10 +85,13 @@ func findPublicTableInfo(tables map[string]*executor.Table, tableName string) (T
 	}
 
 	if table, ok := tables[tableName]; ok && table != nil {
+		if table.IsSystem {
+			return TableInfo{}, false
+		}
 		return publicTableInfo(table), true
 	}
 	for name, table := range tables {
-		if table == nil {
+		if table == nil || table.IsSystem {
 			continue
 		}
 		if strings.EqualFold(name, tableName) {

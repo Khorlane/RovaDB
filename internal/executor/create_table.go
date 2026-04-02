@@ -21,6 +21,7 @@ var (
 type Table struct {
 	Name              string
 	TableID           uint32
+	IsSystem          bool
 	Columns           []parser.ColumnDef
 	Rows              [][]parser.Value // transient operation rows; persisted storage is authoritative
 	Indexes           map[string]*planner.BasicIndex

@@ -57,9 +57,9 @@ func TestCommitFlushesDirtyPages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pager.Get(0) error = %v", err)
 	}
-	rootPage, err := db.pager.Get(1)
+	rootPage, err := db.pager.Get(stagedTables["t"].RootPageID())
 	if err != nil {
-		t.Fatalf("pager.Get(1) error = %v", err)
+		t.Fatalf("pager.Get(root) error = %v", err)
 	}
 	if db.pager.HasOriginal(catalogPage) || db.pager.HasOriginal(rootPage) {
 		t.Fatal("rollback snapshots still tracked after commit")
@@ -177,6 +177,7 @@ func TestJournalWrittenBeforeDatabaseOverwrite(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
+	rootPageID := db.tables["t"].RootPageID()
 
 	hookCalled := false
 	db.afterJournalWriteHook = func() error {
@@ -198,7 +199,7 @@ func TestJournalWrittenBeforeDatabaseOverwrite(t *testing.T) {
 
 		rawDB, pager := openRawStorage(t, path)
 		defer rawDB.Close()
-		page, err := pager.Get(1)
+		page, err := pager.Get(rootPageID)
 		if err != nil {
 			return err
 		}
@@ -1054,9 +1055,9 @@ func TestCommitClearsRollbackSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pager.Get(0) error = %v", err)
 	}
-	rootPage, err := db.pager.Get(1)
+	rootPage, err := db.pager.Get(stagedTables["t"].RootPageID())
 	if err != nil {
-		t.Fatalf("pager.Get(1) error = %v", err)
+		t.Fatalf("pager.Get(root) error = %v", err)
 	}
 	if db.pager.HasOriginal(catalogPage) || db.pager.HasOriginal(rootPage) {
 		t.Fatal("rollback snapshot still tracked after commit")

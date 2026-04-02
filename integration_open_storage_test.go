@@ -629,8 +629,8 @@ func TestOpenLoadsDurableFreeListHead(t *testing.T) {
 	}
 
 	rawDB, pager := openRawStorage(t, path)
-	seedFreePageForTest(t, pager, 2, 0)
-	if err := storage.WriteDirectoryFreeListHead(rawDB.File(), 2); err != nil {
+	freeHead := appendFreePageForTest(t, pager, 0)
+	if err := storage.WriteDirectoryFreeListHead(rawDB.File(), uint32(freeHead)); err != nil {
 		t.Fatalf("WriteDirectoryFreeListHead() error = %v", err)
 	}
 	if err := rawDB.Close(); err != nil {
@@ -643,8 +643,8 @@ func TestOpenLoadsDurableFreeListHead(t *testing.T) {
 	}
 	defer db.Close()
 
-	if db.freeListHead != 2 {
-		t.Fatalf("db.freeListHead = %d, want 2", db.freeListHead)
+	if db.freeListHead != uint32(freeHead) {
+		t.Fatalf("db.freeListHead = %d, want %d", db.freeListHead, freeHead)
 	}
 }
 
@@ -663,9 +663,9 @@ func TestCreateTableReusesDurableFreeListHeadAndAdvancesIt(t *testing.T) {
 	}
 
 	rawDB, pager := openRawStorage(t, path)
-	seedFreePageForTest(t, pager, 2, 3)
-	seedFreePageForTest(t, pager, 3, 0)
-	if err := storage.WriteDirectoryFreeListHead(rawDB.File(), 2); err != nil {
+	secondFreePageID := appendFreePageForTest(t, pager, 0)
+	firstFreePageID := appendFreePageForTest(t, pager, secondFreePageID)
+	if err := storage.WriteDirectoryFreeListHead(rawDB.File(), uint32(firstFreePageID)); err != nil {
 		t.Fatalf("WriteDirectoryFreeListHead() error = %v", err)
 	}
 	if err := rawDB.Close(); err != nil {
@@ -679,11 +679,11 @@ func TestCreateTableReusesDurableFreeListHeadAndAdvancesIt(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE t2 (id INT)"); err != nil {
 		t.Fatalf("Exec(create t2) error = %v", err)
 	}
-	if got := db.tables["t2"].RootPageID(); got != 2 {
-		t.Fatalf("t2 rootPageID = %d, want 2", got)
+	if got := db.tables["t2"].RootPageID(); got != firstFreePageID {
+		t.Fatalf("t2 rootPageID = %d, want %d", got, firstFreePageID)
 	}
-	if db.freeListHead != 3 {
-		t.Fatalf("db.freeListHead = %d, want 3", db.freeListHead)
+	if db.freeListHead != uint32(secondFreePageID) {
+		t.Fatalf("db.freeListHead = %d, want %d", db.freeListHead, secondFreePageID)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -695,8 +695,8 @@ func TestCreateTableReusesDurableFreeListHeadAndAdvancesIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDirectoryFreeListHead() error = %v", err)
 	}
-	if head != 3 {
-		t.Fatalf("ReadDirectoryFreeListHead() = %d, want 3", head)
+	if head != uint32(secondFreePageID) {
+		t.Fatalf("ReadDirectoryFreeListHead() = %d, want %d", head, secondFreePageID)
 	}
 }
 
@@ -710,13 +710,14 @@ func TestCreateTableFallsBackToFreshAllocationWhenFreeListEmpty(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE t1 (id INT)"); err != nil {
 		t.Fatalf("Exec(create t1) error = %v", err)
 	}
+	t1Root := db.tables["t1"].RootPageID()
 	if _, err := db.Exec("CREATE TABLE t2 (id INT)"); err != nil {
 		t.Fatalf("Exec(create t2) error = %v", err)
 	}
 	defer db.Close()
 
-	if got := db.tables["t2"].RootPageID(); got != 2 {
-		t.Fatalf("t2 rootPageID = %d, want 2", got)
+	if got := db.tables["t2"].RootPageID(); got != t1Root+1 {
+		t.Fatalf("t2 rootPageID = %d, want %d", got, t1Root+1)
 	}
 	if db.freeListHead != 0 {
 		t.Fatalf("db.freeListHead = %d, want 0", db.freeListHead)
@@ -738,9 +739,9 @@ func TestReopenPreservesFreeListHeadForSubsequentAllocation(t *testing.T) {
 	}
 
 	rawDB, pager := openRawStorage(t, path)
-	seedFreePageForTest(t, pager, 2, 3)
-	seedFreePageForTest(t, pager, 3, 0)
-	if err := storage.WriteDirectoryFreeListHead(rawDB.File(), 2); err != nil {
+	secondFreePageID := appendFreePageForTest(t, pager, 0)
+	firstFreePageID := appendFreePageForTest(t, pager, secondFreePageID)
+	if err := storage.WriteDirectoryFreeListHead(rawDB.File(), uint32(firstFreePageID)); err != nil {
 		t.Fatalf("WriteDirectoryFreeListHead() error = %v", err)
 	}
 	if err := rawDB.Close(); err != nil {
@@ -763,14 +764,14 @@ func TestReopenPreservesFreeListHeadForSubsequentAllocation(t *testing.T) {
 		t.Fatalf("second reopen Open() error = %v", err)
 	}
 	defer db.Close()
-	if db.freeListHead != 3 {
-		t.Fatalf("db.freeListHead = %d, want 3", db.freeListHead)
+	if db.freeListHead != uint32(secondFreePageID) {
+		t.Fatalf("db.freeListHead = %d, want %d", db.freeListHead, secondFreePageID)
 	}
 	if _, err := db.Exec("CREATE TABLE t3 (id INT)"); err != nil {
 		t.Fatalf("Exec(create t3) error = %v", err)
 	}
-	if got := db.tables["t3"].RootPageID(); got != 3 {
-		t.Fatalf("t3 rootPageID = %d, want 3", got)
+	if got := db.tables["t3"].RootPageID(); got != secondFreePageID {
+		t.Fatalf("t3 rootPageID = %d, want %d", got, secondFreePageID)
 	}
 }
 
@@ -789,9 +790,10 @@ func TestCreateTableFailsOnMalformedFreePageLinkage(t *testing.T) {
 	}
 
 	rawDB, pager := openRawStorage(t, path)
-	page, err := pager.Get(2)
+	badFreePageID := appendFreePageForTest(t, pager, 0)
+	page, err := pager.Get(badFreePageID)
 	if err != nil {
-		t.Fatalf("pager.Get(2) error = %v", err)
+		t.Fatalf("pager.Get(%d) error = %v", badFreePageID, err)
 	}
 	clear(page.Data())
 	copy(page.Data(), []byte("not-a-free-page"))
@@ -799,7 +801,7 @@ func TestCreateTableFailsOnMalformedFreePageLinkage(t *testing.T) {
 	if err := pager.Flush(); err != nil {
 		t.Fatalf("pager.Flush() error = %v", err)
 	}
-	if err := storage.WriteDirectoryFreeListHead(rawDB.File(), 2); err != nil {
+	if err := storage.WriteDirectoryFreeListHead(rawDB.File(), uint32(badFreePageID)); err != nil {
 		t.Fatalf("WriteDirectoryFreeListHead() error = %v", err)
 	}
 	if err := rawDB.Close(); err != nil {
@@ -921,16 +923,17 @@ func TestOpenReplaysCommittedWALState(t *testing.T) {
 	} else if len(records) == 0 {
 		t.Fatal("len(ReadWALRecords()) = 0, want committed WAL after checkpoint failure")
 	}
+	rootPageID := db.tables["t"].RootPageID()
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 
 	rawDB, pager := openRawStorage(t, path)
-	rootPage, err := pager.Get(1)
+	rootPage, err := pager.Get(rootPageID)
 	if err != nil {
-		t.Fatalf("pager.Get(1) error = %v", err)
+		t.Fatalf("pager.Get(root) error = %v", err)
 	}
-	corrupted := storage.InitializeTablePage(1)
+	corrupted := storage.InitializeTablePage(uint32(rootPageID))
 	if err := storage.RecomputePageChecksum(corrupted); err != nil {
 		t.Fatalf("RecomputePageChecksum() error = %v", err)
 	}
@@ -966,14 +969,15 @@ func TestOpenIgnoresTrailingUncommittedWALFrames(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
+	rootPageID := db.tables["t"].RootPageID()
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 
 	rawDB, pager := openRawStorage(t, path)
-	rootPage, err := pager.Get(1)
+	rootPage, err := pager.Get(rootPageID)
 	if err != nil {
-		t.Fatalf("pager.Get(1) error = %v", err)
+		t.Fatalf("pager.Get(root) error = %v", err)
 	}
 	uncommitted := append([]byte(nil), rootPage.Data()...)
 	row, err := storage.EncodeSlottedRow([]parser.Value{parser.Int64Value(2)})
@@ -998,7 +1002,7 @@ func TestOpenIgnoresTrailingUncommittedWALFrames(t *testing.T) {
 	}
 	var frame storage.WALFrame
 	frame.FrameLSN = 999
-	frame.PageID = 1
+	frame.PageID = uint32(rootPageID)
 	frame.PageLSN = 999
 	copy(frame.PageData[:], uncommitted)
 	if err := storage.AppendWALFrame(path, frame); err != nil {
@@ -1034,16 +1038,17 @@ func TestOpenReplayIsIdempotentAcrossRepeatedOpens(t *testing.T) {
 		t.Fatal("Exec(insert) error = nil, want checkpoint failure")
 	}
 	db.afterDatabaseSyncHook = nil
+	rootPageID := db.tables["t"].RootPageID()
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 
 	rawDB, pager := openRawStorage(t, path)
-	rootPage, err := pager.Get(1)
+	rootPage, err := pager.Get(rootPageID)
 	if err != nil {
-		t.Fatalf("pager.Get(1) error = %v", err)
+		t.Fatalf("pager.Get(root) error = %v", err)
 	}
-	corrupted := storage.InitializeTablePage(1)
+	corrupted := storage.InitializeTablePage(uint32(rootPageID))
 	if err := storage.RecomputePageChecksum(corrupted); err != nil {
 		t.Fatalf("RecomputePageChecksum() error = %v", err)
 	}
@@ -1094,16 +1099,17 @@ func TestOpenReplaysMultipleCommittedWALTransactions(t *testing.T) {
 		t.Fatal("Exec(second insert) error = nil, want checkpoint failure")
 	}
 	db.afterDatabaseSyncHook = nil
+	rootPageID := db.tables["t"].RootPageID()
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 
 	rawDB, pager := openRawStorage(t, path)
-	rootPage, err := pager.Get(1)
+	rootPage, err := pager.Get(rootPageID)
 	if err != nil {
-		t.Fatalf("pager.Get(1) error = %v", err)
+		t.Fatalf("pager.Get(root) error = %v", err)
 	}
-	older := storage.InitializeTablePage(1)
+	older := storage.InitializeTablePage(uint32(rootPageID))
 	row, err := storage.EncodeSlottedRow([]parser.Value{parser.Int64Value(1)})
 	if err != nil {
 		t.Fatalf("EncodeSlottedRow() error = %v", err)
@@ -1184,4 +1190,17 @@ func seedFreePageForTest(t *testing.T, pager *storage.Pager, pageID storage.Page
 	if err := pager.Flush(); err != nil {
 		t.Fatalf("pager.Flush() error = %v", err)
 	}
+}
+
+func appendFreePageForTest(t *testing.T, pager *storage.Pager, next storage.PageID) storage.PageID {
+	t.Helper()
+
+	page := pager.NewPage()
+	pageID := page.ID()
+	clear(page.Data())
+	copy(page.Data(), storage.InitFreePage(uint32(pageID), uint32(next)))
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+	return pageID
 }

@@ -2,6 +2,8 @@ package rovadb
 
 import (
 	"testing"
+
+	"github.com/Khorlane/RovaDB/internal/executor"
 )
 
 // Stage 4 invariants:
@@ -373,8 +375,8 @@ func TestFailedCreateTableDoesNotPartiallyRegisterTable(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE t (id INT)"); err == nil {
 		t.Fatal("Exec(duplicate create) error = nil, want failure")
 	}
-	if len(db.tables) != 1 {
-		t.Fatalf("len(db.tables) = %d, want 1", len(db.tables))
+	if got := userTableCount(db.tables); got != 1 {
+		t.Fatalf("userTableCount(db.tables) = %d, want 1", got)
 	}
 	assertSelectIntRows(t, db, "SELECT * FROM t")
 
@@ -385,10 +387,21 @@ func TestFailedCreateTableDoesNotPartiallyRegisterTable(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 
-	if len(db.tables) != 1 {
-		t.Fatalf("len(reopened db.tables) = %d, want 1", len(db.tables))
+	if got := userTableCount(db.tables); got != 1 {
+		t.Fatalf("userTableCount(reopened db.tables) = %d, want 1", got)
 	}
 	assertSelectIntRows(t, db, "SELECT * FROM t")
+}
+
+func userTableCount(tables map[string]*executor.Table) int {
+	count := 0
+	for _, table := range tables {
+		if table == nil || table.IsSystem {
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 func assertIntRows(t *testing.T, rows *Rows, want ...int) {
