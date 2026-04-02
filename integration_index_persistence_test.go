@@ -691,17 +691,8 @@ func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
-	foundRootMapping := false
-	for _, mapping := range mappings {
-		if mapping.ObjectType == storage.DirectoryRootMappingObjectIndex && mapping.TableName == "users" && mapping.IndexName == "idx_users_name" {
-			foundRootMapping = true
-			if mapping.RootPageID != indexDef.RootPageID {
-				t.Fatalf("directory index root mapping = %d, want %d", mapping.RootPageID, indexDef.RootPageID)
-			}
-		}
-	}
-	if !foundRootMapping {
-		t.Fatal("directory index root mapping not found after root split")
+	if len(mappings) != 0 {
+		t.Fatalf("len(ReadDirectoryRootMappings()) = %d, want 0 on new writes", len(mappings))
 	}
 	foundIDRootMapping := false
 	for _, mapping := range idMappings {

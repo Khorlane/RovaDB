@@ -345,7 +345,7 @@ func TestDirectoryRootMappingsRoundTrip(t *testing.T) {
 		},
 	}
 
-	page, err := buildDirectoryCatalogPage([]byte{1, 2, 3}, CurrentDBFormatVersion, 19, mappings, nil, DirectoryCheckpointMetadata{})
+	page, err := buildLegacyDirectoryCatalogPage([]byte{1, 2, 3}, CurrentDBFormatVersion, 19, mappings, nil, DirectoryCheckpointMetadata{})
 	if err != nil {
 		t.Fatalf("buildDirectoryCatalogPage() error = %v", err)
 	}
@@ -365,7 +365,7 @@ func TestDirectoryRootMappingsRoundTrip(t *testing.T) {
 }
 
 func TestReadDirectoryRootMappingsEmptyRoundTrip(t *testing.T) {
-	page, err := buildDirectoryCatalogPage([]byte{1, 2, 3}, CurrentDBFormatVersion, 0, nil, nil, DirectoryCheckpointMetadata{})
+	page, err := buildDirectoryCatalogPage([]byte{1, 2, 3}, CurrentDBFormatVersion, 0, nil, DirectoryCheckpointMetadata{})
 	if err != nil {
 		t.Fatalf("buildDirectoryCatalogPage() error = %v", err)
 	}
@@ -460,7 +460,7 @@ func TestDirectoryRootIDMappingsRoundTrip(t *testing.T) {
 		},
 	}
 
-	page, err := buildDirectoryCatalogPage(catalogPayload, CurrentDBFormatVersion, 19, nil, mappings, DirectoryCheckpointMetadata{})
+	page, err := buildDirectoryCatalogPage(catalogPayload, CurrentDBFormatVersion, 19, mappings, DirectoryCheckpointMetadata{})
 	if err != nil {
 		t.Fatalf("buildDirectoryCatalogPage() error = %v", err)
 	}
@@ -534,6 +534,50 @@ func TestBuildDirectoryRootStateFromCatalogOrdersMappingsDeterministically(t *te
 	for i := range wantIDMappings {
 		if state.RootIDMappings[i] != wantIDMappings[i] {
 			t.Fatalf("state.RootIDMappings[%d] = %#v, want %#v", i, state.RootIDMappings[i], wantIDMappings[i])
+		}
+	}
+}
+
+func TestBuildCatalogPageDataWritesIDMappingsOnly(t *testing.T) {
+	page, err := BuildCatalogPageData(&CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				TableID:    7,
+				RootPageID: 11,
+				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
+				Indexes: []CatalogIndex{
+					{Name: "idx_users_id", IndexID: 9, RootPageID: 13, Columns: []CatalogIndexColumn{{Name: "id"}}},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildCatalogPageData() error = %v", err)
+	}
+
+	nameMappings, err := directoryRootMappings(page)
+	if err != nil {
+		t.Fatalf("directoryRootMappings() error = %v", err)
+	}
+	if len(nameMappings) != 0 {
+		t.Fatalf("len(directoryRootMappings()) = %d, want 0 on new writes", len(nameMappings))
+	}
+
+	idMappings, err := directoryRootIDMappings(page)
+	if err != nil {
+		t.Fatalf("directoryRootIDMappings() error = %v", err)
+	}
+	want := []DirectoryRootIDMapping{
+		{ObjectType: DirectoryRootMappingObjectTable, ObjectID: 7, RootPageID: 11},
+		{ObjectType: DirectoryRootMappingObjectIndex, ObjectID: 9, RootPageID: 13},
+	}
+	if len(idMappings) != len(want) {
+		t.Fatalf("len(directoryRootIDMappings()) = %d, want %d", len(idMappings), len(want))
+	}
+	for i := range want {
+		if idMappings[i] != want[i] {
+			t.Fatalf("idMappings[%d] = %#v, want %#v", i, idMappings[i], want[i])
 		}
 	}
 }

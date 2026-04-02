@@ -381,7 +381,7 @@ func TestOpenFailsOnMalformedDirectoryPage(t *testing.T) {
 	}
 }
 
-func TestDirectoryRootMappingsPersistTableRootAcrossReopen(t *testing.T) {
+func TestOpenFallsBackToLegacyNameBasedTableRootMappings(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
@@ -397,25 +397,16 @@ func TestDirectoryRootMappingsPersistTableRootAcrossReopen(t *testing.T) {
 	}
 
 	rawDB, _ := openRawStorage(t, path)
-	mappings, err := storage.ReadDirectoryRootMappings(rawDB.File())
-	if err != nil {
-		t.Fatalf("ReadDirectoryRootMappings() error = %v", err)
+	if err := storage.WriteDirectoryRootMappings(rawDB.File(), []storage.DirectoryRootMapping{{
+		ObjectType: storage.DirectoryRootMappingObjectTable,
+		TableName:  "users",
+		RootPageID: usersRoot,
+	}}); err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
 	}
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
-	}
-
-	found := false
-	for _, mapping := range mappings {
-		if mapping.ObjectType == storage.DirectoryRootMappingObjectTable && mapping.TableName == "users" {
-			found = true
-			if mapping.RootPageID != usersRoot {
-				t.Fatalf("users table root mapping = %d, want %d", mapping.RootPageID, usersRoot)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("users table root mapping not found")
 	}
 
 	db, err = Open(path)
@@ -428,7 +419,7 @@ func TestDirectoryRootMappingsPersistTableRootAcrossReopen(t *testing.T) {
 	}
 }
 
-func TestDirectoryRootMappingsPersistIndexRootAcrossReopen(t *testing.T) {
+func TestOpenFallsBackToLegacyNameBasedIndexRootMappings(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
@@ -447,25 +438,17 @@ func TestDirectoryRootMappingsPersistIndexRootAcrossReopen(t *testing.T) {
 	}
 
 	rawDB, _ := openRawStorage(t, path)
-	mappings, err := storage.ReadDirectoryRootMappings(rawDB.File())
-	if err != nil {
-		t.Fatalf("ReadDirectoryRootMappings() error = %v", err)
+	if err := storage.WriteDirectoryRootMappings(rawDB.File(), []storage.DirectoryRootMapping{{
+		ObjectType: storage.DirectoryRootMappingObjectIndex,
+		TableName:  "users",
+		IndexName:  "idx_users_name",
+		RootPageID: indexRoot,
+	}}); err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
 	}
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
-	}
-
-	found := false
-	for _, mapping := range mappings {
-		if mapping.ObjectType == storage.DirectoryRootMappingObjectIndex && mapping.TableName == "users" && mapping.IndexName == "idx_users_name" {
-			found = true
-			if mapping.RootPageID != indexRoot {
-				t.Fatalf("users index root mapping = %d, want %d", mapping.RootPageID, indexRoot)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("users index root mapping not found")
 	}
 
 	db, err = Open(path)
@@ -504,12 +487,19 @@ func TestDirectoryRootIDMappingsPersistAcrossReopen(t *testing.T) {
 	}
 
 	rawDB, _ := openRawStorage(t, path)
+	nameMappings, err := storage.ReadDirectoryRootMappings(rawDB.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryRootMappings() error = %v", err)
+	}
 	idMappings, err := storage.ReadDirectoryRootIDMappings(rawDB.File())
 	if err != nil {
 		t.Fatalf("ReadDirectoryRootIDMappings() error = %v", err)
 	}
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+	if len(nameMappings) != 0 {
+		t.Fatalf("len(ReadDirectoryRootMappings()) = %d, want 0 on new writes", len(nameMappings))
 	}
 
 	foundTable := false
@@ -548,7 +538,7 @@ func TestDirectoryRootIDMappingsPersistAcrossReopen(t *testing.T) {
 	}
 }
 
-func TestDirectoryWritePathKeepsNameAndIDMappingsConsistent(t *testing.T) {
+func TestDirectoryWritePathWritesIDMappingsOnly(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
@@ -589,13 +579,8 @@ func TestDirectoryWritePathKeepsNameAndIDMappingsConsistent(t *testing.T) {
 	}
 
 	wantState := storage.BuildDirectoryRootStateFromCatalog(catalog)
-	if len(nameMappings) != len(wantState.RootMappings) {
-		t.Fatalf("len(nameMappings) = %d, want %d", len(nameMappings), len(wantState.RootMappings))
-	}
-	for i := range wantState.RootMappings {
-		if nameMappings[i] != wantState.RootMappings[i] {
-			t.Fatalf("nameMappings[%d] = %#v, want %#v", i, nameMappings[i], wantState.RootMappings[i])
-		}
+	if len(nameMappings) != 0 {
+		t.Fatalf("len(nameMappings) = %d, want 0 on new writes", len(nameMappings))
 	}
 	if len(idMappings) != len(wantState.RootIDMappings) {
 		t.Fatalf("len(idMappings) = %d, want %d", len(idMappings), len(wantState.RootIDMappings))

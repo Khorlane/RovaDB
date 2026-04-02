@@ -371,7 +371,7 @@ func ValidateDirectoryControlState(file *os.File, state DirectoryControlState) e
 	return nil
 }
 
-// WriteDirectoryRootMappings rewrites the durable root mappings while preserving other directory state.
+// WriteDirectoryRootMappings rewrites the legacy name-based root mappings while preserving other directory state.
 func WriteDirectoryRootMappings(file *os.File, mappings []DirectoryRootMapping) error {
 	page, err := ReadDirectoryPage(file)
 	if err != nil {
@@ -393,7 +393,7 @@ func WriteDirectoryRootMappings(file *os.File, mappings []DirectoryRootMapping) 
 	if err != nil {
 		return err
 	}
-	rebuilt, err := buildDirectoryCatalogPage(catalogPayload, CurrentDBFormatVersion, freeListHead, mappings, idMappings, checkpointMeta)
+	rebuilt, err := buildLegacyDirectoryCatalogPage(catalogPayload, CurrentDBFormatVersion, freeListHead, mappings, idMappings, checkpointMeta)
 	if err != nil {
 		return err
 	}
@@ -418,11 +418,7 @@ func WriteDirectoryRootIDMappings(file *os.File, mappings []DirectoryRootIDMappi
 	if err != nil {
 		return err
 	}
-	nameMappings, err := directoryRootMappings(page)
-	if err != nil {
-		return err
-	}
-	rebuilt, err := buildDirectoryCatalogPage(catalogPayload, CurrentDBFormatVersion, freeListHead, nameMappings, mappings, checkpointMeta)
+	rebuilt, err := buildDirectoryCatalogPage(catalogPayload, CurrentDBFormatVersion, freeListHead, mappings, checkpointMeta)
 	if err != nil {
 		return err
 	}
@@ -695,7 +691,11 @@ func ApplyDirectoryRootIDMappings(cat *CatalogData, mappings []DirectoryRootIDMa
 	return applied, nil
 }
 
-func buildDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, freeListHead uint32, mappings []DirectoryRootMapping, idMappings []DirectoryRootIDMapping, checkpointMeta DirectoryCheckpointMetadata) ([]byte, error) {
+func buildDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, freeListHead uint32, idMappings []DirectoryRootIDMapping, checkpointMeta DirectoryCheckpointMetadata) ([]byte, error) {
+	return buildLegacyDirectoryCatalogPage(catalogPayload, formatVersion, freeListHead, nil, idMappings, checkpointMeta)
+}
+
+func buildLegacyDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, freeListHead uint32, mappings []DirectoryRootMapping, idMappings []DirectoryRootIDMapping, checkpointMeta DirectoryCheckpointMetadata) ([]byte, error) {
 	rootMapPayload, err := encodeDirectoryRootMappings(mappings)
 	if err != nil {
 		return nil, err

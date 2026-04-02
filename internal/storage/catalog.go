@@ -232,11 +232,6 @@ func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint3
 		cat = &CatalogData{}
 	}
 	rootState := BuildDirectoryRootStateFromCatalog(cat)
-	rootMappings := rootState.RootMappings
-	rootMapPayload, err := encodeDirectoryRootMappings(rootMappings)
-	if err != nil {
-		return nil, err
-	}
 	rootIDMappings := rootState.RootIDMappings
 	rootIDPayload, err := encodeDirectoryRootIDMappings(rootIDMappings)
 	if err != nil {
@@ -247,7 +242,7 @@ func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint3
 		rootIDTrailerSize = directoryRootIDTrailerHeaderSize + len(rootIDPayload)
 	}
 
-	maxCatalogPayloadSize := PageSize - directoryCatalogOffset - len(rootMapPayload) - directoryCheckpointMetadataSize - rootIDTrailerSize
+	maxCatalogPayloadSize := PageSize - directoryCatalogOffset - directoryCheckpointMetadataSize - rootIDTrailerSize
 	buf := make([]byte, 0, maxCatalogPayloadSize)
 	buf = appendUint32(buf, catalogVersion)
 	buf = appendUint32(buf, uint32(len(cat.Tables)))
@@ -288,7 +283,7 @@ func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint3
 		}
 	}
 
-	return buildDirectoryCatalogPage(buf, CurrentDBFormatVersion, freeListHead, rootMappings, rootIDMappings, checkpointMeta)
+	return buildDirectoryCatalogPage(buf, CurrentDBFormatVersion, freeListHead, rootIDMappings, checkpointMeta)
 }
 
 func isZeroPage(data []byte) bool {
