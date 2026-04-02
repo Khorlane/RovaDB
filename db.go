@@ -169,7 +169,6 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
-	backfillStableCatalogIDsOnOpen(catalog)
 	if err := storage.ValidateDirectoryControlState(file.File(), storage.DirectoryControlState{
 		FreeListHead:   freeListHead,
 		RootIDMappings: rootIDMappings,
@@ -239,10 +238,6 @@ func (db *DB) reconcileSystemCatalogOnOpen(tables map[string]*executor.Table) er
 		return ErrInvalidArgument
 	}
 
-	backfilled, err := backfillStableCatalogIDs(tables)
-	if err != nil {
-		return err
-	}
 	newSystemPageIDs, bootstrapped, err := db.ensureSystemCatalogTables(tables)
 	if err != nil {
 		return err
@@ -251,7 +246,7 @@ func (db *DB) reconcileSystemCatalogOnOpen(tables map[string]*executor.Table) er
 	if err != nil {
 		return err
 	}
-	if !backfilled && !bootstrapped && !rebuiltSystemRows {
+	if !bootstrapped && !rebuiltSystemRows {
 		return nil
 	}
 	return db.persistCatalogState(tables, systemPages)
@@ -284,60 +279,6 @@ func replayCommittedWAL(path string) error {
 		return err
 	}
 	return storage.ApplyWALFramesToDB(path, frames)
-}
-
-func backfillStableCatalogIDsOnOpen(cat *storage.CatalogData) {
-	if cat == nil {
-		return
-	}
-	nextTableID := nextCatalogTableID(cat)
-	nextIndexID := nextCatalogIndexID(cat)
-	for i := range cat.Tables {
-		if cat.Tables[i].TableID == 0 {
-			cat.Tables[i].TableID = nextTableID
-			nextTableID++
-		}
-		for j := range cat.Tables[i].Indexes {
-			if cat.Tables[i].Indexes[j].IndexID == 0 {
-				cat.Tables[i].Indexes[j].IndexID = nextIndexID
-				nextIndexID++
-			}
-		}
-	}
-}
-
-func nextCatalogTableID(cat *storage.CatalogData) uint32 {
-	maxID := uint32(0)
-	if cat == nil {
-		return 1
-	}
-	for _, table := range cat.Tables {
-		if table.TableID > maxID {
-			maxID = table.TableID
-		}
-	}
-	if maxID == 0 {
-		return 1
-	}
-	return maxID + 1
-}
-
-func nextCatalogIndexID(cat *storage.CatalogData) uint32 {
-	maxID := uint32(0)
-	if cat == nil {
-		return 1
-	}
-	for _, table := range cat.Tables {
-		for _, index := range table.Indexes {
-			if index.IndexID > maxID {
-				maxID = index.IndexID
-			}
-		}
-	}
-	if maxID == 0 {
-		return 1
-	}
-	return maxID + 1
 }
 
 // Exec executes a non-SELECT statement and returns a write result.
@@ -2168,55 +2109,6 @@ func nextIndexID(tables map[string]*executor.Table) uint32 {
 		return 1
 	}
 	return maxID + 1
-}
-
-func backfillStableCatalogIDs(tables map[string]*executor.Table) (bool, error) {
-	if len(tables) == 0 {
-		return false, nil
-	}
-
-	changed := false
-	tableNames := make([]string, 0, len(tables))
-	for tableName := range tables {
-		tableNames = append(tableNames, tableName)
-	}
-	sort.Strings(tableNames)
-
-	for _, tableName := range tableNames {
-		table := tables[tableName]
-		if table == nil {
-			continue
-		}
-		if table.TableID == 0 {
-			table.TableID = nextTableID(tables)
-			changed = true
-		}
-
-		indexNames := make([]string, 0, len(table.IndexDefs))
-		indexByName := make(map[string]*storage.CatalogIndex, len(table.IndexDefs))
-		for i := range table.IndexDefs {
-			indexByName[table.IndexDefs[i].Name] = &table.IndexDefs[i]
-			indexNames = append(indexNames, table.IndexDefs[i].Name)
-		}
-		sort.Strings(indexNames)
-		for _, indexName := range indexNames {
-			indexDef := indexByName[indexName]
-			if indexDef == nil {
-				continue
-			}
-			if indexDef.IndexID == 0 {
-				indexDef.IndexID = nextIndexID(tables)
-				changed = true
-			}
-			if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok {
-				if index := table.Indexes[columnName]; index != nil {
-					index.IndexID = indexDef.IndexID
-				}
-			}
-		}
-	}
-
-	return changed, nil
 }
 
 type indexPageStager struct {

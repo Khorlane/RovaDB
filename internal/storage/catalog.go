@@ -114,7 +114,7 @@ func decodeCatalogPayload(pageData []byte) (int, *CatalogData, error) {
 			return 0, nil, errCorruptedCatalogPage
 		}
 		tableID, ok := readUint32(pageData, &offset)
-		if !ok {
+		if !ok || tableID == 0 {
 			return 0, nil, errCorruptedCatalogPage
 		}
 		rowCount, ok := readUint32(pageData, &offset)
@@ -346,7 +346,7 @@ func readCatalogIndex(data []byte, offset *int, columnNames map[string]struct{},
 	unique := data[*offset] != 0
 	*offset++
 	indexID, ok := readUint32(data, offset)
-	if !ok {
+	if !ok || indexID == 0 {
 		return CatalogIndex{}, errCorruptedCatalogPage
 	}
 	columnCount, ok := readUint16(data, offset)

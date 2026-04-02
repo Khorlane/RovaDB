@@ -64,6 +64,7 @@ func TestDirectoryCheckpointMetadataRoundTrip(t *testing.T) {
 		Tables: []CatalogTable{
 			{
 				Name:       "users",
+				TableID:    1,
 				RootPageID: 1,
 				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
 			},
@@ -135,6 +136,7 @@ func TestReadDirectoryCheckpointMetadataPersistsAcrossReopen(t *testing.T) {
 		Tables: []CatalogTable{
 			{
 				Name:       "users",
+				TableID:    1,
 				RootPageID: 1,
 				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
 			},
@@ -321,6 +323,7 @@ func TestDirectoryRootIDMappingsRoundTrip(t *testing.T) {
 		Tables: []CatalogTable{
 			{
 				Name:       "users",
+				TableID:    1,
 				RootPageID: 1,
 				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
 			},

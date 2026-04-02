@@ -110,6 +110,7 @@ func TestCatalogRoundTripIncludesRealType(t *testing.T) {
 		Tables: []CatalogTable{
 			{
 				Name:       "measurements",
+				TableID:    1,
 				RootPageID: 1,
 				RowCount:   0,
 				Columns: []CatalogColumn{
