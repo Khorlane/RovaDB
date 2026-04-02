@@ -622,6 +622,50 @@ func TestOpenFailsWhenNewCatalogPayloadHasNoDirectoryRoots(t *testing.T) {
 	}
 }
 
+func TestOpenFailsWithoutDirectoryRootsEvenIfCurrentCatalogSnapshotCarriesRoots(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	catalog, err := storage.LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+	catalog = catalogWithDirectoryRootsForSave(t, rawDB.File(), catalog)
+	if err := storage.SaveCatalog(pager, catalog); err != nil {
+		t.Fatalf("SaveCatalog() error = %v", err)
+	}
+	if err := pager.FlushDirty(); err != nil {
+		t.Fatalf("pager.FlushDirty() error = %v", err)
+	}
+	if err := storage.WriteDirectoryRootIDMappings(rawDB.File(), nil); err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("WriteDirectoryRootIDMappings() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want missing directory roots failure without catalog fallback")
+	}
+}
+
 func TestOpenFallsBackToLegacyCatalogRootsForV5PayloadWithoutDirectoryMappings(t *testing.T) {
 	path := testDBPath(t)
 

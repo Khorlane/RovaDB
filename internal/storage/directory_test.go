@@ -513,8 +513,9 @@ func TestWriteDirectoryRootIDMappingsPersistsDurably(t *testing.T) {
 	}
 }
 
-func TestApplyDirectoryRootIDMappingsRejectsMismatch(t *testing.T) {
+func TestApplyDirectoryRootIDMappingsUsesDirectoryRootsOnly(t *testing.T) {
 	catalog := &CatalogData{
+		Version: catalogVersion,
 		Tables: []CatalogTable{
 			{
 				Name:       "users",
@@ -533,16 +534,28 @@ func TestApplyDirectoryRootIDMappingsRejectsMismatch(t *testing.T) {
 			ObjectID:   3,
 			RootPageID: 9,
 		},
+		{
+			ObjectType: DirectoryRootMappingObjectIndex,
+			ObjectID:   9,
+			RootPageID: 11,
+		},
 	}
 
-	_, err := ApplyDirectoryRootIDMappings(catalog, mappings)
-	if !errors.Is(err, errCorruptedDirectoryPage) {
-		t.Fatalf("ApplyDirectoryRootIDMappings() error = %v, want %v", err, errCorruptedDirectoryPage)
+	got, err := ApplyDirectoryRootIDMappings(catalog, mappings)
+	if err != nil {
+		t.Fatalf("ApplyDirectoryRootIDMappings() error = %v", err)
+	}
+	if got.Tables[0].RootPageID != 9 {
+		t.Fatalf("got.Tables[0].RootPageID = %d, want 9 from directory mapping", got.Tables[0].RootPageID)
+	}
+	if got.Tables[0].Indexes[0].RootPageID != 11 {
+		t.Fatalf("got.Tables[0].Indexes[0].RootPageID = %d, want 11 from directory mapping", got.Tables[0].Indexes[0].RootPageID)
 	}
 }
 
 func TestApplyDirectoryRootIDMappingsFallsBackWhenEmpty(t *testing.T) {
 	catalog := &CatalogData{
+		Version: catalogVersion,
 		Tables: []CatalogTable{
 			{
 				Name:       "users",
@@ -553,12 +566,40 @@ func TestApplyDirectoryRootIDMappingsFallsBackWhenEmpty(t *testing.T) {
 		},
 	}
 
-	got, err := ApplyDirectoryRootIDMappings(catalog, nil)
+	_, err := ApplyDirectoryRootIDMappings(catalog, nil)
+	if !errors.Is(err, errCorruptedDirectoryPage) {
+		t.Fatalf("ApplyDirectoryRootIDMappings() error = %v, want %v", err, errCorruptedDirectoryPage)
+	}
+}
+
+func TestApplyDirectoryRootIDMappingsIgnoresCatalogCarriedRoots(t *testing.T) {
+	catalog := &CatalogData{
+		Version: catalogVersion,
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				TableID:    3,
+				RootPageID: 99,
+				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
+				Indexes: []CatalogIndex{
+					{Name: "idx_users_id", IndexID: 9, RootPageID: 101, Columns: []CatalogIndexColumn{{Name: "id"}}},
+				},
+			},
+		},
+	}
+
+	got, err := ApplyDirectoryRootIDMappings(catalog, []DirectoryRootIDMapping{
+		{ObjectType: DirectoryRootMappingObjectTable, ObjectID: 3, RootPageID: 5},
+		{ObjectType: DirectoryRootMappingObjectIndex, ObjectID: 9, RootPageID: 7},
+	})
 	if err != nil {
 		t.Fatalf("ApplyDirectoryRootIDMappings() error = %v", err)
 	}
 	if got.Tables[0].RootPageID != 5 {
-		t.Fatalf("got.Tables[0].RootPageID = %d, want 5", got.Tables[0].RootPageID)
+		t.Fatalf("got.Tables[0].RootPageID = %d, want 5 from directory mapping", got.Tables[0].RootPageID)
+	}
+	if got.Tables[0].Indexes[0].RootPageID != 7 {
+		t.Fatalf("got.Tables[0].Indexes[0].RootPageID = %d, want 7 from directory mapping", got.Tables[0].Indexes[0].RootPageID)
 	}
 }
 

@@ -388,10 +388,16 @@ func BuildDirectoryRootIDMappings(cat *CatalogData) []DirectoryRootIDMapping {
 
 // ApplyDirectoryRootIDMappings overlays directory-owned physical roots onto catalog metadata by stable logical ID.
 func ApplyDirectoryRootIDMappings(cat *CatalogData, mappings []DirectoryRootIDMapping) (*CatalogData, error) {
-	if cat == nil || len(mappings) == 0 {
+	if cat == nil {
 		return cat, nil
 	}
 	strictRoots := cat.Version >= catalogVersion
+	if len(mappings) == 0 {
+		if strictRoots && len(cat.Tables) != 0 {
+			return nil, errCorruptedDirectoryPage
+		}
+		return cat, nil
+	}
 
 	tableMappings := make(map[uint32]uint32)
 	indexMappings := make(map[uint32]uint32)
@@ -420,16 +426,13 @@ func ApplyDirectoryRootIDMappings(cat *CatalogData, mappings []DirectoryRootIDMa
 		cloned := CatalogTable{
 			Name:       table.Name,
 			TableID:    table.TableID,
-			RootPageID: table.RootPageID,
+			RootPageID: 0,
 			RowCount:   table.RowCount,
 			Columns:    append([]CatalogColumn(nil), table.Columns...),
 			Indexes:    make([]CatalogIndex, 0, len(table.Indexes)),
 		}
 		if table.TableID != 0 {
 			if mappedRootPageID, ok := tableMappings[table.TableID]; ok {
-				if cloned.RootPageID != 0 && cloned.RootPageID != mappedRootPageID {
-					return nil, errCorruptedDirectoryPage
-				}
 				cloned.RootPageID = mappedRootPageID
 				delete(tableMappings, table.TableID)
 			} else if strictRoots {
@@ -442,14 +445,11 @@ func ApplyDirectoryRootIDMappings(cat *CatalogData, mappings []DirectoryRootIDMa
 				Name:       index.Name,
 				Unique:     index.Unique,
 				IndexID:    index.IndexID,
-				RootPageID: index.RootPageID,
+				RootPageID: 0,
 				Columns:    append([]CatalogIndexColumn(nil), index.Columns...),
 			}
 			if index.IndexID != 0 {
 				if mappedRootPageID, ok := indexMappings[index.IndexID]; ok {
-					if clonedIndex.RootPageID != 0 && clonedIndex.RootPageID != mappedRootPageID {
-						return nil, errCorruptedDirectoryPage
-					}
 					clonedIndex.RootPageID = mappedRootPageID
 					delete(indexMappings, index.IndexID)
 				} else if strictRoots {
