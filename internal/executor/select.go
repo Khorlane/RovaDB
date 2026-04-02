@@ -45,22 +45,9 @@ func executeIndexSelect(plan *planner.SelectPlan, table *Table) ([][]parser.Valu
 	if plan == nil || plan.IndexScan == nil || table == nil {
 		return nil, errInvalidSelectPlan
 	}
-
-	index := table.Indexes[plan.IndexScan.ColumnName]
-	if index == nil {
-		return nil, errInvalidSelectPlan
-	}
-
-	rowPositions := index.LookupEqual(plan.IndexScan.Value)
-	candidateRows := make([][]parser.Value, 0, len(rowPositions))
-	for _, rowIndex := range rowPositions {
-		if rowIndex < 0 || rowIndex >= len(table.Rows) {
-			return nil, errInvalidSelectPlan
-		}
-		candidateRows = append(candidateRows, table.Rows[rowIndex])
-	}
-
-	return executeSelectRows(plan.Stmt, table, candidateRows)
+	// Public indexed query execution now lives in the DB-owned page-backed path.
+	// This executor helper remains metadata-only for isolated unit coverage.
+	return executeSelectRows(plan.Stmt, table, table.Rows)
 }
 
 // SelectCandidateRows executes a planned single-table select against caller-supplied candidate rows.

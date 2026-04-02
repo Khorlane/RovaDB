@@ -1265,12 +1265,6 @@ func TestSelectWithIndexScan(t *testing.T) {
 			{parser.Int64Value(2), parser.StringValue("bob")},
 			{parser.Int64Value(3), parser.StringValue("alice")},
 		},
-		Indexes: map[string]*planner.BasicIndex{
-			"name": planner.NewBasicIndex("users", "name"),
-		},
-	}
-	if err := table.Indexes["name"].Rebuild([]string{"id", "name"}, table.Rows); err != nil {
-		t.Fatalf("BasicIndex.Rebuild() error = %v", err)
 	}
 
 	rows, err := Select(&planner.SelectPlan{
@@ -1306,14 +1300,14 @@ func TestSelectInvalidPlanMissingIndexScanPayload(t *testing.T) {
 	}
 }
 
-func TestSelectInvalidPlanMissingRuntimeIndex(t *testing.T) {
+func TestSelectIndexScanDoesNotRequireRuntimeIndexShell(t *testing.T) {
 	table := &Table{
 		Name:    "users",
 		Columns: typedCols(),
 		Rows:    [][]parser.Value{{parser.Int64Value(1), parser.StringValue("alice")}},
 	}
 
-	_, err := Select(&planner.SelectPlan{
+	rows, err := Select(&planner.SelectPlan{
 		Stmt: &parser.SelectExpr{
 			TableName: "users",
 			Where:     where(parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("alice")}),
@@ -1325,7 +1319,10 @@ func TestSelectInvalidPlanMissingRuntimeIndex(t *testing.T) {
 			Value:      parser.StringValue("alice"),
 		},
 	}, map[string]*Table{"users": table})
-	if err != errInvalidSelectPlan {
-		t.Fatalf("Select() error = %v, want %v", err, errInvalidSelectPlan)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 1 || rows[0][0] != parser.Int64Value(1) || rows[0][1] != parser.StringValue("alice") {
+		t.Fatalf("Select() rows = %#v, want [[1 alice]]", rows)
 	}
 }
