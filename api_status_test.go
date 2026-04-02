@@ -448,3 +448,150 @@ func TestPageUsageOnClosedDBReturnsErrClosed(t *testing.T) {
 		t.Fatalf("PageUsage() error = %v, want ErrClosed", err)
 	}
 }
+
+func TestSchemaInventoryOnFreshDB(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	inventory, err := db.SchemaInventory()
+	if err != nil {
+		t.Fatalf("SchemaInventory() error = %v", err)
+	}
+	if len(inventory.Tables) != 0 {
+		t.Fatalf("len(SchemaInventory().Tables) = %d, want 0", len(inventory.Tables))
+	}
+	if len(inventory.Indexes) != 0 {
+		t.Fatalf("len(SchemaInventory().Indexes) = %d, want 0", len(inventory.Indexes))
+	}
+}
+
+func TestSchemaInventoryIncludesUserTablesAndIndexes(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"CREATE UNIQUE INDEX idx_users_name ON users (name)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	users := db.tables["users"]
+	indexDef := users.IndexDefinition("idx_users_name")
+	if users == nil || indexDef == nil {
+		t.Fatalf("schema setup failed: users=%v index=%v", users, indexDef)
+	}
+
+	inventory, err := db.SchemaInventory()
+	if err != nil {
+		t.Fatalf("SchemaInventory() error = %v", err)
+	}
+	if len(inventory.Tables) != 1 {
+		t.Fatalf("len(SchemaInventory().Tables) = %d, want 1", len(inventory.Tables))
+	}
+	if len(inventory.Indexes) != 1 {
+		t.Fatalf("len(SchemaInventory().Indexes) = %d, want 1", len(inventory.Indexes))
+	}
+
+	tableInfo := inventory.Tables[0]
+	if tableInfo.TableID != users.TableID || tableInfo.TableName != "users" || tableInfo.RootPageID != uint32(users.RootPageID()) || tableInfo.IndexCount != 1 {
+		t.Fatalf("SchemaInventory().Tables[0] = %#v, want users metadata", tableInfo)
+	}
+
+	indexInfo := inventory.Indexes[0]
+	if indexInfo.IndexID != indexDef.IndexID || indexInfo.TableName != "users" || indexInfo.IndexName != "idx_users_name" || indexInfo.RootPageID != indexDef.RootPageID || !indexInfo.IsUnique {
+		t.Fatalf("SchemaInventory().Indexes[0] = %#v, want idx_users_name metadata", indexInfo)
+	}
+}
+
+func TestSchemaInventoryOrderingIsDeterministic(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"CREATE TABLE accounts (id INT, email TEXT)",
+		"CREATE INDEX idx_users_name ON users (name)",
+		"CREATE UNIQUE INDEX idx_accounts_email ON accounts (email)",
+		"CREATE INDEX idx_accounts_id ON accounts (id)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	inventory, err := db.SchemaInventory()
+	if err != nil {
+		t.Fatalf("SchemaInventory() error = %v", err)
+	}
+
+	if got := []string{inventory.Tables[0].TableName, inventory.Tables[1].TableName}; got[0] != "accounts" || got[1] != "users" {
+		t.Fatalf("SchemaInventory().Tables order = %#v, want [accounts users]", got)
+	}
+	if got := []string{
+		inventory.Indexes[0].TableName + "." + inventory.Indexes[0].IndexName,
+		inventory.Indexes[1].TableName + "." + inventory.Indexes[1].IndexName,
+		inventory.Indexes[2].TableName + "." + inventory.Indexes[2].IndexName,
+	}; got[0] != "accounts.idx_accounts_email" || got[1] != "accounts.idx_accounts_id" || got[2] != "users.idx_users_name" {
+		t.Fatalf("SchemaInventory().Indexes order = %#v, want [accounts.idx_accounts_email accounts.idx_accounts_id users.idx_users_name]", got)
+	}
+}
+
+func TestSchemaInventoryExcludesSystemTables(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	inventory, err := db.SchemaInventory()
+	if err != nil {
+		t.Fatalf("SchemaInventory() error = %v", err)
+	}
+	for _, tableInfo := range inventory.Tables {
+		if isSystemCatalogTableName(tableInfo.TableName) {
+			t.Fatalf("SchemaInventory() included system table %#v", tableInfo)
+		}
+	}
+	for _, indexInfo := range inventory.Indexes {
+		if isSystemCatalogTableName(indexInfo.TableName) {
+			t.Fatalf("SchemaInventory() included system-table index %#v", indexInfo)
+		}
+	}
+}
+
+func TestSchemaInventoryOnClosedDBReturnsErrClosed(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	_, err = db.SchemaInventory()
+	if !errors.Is(err, ErrClosed) {
+		t.Fatalf("SchemaInventory() error = %v, want ErrClosed", err)
+	}
+}

@@ -2,6 +2,7 @@ package rovadb
 
 import (
 	"encoding/binary"
+	"sort"
 
 	"github.com/Khorlane/RovaDB/internal/executor"
 	"github.com/Khorlane/RovaDB/internal/storage"
@@ -34,6 +35,29 @@ type EnginePageUsage struct {
 	IndexInternalPages int
 	FreePages          int
 	DirectoryPages     int
+}
+
+// EngineTableInfo is a compact logical table inventory entry.
+type EngineTableInfo struct {
+	TableID    uint32
+	TableName  string
+	RootPageID uint32
+	IndexCount int
+}
+
+// EngineIndexInfo is a compact logical index inventory entry.
+type EngineIndexInfo struct {
+	IndexID    uint32
+	TableName  string
+	IndexName  string
+	RootPageID uint32
+	IsUnique   bool
+}
+
+// EngineSchemaInventory is a compact logical object inventory.
+type EngineSchemaInventory struct {
+	Tables  []EngineTableInfo
+	Indexes []EngineIndexInfo
 }
 
 // EngineStatus returns a stable in-memory status snapshot for diagnostics.
@@ -177,6 +201,57 @@ func (db *DB) PageUsage() (EnginePageUsage, error) {
 	}
 
 	return usage, nil
+}
+
+// SchemaInventory returns a compact deterministic inventory of user schema objects.
+func (db *DB) SchemaInventory() (EngineSchemaInventory, error) {
+	if db == nil {
+		return EngineSchemaInventory{}, ErrInvalidArgument
+	}
+	if db.closed {
+		return EngineSchemaInventory{}, ErrClosed
+	}
+	if err := db.validateTxnState(); err != nil {
+		return EngineSchemaInventory{}, err
+	}
+
+	inventory := EngineSchemaInventory{
+		Tables:  make([]EngineTableInfo, 0),
+		Indexes: make([]EngineIndexInfo, 0),
+	}
+	for _, table := range db.tables {
+		if table == nil || table.IsSystem {
+			continue
+		}
+		inventory.Tables = append(inventory.Tables, EngineTableInfo{
+			TableID:    table.TableID,
+			TableName:  table.Name,
+			RootPageID: uint32(table.RootPageID()),
+			IndexCount: len(table.IndexDefs),
+		})
+		for _, indexDef := range table.IndexDefs {
+			inventory.Indexes = append(inventory.Indexes, EngineIndexInfo{
+				IndexID:    indexDef.IndexID,
+				TableName:  table.Name,
+				IndexName:  indexDef.Name,
+				RootPageID: indexDef.RootPageID,
+				IsUnique:   indexDef.Unique,
+			})
+		}
+	}
+
+	sort.Slice(inventory.Tables, func(i, j int) bool {
+		return inventory.Tables[i].TableName < inventory.Tables[j].TableName
+	})
+	sort.Slice(inventory.Indexes, func(i, j int) bool {
+		left := inventory.Indexes[i]
+		right := inventory.Indexes[j]
+		if left.TableName == right.TableName {
+			return left.IndexName < right.IndexName
+		}
+		return left.TableName < right.TableName
+	})
+	return inventory, nil
 }
 
 func statusUserTableCount(tables map[string]*executor.Table) int {
