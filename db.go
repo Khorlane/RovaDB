@@ -650,11 +650,18 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 			if index == nil {
 				return &Rows{err: newExecError("invalid select plan"), idx: -1}, nil
 			}
+			execTable := cloneSelectTableMeta(table)
+			if sel.IsCountStar {
+				count, err := db.countIndexedRows(execTable, index, plan.IndexScan.Value)
+				if err != nil {
+					return &Rows{err: err, idx: -1}, nil
+				}
+				return newRows([]string{"count"}, [][]any{{count}}), nil
+			}
 			candidateRows, err := db.lookupIndexedRows(table, index, plan.IndexScan.Value)
 			if err != nil {
 				return &Rows{err: err, idx: -1}, nil
 			}
-			execTable := cloneSelectTableMeta(table)
 			rows, err := executor.SelectCandidateRows(plan, execTable, candidateRows)
 			if err != nil {
 				return &Rows{err: err, idx: -1}, nil
@@ -785,6 +792,23 @@ func (db *DB) scanTableRows(table *executor.Table) ([][]parser.Value, error) {
 }
 
 func (db *DB) lookupIndexedRows(table *executor.Table, idx *planner.BasicIndex, searchValue parser.Value) ([][]parser.Value, error) {
+	locators, err := db.lookupIndexedLocators(table, idx, searchValue)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([][]parser.Value, 0, len(locators))
+	for _, locator := range locators {
+		row, err := db.fetchRowByLocator(table, locator)
+		if err != nil {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+func (db *DB) lookupIndexedLocators(table *executor.Table, idx *planner.BasicIndex, searchValue parser.Value) ([]storage.RowLocator, error) {
 	if db == nil || table == nil || idx == nil {
 		return nil, ErrInvalidArgument
 	}
@@ -803,16 +827,23 @@ func (db *DB) lookupIndexedRows(table *executor.Table, idx *planner.BasicIndex, 
 	if err != nil {
 		return nil, wrapStorageError(err)
 	}
+	return locators, nil
+}
 
-	rows := make([][]parser.Value, 0, len(locators))
+func (db *DB) countIndexedRows(table *executor.Table, idx *planner.BasicIndex, searchValue parser.Value) (int, error) {
+	locators, err := db.lookupIndexedLocators(table, idx, searchValue)
+	if err != nil {
+		return 0, err
+	}
+
+	count := 0
 	for _, locator := range locators {
-		row, err := db.fetchRowByLocator(table, locator)
-		if err != nil {
+		if _, err := db.fetchRowByLocator(table, locator); err != nil {
 			continue
 		}
-		rows = append(rows, row)
+		count++
 	}
-	return rows, nil
+	return count, nil
 }
 
 func validateIndexLookupMetadata(table *executor.Table, idx *planner.BasicIndex) error {
