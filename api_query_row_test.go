@@ -330,6 +330,128 @@ func TestQueryRowPlaceholderArgsReflectsUpdatedRow(t *testing.T) {
 	}
 }
 
+func TestQueryRowIndexedEqualityUsesDurableLookupPath(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'cara')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	db.tables["users"].Indexes["name"].Entries = nil
+
+	row := db.QueryRow("SELECT id FROM users WHERE name = 'bob'")
+	var id int
+	if err := row.Scan(&id); err != nil {
+		t.Fatalf("QueryRow(indexed equality).Scan() error = %v", err)
+	}
+	if id != 2 {
+		t.Fatalf("QueryRow(indexed equality).Scan() got %d, want 2", id)
+	}
+}
+
+func TestQueryRowIndexedEqualityDuplicateMatchesRemainMultipleRows(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'alice')",
+		"INSERT INTO users VALUES (3, 'bob')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	db.tables["users"].Indexes["name"].Entries = nil
+
+	row := db.QueryRow("SELECT id FROM users WHERE name = 'alice'")
+	var id int
+	if err := row.Scan(&id); !errors.Is(err, ErrMultipleRows) {
+		t.Fatalf("QueryRow(duplicate indexed equality).Scan() = %v, want ErrMultipleRows", err)
+	}
+}
+
+func TestQueryRowIndexedEqualityNoMatchRemainsNoRows(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	db.tables["users"].Indexes["name"].Entries = nil
+
+	row := db.QueryRow("SELECT id FROM users WHERE name = 'zoe'")
+	var id int
+	if err := row.Scan(&id); !errors.Is(err, ErrNoRows) {
+		t.Fatalf("QueryRow(no-match indexed equality).Scan() = %v, want ErrNoRows", err)
+	}
+}
+
+func TestQueryRowNonIndexPathRemainsUnchanged(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'cara')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	row := db.QueryRow("SELECT name FROM users WHERE id > 1")
+	var name string
+	if err := row.Scan(&name); !errors.Is(err, ErrMultipleRows) {
+		t.Fatalf("QueryRow(non-index path).Scan() = %v, want ErrMultipleRows", err)
+	}
+}
+
 func TestQueryRowPlaceholderArgsCountMismatchIsDeferred(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

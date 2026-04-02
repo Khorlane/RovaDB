@@ -715,7 +715,7 @@ func cloneSelectTableMeta(table *executor.Table) *executor.Table {
 
 // QueryRow executes Query and wraps the resulting row set for deferred handling.
 func (db *DB) QueryRow(query string, args ...any) *Row {
-	rows, err := db.Query(query, args...)
+	rows, err := db.query(query, args...)
 	if err != nil {
 		rows = &Rows{
 			idx: -1,
