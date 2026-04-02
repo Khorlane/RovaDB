@@ -511,6 +511,244 @@ func TestSaveCatalogDemotesOverflowBackToEmbeddedWhenPayloadFits(t *testing.T) {
 	}
 }
 
+func TestSaveCatalogDemotionReclaimsSupersededOverflowChain(t *testing.T) {
+	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog-reclaim-demote.db"))
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+
+	oversize := &CatalogData{}
+	for i := 0; i < 200; i++ {
+		oversize.Tables = append(oversize.Tables, CatalogTable{
+			Name:       fmt.Sprintf("table_%03d", i),
+			TableID:    uint32(i + 1),
+			RootPageID: uint32(i + 1),
+			Columns: []CatalogColumn{
+				{Name: "id", Type: CatalogColumnTypeInt},
+				{Name: "name", Type: CatalogColumnTypeText},
+			},
+		})
+	}
+	if err := SaveCatalog(pager, oversize); err != nil {
+		t.Fatalf("SaveCatalog(oversize) error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush(oversize) error = %v", err)
+	}
+
+	pageData, err := pager.ReadPage(DirectoryControlPageID)
+	if err != nil {
+		t.Fatalf("pager.ReadPage(directory oversize) error = %v", err)
+	}
+	oldHead, err := DirectoryCATDIROverflowHeadPageID(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowHeadPageID(oversize) error = %v", err)
+	}
+	oldCount, err := DirectoryCATDIROverflowPageCount(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowPageCount(oversize) error = %v", err)
+	}
+	oldIDs, err := ReadCatalogOverflowChainPageIDs(pager, PageID(oldHead), oldCount)
+	if err != nil {
+		t.Fatalf("ReadCatalogOverflowChainPageIDs() error = %v", err)
+	}
+
+	smaller := &CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				TableID:    1,
+				RootPageID: 3,
+				Columns: []CatalogColumn{
+					{Name: "id", Type: CatalogColumnTypeInt},
+				},
+			},
+		},
+	}
+	if err := SaveCatalog(pager, smaller); err != nil {
+		t.Fatalf("SaveCatalog(smaller) error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush(smaller) error = %v", err)
+	}
+
+	pageData, err = pager.ReadPage(DirectoryControlPageID)
+	if err != nil {
+		t.Fatalf("pager.ReadPage(directory smaller) error = %v", err)
+	}
+	freeListHead, err := DirectoryFreeListHead(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryFreeListHead() error = %v", err)
+	}
+	reclaimedIDs := allocateFreePagesForTest(t, pager, freeListHead, len(oldIDs))
+	assertSamePageSet(t, reclaimedIDs, oldIDs)
+}
+
+func TestSaveCatalogOverflowRewriteReclaimsPriorOverflowChain(t *testing.T) {
+	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog-reclaim-overflow.db"))
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+
+	oversizeA := &CatalogData{}
+	for i := 0; i < 200; i++ {
+		oversizeA.Tables = append(oversizeA.Tables, CatalogTable{
+			Name:       fmt.Sprintf("table_a_%03d", i),
+			TableID:    uint32(i + 1),
+			RootPageID: uint32(i + 1),
+			Columns: []CatalogColumn{
+				{Name: "id", Type: CatalogColumnTypeInt},
+				{Name: "name", Type: CatalogColumnTypeText},
+			},
+		})
+	}
+	if err := SaveCatalog(pager, oversizeA); err != nil {
+		t.Fatalf("SaveCatalog(oversizeA) error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush(oversizeA) error = %v", err)
+	}
+
+	pageData, err := pager.ReadPage(DirectoryControlPageID)
+	if err != nil {
+		t.Fatalf("pager.ReadPage(directory oversizeA) error = %v", err)
+	}
+	oldHead, err := DirectoryCATDIROverflowHeadPageID(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowHeadPageID(oversizeA) error = %v", err)
+	}
+	oldCount, err := DirectoryCATDIROverflowPageCount(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowPageCount(oversizeA) error = %v", err)
+	}
+	oldIDs, err := ReadCatalogOverflowChainPageIDs(pager, PageID(oldHead), oldCount)
+	if err != nil {
+		t.Fatalf("ReadCatalogOverflowChainPageIDs(oversizeA) error = %v", err)
+	}
+
+	oversizeB := &CatalogData{}
+	for i := 0; i < 220; i++ {
+		oversizeB.Tables = append(oversizeB.Tables, CatalogTable{
+			Name:       fmt.Sprintf("table_b_%03d_%s", i, "expanded"),
+			TableID:    uint32(i + 1),
+			RootPageID: uint32(i + 1000),
+			Columns: []CatalogColumn{
+				{Name: "id", Type: CatalogColumnTypeInt},
+				{Name: "name", Type: CatalogColumnTypeText},
+				{Name: "city", Type: CatalogColumnTypeText},
+			},
+		})
+	}
+	if err := SaveCatalog(pager, oversizeB); err != nil {
+		t.Fatalf("SaveCatalog(oversizeB) error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush(oversizeB) error = %v", err)
+	}
+
+	pageData, err = pager.ReadPage(DirectoryControlPageID)
+	if err != nil {
+		t.Fatalf("pager.ReadPage(directory oversizeB) error = %v", err)
+	}
+	mode, err := DirectoryCATDIRStorageMode(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIRStorageMode(oversizeB) error = %v", err)
+	}
+	if mode != DirectoryCATDIRStorageModeOverflow {
+		t.Fatalf("DirectoryCATDIRStorageMode(oversizeB) = %d, want %d", mode, DirectoryCATDIRStorageModeOverflow)
+	}
+	newHead, err := DirectoryCATDIROverflowHeadPageID(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowHeadPageID(oversizeB) error = %v", err)
+	}
+	if containsPageID(oldIDs, PageID(newHead)) {
+		t.Fatalf("new overflow head %d unexpectedly belongs to reclaimed old chain %#v", newHead, oldIDs)
+	}
+	freeListHead, err := DirectoryFreeListHead(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryFreeListHead(oversizeB) error = %v", err)
+	}
+	reclaimedIDs := allocateFreePagesForTest(t, pager, freeListHead, len(oldIDs))
+	assertSamePageSet(t, reclaimedIDs, oldIDs)
+
+	got, err := LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("LoadCatalog(oversizeB) error = %v", err)
+	}
+	if len(got.Tables) != len(oversizeB.Tables) {
+		t.Fatalf("len(LoadCatalog().Tables) = %d, want %d", len(got.Tables), len(oversizeB.Tables))
+	}
+}
+
+func allocateFreePagesForTest(t *testing.T, pager *Pager, freeListHead uint32, count int) []PageID {
+	t.Helper()
+	allocator := PageAllocator{
+		NextPageID: uint32(pager.NextPageID()),
+		FreePage: FreePageState{
+			HeadPageID: freeListHead,
+		},
+		ReadFreeNext: func(pageID uint32) (uint32, error) {
+			pageData, err := pager.ReadPage(PageID(pageID))
+			if err != nil {
+				return 0, err
+			}
+			return FreePageNext(pageData)
+		},
+	}
+	pageIDs := make([]PageID, 0, count)
+	for i := 0; i < count; i++ {
+		pageID, reused, err := allocator.Allocate()
+		if err != nil {
+			t.Fatalf("allocator.Allocate() error = %v", err)
+		}
+		if !reused {
+			t.Fatalf("allocator.Allocate() reused = false, want reclaimed free page")
+		}
+		pageIDs = append(pageIDs, PageID(pageID))
+	}
+	return pageIDs
+}
+
+func assertSamePageSet(t *testing.T, got []PageID, want []PageID) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("len(pageIDs) = %d, want %d", len(got), len(want))
+	}
+	wantSet := make(map[PageID]int, len(want))
+	for _, pageID := range want {
+		wantSet[pageID]++
+	}
+	for _, pageID := range got {
+		wantSet[pageID]--
+	}
+	for pageID, remaining := range wantSet {
+		if remaining != 0 {
+			t.Fatalf("page set mismatch for page %d, remaining count %d, got=%#v want=%#v", pageID, remaining, got, want)
+		}
+	}
+}
+
+func containsPageID(pageIDs []PageID, target PageID) bool {
+	for _, pageID := range pageIDs {
+		if pageID == target {
+			return true
+		}
+	}
+	return false
+}
+
 func TestSaveCatalogOverflowAllocationFailureLeavesCommittedMetadataIntact(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalog-intact.db")
 	dbFile, err := OpenOrCreate(path)

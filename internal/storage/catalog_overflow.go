@@ -125,3 +125,58 @@ func ReadCatalogOverflowPayload(reader PageReader, headPageID PageID, expectedPa
 	}
 	return payload, nil
 }
+
+func ReadCatalogOverflowChainPageIDs(reader PageReader, headPageID PageID, expectedPageCount uint32) ([]PageID, error) {
+	if reader == nil || headPageID == 0 || expectedPageCount == 0 {
+		return nil, errCorruptedCatalogOverflow
+	}
+	visited := make(map[PageID]struct{}, expectedPageCount)
+	pageIDs := make([]PageID, 0, expectedPageCount)
+	currentPageID := headPageID
+
+	for i := uint32(0); i < expectedPageCount; i++ {
+		if currentPageID == 0 {
+			return nil, errCorruptedCatalogOverflow
+		}
+		if _, exists := visited[currentPageID]; exists {
+			return nil, errCorruptedCatalogOverflow
+		}
+		visited[currentPageID] = struct{}{}
+		pageIDs = append(pageIDs, currentPageID)
+
+		pageData, err := reader.ReadPage(currentPageID)
+		if err != nil {
+			return nil, err
+		}
+		nextPageID, err := CatalogOverflowNextPageID(pageData)
+		if err != nil {
+			return nil, err
+		}
+		if i+1 < expectedPageCount && nextPageID == 0 {
+			return nil, errCorruptedCatalogOverflow
+		}
+		currentPageID = nextPageID
+	}
+	if currentPageID != 0 {
+		return nil, errCorruptedCatalogOverflow
+	}
+	return pageIDs, nil
+}
+
+func BuildCatalogOverflowReclaimPages(reader PageReader, headPageID PageID, expectedPageCount uint32, freeListHead uint32) ([]CatalogWritePage, uint32, error) {
+	pageIDs, err := ReadCatalogOverflowChainPageIDs(reader, headPageID, expectedPageCount)
+	if err != nil {
+		return nil, freeListHead, err
+	}
+	reclaimedPages := make([]CatalogWritePage, 0, len(pageIDs))
+	currentFreeListHead := freeListHead
+	for _, pageID := range pageIDs {
+		reclaimedPages = append(reclaimedPages, CatalogWritePage{
+			PageID: pageID,
+			Data:   InitFreePage(uint32(pageID), currentFreeListHead),
+			IsNew:  false,
+		})
+		currentFreeListHead = uint32(pageID)
+	}
+	return reclaimedPages, currentFreeListHead, nil
+}

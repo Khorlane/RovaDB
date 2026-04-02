@@ -1640,13 +1640,19 @@ func (db *DB) stageDirtyState(catalogWrite *storage.CatalogWritePlan, pages []st
 		return ErrInvalidArgument
 	}
 
-	stagedPages := make([]stagedPage, 0, len(pages)+len(catalogWrite.OverflowPages)+1)
+	stagedPages := make([]stagedPage, 0, len(pages)+len(catalogWrite.OverflowPages)+len(catalogWrite.ReclaimedPages)+1)
 	stagedPages = append(stagedPages, pages...)
 	for _, overflowPage := range catalogWrite.OverflowPages {
 		stagedPages = append(stagedPages, stagedPage{
 			id:    overflowPage.PageID,
 			data:  overflowPage.Data,
 			isNew: overflowPage.IsNew,
+		})
+	}
+	for _, reclaimedPage := range catalogWrite.ReclaimedPages {
+		stagedPages = append(stagedPages, stagedPage{
+			id:   reclaimedPage.PageID,
+			data: reclaimedPage.Data,
 		})
 	}
 	stagedPages = append(stagedPages, stagedPage{id: 0, data: catalogWrite.DirectoryPage})
@@ -1696,12 +1702,25 @@ func (db *DB) buildCatalogPageData(stagedTables map[string]*executor.Table, page
 		}
 	}
 	currentMode := storage.DirectoryCATDIRStorageModeEmbedded
+	currentOverflowHead := storage.PageID(0)
+	currentOverflowCount := uint32(0)
 	if pageData, err := db.pager.ReadPage(storage.DirectoryControlPageID); err == nil && storage.ValidateDirectoryPage(pageData) == nil {
 		mode, err := storage.DirectoryCATDIRStorageMode(pageData)
 		if err != nil {
 			return nil, err
 		}
 		currentMode = mode
+		if currentMode == storage.DirectoryCATDIRStorageModeOverflow {
+			overflowHead, err := storage.DirectoryCATDIROverflowHeadPageID(pageData)
+			if err != nil {
+				return nil, err
+			}
+			currentOverflowHead = storage.PageID(overflowHead)
+			currentOverflowCount, err = storage.DirectoryCATDIROverflowPageCount(pageData)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	allocateOverflowPage := func() (storage.PageID, bool, error) {
 		allocator := storage.PageAllocator{
@@ -1725,7 +1744,7 @@ func (db *DB) buildCatalogPageData(stagedTables map[string]*executor.Table, page
 		freeListHead = allocator.FreePage.HeadPageID
 		return storage.PageID(allocated), !reused, nil
 	}
-	return storage.PrepareCatalogWritePlan(catalogFromTables(stagedTables), currentMode, storage.CurrentDBFormatVersion, &freeListHead, storage.DirectoryCheckpointMetadata{
+	return storage.PrepareCatalogWritePlan(catalogFromTables(stagedTables), currentMode, currentOverflowHead, currentOverflowCount, db.pager, storage.CurrentDBFormatVersion, &freeListHead, storage.DirectoryCheckpointMetadata{
 		LastCheckpointLSN:       db.lastCheckpointLSN,
 		LastCheckpointPageCount: db.lastCheckpointPageCount,
 	}, allocateOverflowPage)
@@ -1741,13 +1760,19 @@ func (db *DB) persistCatalogState(stagedTables map[string]*executor.Table, pages
 		return wrapStorageError(err)
 	}
 
-	stagedPages := make([]stagedPage, 0, len(pages)+len(catalogWrite.OverflowPages)+1)
+	stagedPages := make([]stagedPage, 0, len(pages)+len(catalogWrite.OverflowPages)+len(catalogWrite.ReclaimedPages)+1)
 	stagedPages = append(stagedPages, pages...)
 	for _, overflowPage := range catalogWrite.OverflowPages {
 		stagedPages = append(stagedPages, stagedPage{
 			id:    overflowPage.PageID,
 			data:  overflowPage.Data,
 			isNew: overflowPage.IsNew,
+		})
+	}
+	for _, reclaimedPage := range catalogWrite.ReclaimedPages {
+		stagedPages = append(stagedPages, stagedPage{
+			id:   reclaimedPage.PageID,
+			data: reclaimedPage.Data,
 		})
 	}
 	stagedPages = append(stagedPages, stagedPage{id: 0, data: catalogWrite.DirectoryPage})

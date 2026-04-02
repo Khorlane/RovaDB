@@ -396,6 +396,13 @@ func TestPersistCatalogStateDemotesCATDIRBackToEmbeddedWhenPayloadFits(t *testin
 	if count != 0 {
 		t.Fatalf("DirectoryCATDIROverflowPageCount(small) = %d, want 0", count)
 	}
+	freeListHead, err := storage.DirectoryFreeListHead(page.Data())
+	if err != nil {
+		t.Fatalf("DirectoryFreeListHead(small) error = %v", err)
+	}
+	if freeListHead == 0 {
+		t.Fatal("DirectoryFreeListHead(small) = 0, want reclaimed overflow pages on free list")
+	}
 
 	got, err := storage.LoadCatalog(pager)
 	if err != nil {
