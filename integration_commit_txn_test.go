@@ -1237,11 +1237,12 @@ func TestSuccessfulCommitPersistsDirectoryCheckpointMetadata(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
+	const wantCheckpointPageCount = 6
 	if db.lastCheckpointLSN == 0 {
 		t.Fatal("db.lastCheckpointLSN = 0, want non-zero after checkpointed commit")
 	}
-	if db.lastCheckpointPageCount != 2 {
-		t.Fatalf("db.lastCheckpointPageCount = %d, want 2", db.lastCheckpointPageCount)
+	if db.lastCheckpointPageCount != wantCheckpointPageCount {
+		t.Fatalf("db.lastCheckpointPageCount = %d, want %d", db.lastCheckpointPageCount, wantCheckpointPageCount)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -1259,8 +1260,8 @@ func TestSuccessfulCommitPersistsDirectoryCheckpointMetadata(t *testing.T) {
 	if meta.LastCheckpointLSN == 0 {
 		t.Fatal("meta.LastCheckpointLSN = 0, want non-zero")
 	}
-	if meta.LastCheckpointPageCount != 2 {
-		t.Fatalf("meta.LastCheckpointPageCount = %d, want 2", meta.LastCheckpointPageCount)
+	if meta.LastCheckpointPageCount != wantCheckpointPageCount {
+		t.Fatalf("meta.LastCheckpointPageCount = %d, want %d", meta.LastCheckpointPageCount, wantCheckpointPageCount)
 	}
 
 	db = reopenDB(t, path)

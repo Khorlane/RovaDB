@@ -206,13 +206,19 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
-	systemPages, bootstrapped, err := db.ensureSystemCatalogTables(tables)
+	newSystemPageIDs, bootstrapped, err := db.ensureSystemCatalogTables(tables)
 	if err != nil {
 		_ = pager.Close()
 		_ = file.Close()
 		return nil, err
 	}
-	if backfilled || bootstrapped {
+	systemPages, rebuiltSystemRows, err := db.rebuildSystemCatalogRows(tables, newSystemPageIDs)
+	if err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, err
+	}
+	if backfilled || bootstrapped || rebuiltSystemRows {
 		if err := db.persistCatalogState(tables, systemPages); err != nil {
 			_ = pager.Close()
 			_ = file.Close()
@@ -1015,16 +1021,12 @@ func (db *DB) applyStagedCreate(stagedTables map[string]*executor.Table, tableNa
 	}
 	table.SetStorageMeta(rootPageID, 0)
 
-	catalogData, err := db.buildCatalogPageData(stagedTables)
-	if err != nil {
-		return wrapStorageError(err)
-	}
 	rootPageData, err := storage.BuildSlottedTablePageData(uint32(rootPageID), nil)
 	if err != nil {
 		return wrapStorageError(err)
 	}
 
-	if err := db.stageDirtyState(catalogData, []stagedPage{{
+	if err := db.stageSchemaState(stagedTables, []stagedPage{{
 		id:    rootPageID,
 		data:  rootPageData,
 		isNew: isNew,
@@ -1132,11 +1134,7 @@ func (db *DB) applyStagedCatalogOnly(stagedTables map[string]*executor.Table) er
 	// Schema metadata changes such as ALTER TABLE ... ADD COLUMN are catalog-only
 	// here. Existing stored rows are not rewritten; older rows are padded in
 	// memory when materialized against the wider schema.
-	catalogData, err := db.buildCatalogPageData(stagedTables)
-	if err != nil {
-		return wrapStorageError(err)
-	}
-	return db.stageDirtyState(catalogData, nil)
+	return db.stageSchemaState(stagedTables, nil)
 }
 
 func (db *DB) applyStagedDropIndex(stagedTables map[string]*executor.Table, rootPageID storage.PageID) error {
@@ -1151,12 +1149,7 @@ func (db *DB) applyStagedDropIndex(stagedTables map[string]*executor.Table, root
 		return err
 	}
 
-	catalogData, err := db.buildCatalogPageData(stagedTables)
-	if err != nil {
-		db.freeListHead = originalFreeListHead
-		return wrapStorageError(err)
-	}
-	if err := db.stageDirtyState(catalogData, pages); err != nil {
+	if err := db.stageSchemaState(stagedTables, pages); err != nil {
 		db.freeListHead = originalFreeListHead
 		return err
 	}
@@ -1175,12 +1168,7 @@ func (db *DB) applyStagedDropTable(stagedTables map[string]*executor.Table, root
 		return err
 	}
 
-	catalogData, err := db.buildCatalogPageData(stagedTables)
-	if err != nil {
-		db.freeListHead = originalFreeListHead
-		return wrapStorageError(err)
-	}
-	if err := db.stageDirtyState(catalogData, pages); err != nil {
+	if err := db.stageSchemaState(stagedTables, pages); err != nil {
 		db.freeListHead = originalFreeListHead
 		return err
 	}
@@ -1229,11 +1217,7 @@ func (db *DB) applyStagedIndexCreate(stagedTables map[string]*executor.Table, ta
 		})
 	}
 
-	catalogData, err := db.buildCatalogPageData(stagedTables)
-	if err != nil {
-		return wrapStorageError(err)
-	}
-	return db.stageDirtyState(catalogData, pages)
+	return db.stageSchemaState(stagedTables, pages)
 }
 
 // Stage 5 correctness requires proposal/staging before apply so a single
@@ -1258,6 +1242,26 @@ func (db *DB) stageDirtyState(catalogData []byte, pages []stagedPage) error {
 		return err
 	}
 	return nil
+}
+
+func (db *DB) stageSchemaState(stagedTables map[string]*executor.Table, pages []stagedPage) error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+
+	systemPages, _, err := db.rebuildSystemCatalogRows(stagedTables, nil)
+	if err != nil {
+		return err
+	}
+	allPages := make([]stagedPage, 0, len(pages)+len(systemPages))
+	allPages = append(allPages, pages...)
+	allPages = append(allPages, systemPages...)
+
+	catalogData, err := db.buildCatalogPageData(stagedTables)
+	if err != nil {
+		return wrapStorageError(err)
+	}
+	return db.stageDirtyState(catalogData, allPages)
 }
 
 func (db *DB) buildCatalogPageData(stagedTables map[string]*executor.Table) ([]byte, error) {

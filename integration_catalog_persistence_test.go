@@ -1,9 +1,11 @@
 package rovadb
 
 import (
+	"fmt"
 	"sort"
 	"testing"
 
+	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
@@ -408,5 +410,306 @@ func TestOpenBootstrapsMissingInternalSystemCatalogTablesForOlderCatalog(t *test
 	sort.Strings(gotNames)
 	if len(gotNames) != 4 {
 		t.Fatalf("bootstrapped system table count = %d, want 4", len(gotNames))
+	}
+}
+
+func TestSystemCatalogRowsTrackSchemaMetadata(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	assertSystemCatalogRows(t, db,
+		[][]any{{int64(db.tables["users"].TableID), "users"}},
+		[][]any{
+			{int64(db.tables["users"].TableID), "id", parser.ColumnTypeInt, int64(1)},
+			{int64(db.tables["users"].TableID), "name", parser.ColumnTypeText, int64(2)},
+		},
+		nil,
+		nil,
+	)
+
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN active INT"); err != nil {
+		t.Fatalf("Exec(alter table) error = %v", err)
+	}
+	assertSystemCatalogRows(t, db,
+		[][]any{{int64(db.tables["users"].TableID), "users"}},
+		[][]any{
+			{int64(db.tables["users"].TableID), "active", parser.ColumnTypeInt, int64(3)},
+			{int64(db.tables["users"].TableID), "id", parser.ColumnTypeInt, int64(1)},
+			{int64(db.tables["users"].TableID), "name", parser.ColumnTypeText, int64(2)},
+		},
+		nil,
+		nil,
+	)
+
+	if _, err := db.Exec("CREATE UNIQUE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create unique index) error = %v", err)
+	}
+	indexDef := db.tables["users"].IndexDefinition("idx_users_name")
+	if indexDef == nil {
+		t.Fatal("IndexDefinition(idx_users_name) = nil")
+	}
+	assertSystemCatalogRows(t, db,
+		[][]any{{int64(db.tables["users"].TableID), "users"}},
+		[][]any{
+			{int64(db.tables["users"].TableID), "active", parser.ColumnTypeInt, int64(3)},
+			{int64(db.tables["users"].TableID), "id", parser.ColumnTypeInt, int64(1)},
+			{int64(db.tables["users"].TableID), "name", parser.ColumnTypeText, int64(2)},
+		},
+		[][]any{{int64(indexDef.IndexID), "idx_users_name", int64(db.tables["users"].TableID), true}},
+		[][]any{{int64(indexDef.IndexID), "name", int64(1)}},
+	)
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+
+	indexDef = db.tables["users"].IndexDefinition("idx_users_name")
+	assertSystemCatalogRows(t, db,
+		[][]any{{int64(db.tables["users"].TableID), "users"}},
+		[][]any{
+			{int64(db.tables["users"].TableID), "active", parser.ColumnTypeInt, int64(3)},
+			{int64(db.tables["users"].TableID), "id", parser.ColumnTypeInt, int64(1)},
+			{int64(db.tables["users"].TableID), "name", parser.ColumnTypeText, int64(2)},
+		},
+		[][]any{{int64(indexDef.IndexID), "idx_users_name", int64(db.tables["users"].TableID), true}},
+		[][]any{{int64(indexDef.IndexID), "name", int64(1)}},
+	)
+}
+
+func TestSystemCatalogRowsRebuildAcrossDropOperations(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create users) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE teams (id INT)"); err != nil {
+		t.Fatalf("Exec(create teams) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+
+	usersTable := db.tables["users"]
+	teamsTable := db.tables["teams"]
+	indexDef := usersTable.IndexDefinition("idx_users_name")
+	if usersTable == nil || teamsTable == nil || indexDef == nil {
+		t.Fatalf("schema setup failed: users=%v teams=%v index=%v", usersTable, teamsTable, indexDef)
+	}
+
+	assertSystemCatalogRows(t, db,
+		[][]any{
+			{int64(teamsTable.TableID), "teams"},
+			{int64(usersTable.TableID), "users"},
+		},
+		[][]any{
+			{int64(teamsTable.TableID), "id", parser.ColumnTypeInt, int64(1)},
+			{int64(usersTable.TableID), "id", parser.ColumnTypeInt, int64(1)},
+			{int64(usersTable.TableID), "name", parser.ColumnTypeText, int64(2)},
+		},
+		[][]any{{int64(indexDef.IndexID), "idx_users_name", int64(usersTable.TableID), false}},
+		[][]any{{int64(indexDef.IndexID), "name", int64(1)}},
+	)
+
+	if _, err := db.Exec("DROP INDEX idx_users_name"); err != nil {
+		t.Fatalf("Exec(drop index) error = %v", err)
+	}
+	assertSystemCatalogRows(t, db,
+		[][]any{
+			{int64(teamsTable.TableID), "teams"},
+			{int64(usersTable.TableID), "users"},
+		},
+		[][]any{
+			{int64(teamsTable.TableID), "id", parser.ColumnTypeInt, int64(1)},
+			{int64(usersTable.TableID), "id", parser.ColumnTypeInt, int64(1)},
+			{int64(usersTable.TableID), "name", parser.ColumnTypeText, int64(2)},
+		},
+		nil,
+		nil,
+	)
+
+	if _, err := db.Exec("DROP TABLE users"); err != nil {
+		t.Fatalf("Exec(drop table) error = %v", err)
+	}
+	assertSystemCatalogRows(t, db,
+		[][]any{{int64(teamsTable.TableID), "teams"}},
+		[][]any{{int64(teamsTable.TableID), "id", parser.ColumnTypeInt, int64(1)}},
+		nil,
+		nil,
+	)
+}
+
+func TestOpenUpgradePopulatesSystemCatalogRowsForOlderDB(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create users) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	userTableID := db.tables["users"].TableID
+	indexID := db.tables["users"].IndexDefinition("idx_users_name").IndexID
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	catalog, err := storage.LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+	filtered := make([]storage.CatalogTable, 0, len(catalog.Tables))
+	for _, table := range catalog.Tables {
+		if isSystemCatalogTableName(table.Name) {
+			continue
+		}
+		filtered = append(filtered, table)
+	}
+	catalog.Tables = filtered
+	if err := storage.SaveCatalog(pager, catalog); err != nil {
+		t.Fatalf("SaveCatalog() error = %v", err)
+	}
+	if err := pager.FlushDirty(); err != nil {
+		t.Fatalf("pager.FlushDirty() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("upgrade Open() error = %v", err)
+	}
+	defer db.Close()
+
+	assertSystemCatalogRows(t, db,
+		[][]any{{int64(userTableID), "users"}},
+		[][]any{
+			{int64(userTableID), "id", parser.ColumnTypeInt, int64(1)},
+			{int64(userTableID), "name", parser.ColumnTypeText, int64(2)},
+		},
+		[][]any{{int64(indexID), "idx_users_name", int64(userTableID), false}},
+		[][]any{{int64(indexID), "name", int64(1)}},
+	)
+}
+
+func assertSystemCatalogRows(t *testing.T, db *DB, wantTables, wantColumns, wantIndexes, wantIndexColumns [][]any) {
+	t.Helper()
+	assertSystemTableRows(t, db, systemTableTables, wantTables)
+	assertSystemTableRows(t, db, systemTableColumns, wantColumns)
+	assertSystemTableRows(t, db, systemTableIndexes, wantIndexes)
+	assertSystemTableRows(t, db, systemTableIndexColumns, wantIndexColumns)
+}
+
+func assertSystemTableRows(t *testing.T, db *DB, tableName string, want [][]any) {
+	t.Helper()
+
+	table := db.tables[tableName]
+	if table == nil {
+		t.Fatalf("db.tables[%q] = nil", tableName)
+	}
+	rows, err := db.scanTableRows(table)
+	if err != nil {
+		t.Fatalf("scanTableRows(%q) error = %v", tableName, err)
+	}
+	got := make([][]any, 0, len(rows))
+	for _, row := range rows {
+		got = append(got, materializeSystemCatalogRow(row))
+	}
+	sortSystemCatalogRows(got)
+	sortSystemCatalogRows(want)
+	if len(got) != len(want) {
+		t.Fatalf("%s row count = %d, want %d; got=%#v", tableName, len(got), len(want), got)
+	}
+	for i := range want {
+		if len(got[i]) != len(want[i]) {
+			t.Fatalf("%s row %d width = %d, want %d; row=%#v", tableName, i, len(got[i]), len(want[i]), got[i])
+		}
+		for j := range want[i] {
+			if got[i][j] != want[i][j] {
+				t.Fatalf("%s row %d col %d = %#v, want %#v; got=%#v", tableName, i, j, got[i][j], want[i][j], got)
+			}
+		}
+	}
+}
+
+func materializeSystemCatalogRow(row []parser.Value) []any {
+	out := make([]any, 0, len(row))
+	for _, value := range row {
+		switch value.Kind {
+		case parser.ValueKindInt64:
+			out = append(out, value.I64)
+		case parser.ValueKindString:
+			out = append(out, value.Str)
+		case parser.ValueKindBool:
+			out = append(out, value.Bool)
+		case parser.ValueKindNull:
+			out = append(out, nil)
+		default:
+			out = append(out, value.Any())
+		}
+	}
+	return out
+}
+
+func sortSystemCatalogRows(rows [][]any) {
+	sort.Slice(rows, func(i, j int) bool {
+		left := rows[i]
+		right := rows[j]
+		limit := len(left)
+		if len(right) < limit {
+			limit = len(right)
+		}
+		for k := 0; k < limit; k++ {
+			ls := systemCatalogCellKey(left[k])
+			rs := systemCatalogCellKey(right[k])
+			if ls == rs {
+				continue
+			}
+			return ls < rs
+		}
+		return len(left) < len(right)
+	})
+}
+
+func systemCatalogCellKey(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return "0:"
+	case bool:
+		if v {
+			return "1:1"
+		}
+		return "1:0"
+	case int64:
+		return fmt.Sprintf("2:%020d", v)
+	case string:
+		return "3:" + v
+	default:
+		return "4:"
 	}
 }
