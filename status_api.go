@@ -1,6 +1,8 @@
 package rovadb
 
 import (
+	"encoding/binary"
+
 	"github.com/Khorlane/RovaDB/internal/executor"
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
@@ -14,6 +16,14 @@ type EngineStatus struct {
 	FreeListHead            uint32
 	TableCount              int
 	IndexCount              int
+}
+
+// EngineCheckResult summarizes a small read-only consistency check.
+type EngineCheckResult struct {
+	OK                bool
+	CheckedTableRoots int
+	CheckedIndexRoots int
+	FreeListHead      uint32
 }
 
 // EngineStatus returns a stable in-memory status snapshot for diagnostics.
@@ -39,6 +49,82 @@ func (db *DB) EngineStatus() (EngineStatus, error) {
 	}, nil
 }
 
+// CheckEngineConsistency runs a small read-only physical/control-plane check.
+func (db *DB) CheckEngineConsistency() (EngineCheckResult, error) {
+	if db == nil {
+		return EngineCheckResult{}, ErrInvalidArgument
+	}
+	if db.closed {
+		return EngineCheckResult{}, ErrClosed
+	}
+	if err := db.validateTxnState(); err != nil {
+		return EngineCheckResult{}, err
+	}
+
+	result := EngineCheckResult{
+		FreeListHead: db.freeListHead,
+	}
+	if db.freeListHead != 0 {
+		pageData, err := readCommittedPageData(db.pool, storage.PageID(db.freeListHead))
+		if err != nil {
+			return result, wrapStorageError(err)
+		}
+		if err := storage.ValidatePageImage(pageData); err != nil {
+			return result, wrapStorageError(err)
+		}
+		if pageTypeOf(pageData) != storage.PageTypeFreePage {
+			return result, wrapStorageError(newStorageError("corrupted free page"))
+		}
+		if _, err := storage.FreePageNext(pageData); err != nil {
+			return result, wrapStorageError(err)
+		}
+	}
+
+	for _, table := range db.tables {
+		if table == nil || table.IsSystem {
+			continue
+		}
+		if table.TableID == 0 || table.RootPageID() == 0 {
+			return result, wrapStorageError(newStorageError("corrupted catalog page"))
+		}
+		pageData, err := readCommittedPageData(db.pool, table.RootPageID())
+		if err != nil {
+			return result, wrapStorageError(err)
+		}
+		if err := storage.ValidatePageImage(pageData); err != nil {
+			return result, wrapStorageError(err)
+		}
+		if pageTypeOf(pageData) != storage.PageTypeTable {
+			return result, wrapStorageError(newStorageError("corrupted table page"))
+		}
+		if _, err := db.scanTableRows(table); err != nil {
+			return result, err
+		}
+		result.CheckedTableRoots++
+
+		for _, indexDef := range table.IndexDefs {
+			if indexDef.IndexID == 0 || indexDef.RootPageID == 0 {
+				return result, wrapStorageError(newStorageError("corrupted catalog page"))
+			}
+			pageData, err := readCommittedPageData(db.pool, storage.PageID(indexDef.RootPageID))
+			if err != nil {
+				return result, wrapStorageError(err)
+			}
+			if err := storage.ValidatePageImage(pageData); err != nil {
+				return result, wrapStorageError(err)
+			}
+			pageType := pageTypeOf(pageData)
+			if pageType != storage.PageTypeIndexLeaf && pageType != storage.PageTypeIndexInternal {
+				return result, wrapStorageError(newStorageError("corrupted index page"))
+			}
+			result.CheckedIndexRoots++
+		}
+	}
+
+	result.OK = true
+	return result, nil
+}
+
 func statusUserTableCount(tables map[string]*executor.Table) int {
 	count := 0
 	for _, table := range tables {
@@ -48,6 +134,13 @@ func statusUserTableCount(tables map[string]*executor.Table) int {
 		count++
 	}
 	return count
+}
+
+func pageTypeOf(page []byte) storage.PageType {
+	if len(page) < 6 {
+		return 0
+	}
+	return storage.PageType(binary.LittleEndian.Uint16(page[4:6]))
 }
 
 func userIndexCount(tables map[string]*executor.Table) int {
