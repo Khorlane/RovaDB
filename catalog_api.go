@@ -97,6 +97,22 @@ func (db *DB) SchemaDigestFromSystemCatalog() (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// VerifySystemCatalogDigest verifies that in-memory and SQL-visible schema digests match.
+func (db *DB) VerifySystemCatalogDigest() error {
+	inMemoryDigest, err := db.SchemaDigest()
+	if err != nil {
+		return err
+	}
+	systemDigest, err := db.SchemaDigestFromSystemCatalog()
+	if err != nil {
+		return err
+	}
+	if inMemoryDigest != systemDigest {
+		return newExecError("system catalog digest mismatch")
+	}
+	return nil
+}
+
 func schemaDigestPayloadFromTables(tables map[string]*executor.Table) []byte {
 	if len(tables) == 0 {
 		return nil

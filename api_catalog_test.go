@@ -166,6 +166,9 @@ func TestCatalogIntrospectionOnClosedDBReturnsErrClosed(t *testing.T) {
 	if _, err := db.SchemaDigestFromSystemCatalog(); !errors.Is(err, ErrClosed) {
 		t.Fatalf("SchemaDigestFromSystemCatalog() error = %v, want ErrClosed", err)
 	}
+	if err := db.VerifySystemCatalogDigest(); !errors.Is(err, ErrClosed) {
+		t.Fatalf("VerifySystemCatalogDigest() error = %v, want ErrClosed", err)
+	}
 }
 
 func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
@@ -182,6 +185,7 @@ func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
 		t.Fatalf("SchemaDigest(empty) error = %v", err)
 	}
 	assertSchemaDigestMethodsMatch(t, db, emptyDigest)
+	assertSystemCatalogDigestVerificationOK(t, db)
 	repeatedEmptyDigest, err := db.SchemaDigest()
 	if err != nil {
 		t.Fatalf("SchemaDigest(repeat empty) error = %v", err)
@@ -198,6 +202,7 @@ func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
 		t.Fatalf("SchemaDigest(after create table) error = %v", err)
 	}
 	assertSchemaDigestMethodsMatch(t, db, tableDigest)
+	assertSystemCatalogDigestVerificationOK(t, db)
 	assertDigestChanged(t, emptyDigest, tableDigest)
 
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN active INT"); err != nil {
@@ -208,6 +213,7 @@ func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
 		t.Fatalf("SchemaDigest(after add column) error = %v", err)
 	}
 	assertSchemaDigestMethodsMatch(t, db, columnDigest)
+	assertSystemCatalogDigestVerificationOK(t, db)
 	assertDigestChanged(t, tableDigest, columnDigest)
 
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
@@ -218,6 +224,7 @@ func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
 		t.Fatalf("SchemaDigest(after create index) error = %v", err)
 	}
 	assertSchemaDigestMethodsMatch(t, db, indexDigest)
+	assertSystemCatalogDigestVerificationOK(t, db)
 	assertDigestChanged(t, columnDigest, indexDigest)
 
 	if _, err := db.Exec("DROP INDEX idx_users_name"); err != nil {
@@ -228,6 +235,7 @@ func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
 		t.Fatalf("SchemaDigest(after drop index) error = %v", err)
 	}
 	assertSchemaDigestMethodsMatch(t, db, dropIndexDigest)
+	assertSystemCatalogDigestVerificationOK(t, db)
 	assertDigestChanged(t, indexDigest, dropIndexDigest)
 	if dropIndexDigest != columnDigest {
 		t.Fatalf("digest after drop index = %q, want %q", dropIndexDigest, columnDigest)
@@ -241,6 +249,7 @@ func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
 		t.Fatalf("SchemaDigest(after drop table) error = %v", err)
 	}
 	assertSchemaDigestMethodsMatch(t, db, dropTableDigest)
+	assertSystemCatalogDigestVerificationOK(t, db)
 	if dropTableDigest != emptyDigest {
 		t.Fatalf("digest after drop table = %q, want %q", dropTableDigest, emptyDigest)
 	}
@@ -264,6 +273,7 @@ func TestSchemaDigestPreservedAcrossReopenAndIgnoresSystemTables(t *testing.T) {
 		t.Fatalf("SchemaDigest(before reopen) error = %v", err)
 	}
 	assertSchemaDigestMethodsMatch(t, db, beforeReopen)
+	assertSystemCatalogDigestVerificationOK(t, db)
 	if got, want := string(schemaDigestPayloadFromTables(db.tables)), string(schemaDigestPayloadFromTables(userOnlyTablesForDigestTest(db.tables))); got != want {
 		t.Fatalf("schemaDigestPayload() included system tables:\ngot  %q\nwant %q", got, want)
 	}
@@ -285,6 +295,7 @@ func TestSchemaDigestPreservedAcrossReopenAndIgnoresSystemTables(t *testing.T) {
 		t.Fatalf("SchemaDigest(after reopen) error = %v", err)
 	}
 	assertSchemaDigestMethodsMatch(t, db, afterReopen)
+	assertSystemCatalogDigestVerificationOK(t, db)
 	if beforeReopen != afterReopen {
 		t.Fatalf("reopen digest mismatch: %q vs %q", beforeReopen, afterReopen)
 	}
@@ -312,6 +323,13 @@ func assertSchemaDigestMethodsMatch(t *testing.T, db *DB, want string) {
 	}
 	if got != want {
 		t.Fatalf("SchemaDigestFromSystemCatalog() = %q, want %q", got, want)
+	}
+}
+
+func assertSystemCatalogDigestVerificationOK(t *testing.T, db *DB) {
+	t.Helper()
+	if err := db.VerifySystemCatalogDigest(); err != nil {
+		t.Fatalf("VerifySystemCatalogDigest() error = %v", err)
 	}
 }
 
