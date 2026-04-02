@@ -51,6 +51,21 @@ type CatalogIndexColumn struct {
 	Desc bool
 }
 
+type CatalogWritePage struct {
+	PageID PageID
+	Data   []byte
+	IsNew  bool
+}
+
+type CatalogWritePlan struct {
+	DirectoryPage     []byte
+	OverflowPages     []CatalogWritePage
+	FreeListHead      uint32
+	CATDIRStorageMode uint32
+}
+
+type CatalogOverflowPageAllocator func() (PageID, bool, error)
+
 // PageReader provides durable page reads without exposing pager internals.
 type PageReader interface {
 	ReadPage(pageID PageID) ([]byte, error)
@@ -114,6 +129,45 @@ func readDirectoryCatalogPayload(reader PageReader, pageData []byte) ([]byte, er
 func loadCatalogPayload(pageData []byte) (*CatalogData, error) {
 	_, cat, err := decodeCatalogPayload(pageData)
 	return cat, err
+}
+
+func encodeCatalogPayload(cat *CatalogData) ([]byte, error) {
+	if cat == nil {
+		cat = &CatalogData{}
+	}
+	buf := make([]byte, 0, embeddedDirectoryCatalogPayloadCapacity(0))
+	buf = appendUint32(buf, catalogVersion)
+	buf = appendUint32(buf, uint32(len(cat.Tables)))
+
+	for _, table := range cat.Tables {
+		if table.Name == "" || len(table.Columns) == 0 {
+			return nil, errCorruptedCatalogPage
+		}
+		buf = appendString(buf, table.Name)
+		buf = appendUint32(buf, table.TableID)
+		buf = appendUint32(buf, table.RowCount)
+		buf = appendUint16(buf, uint16(len(table.Columns)))
+
+		for _, column := range table.Columns {
+			if column.Name == "" {
+				return nil, errCorruptedCatalogPage
+			}
+			if column.Type != CatalogColumnTypeInt && column.Type != CatalogColumnTypeText && column.Type != CatalogColumnTypeBool && column.Type != CatalogColumnTypeReal {
+				return nil, errCorruptedCatalogPage
+			}
+			buf = appendString(buf, column.Name)
+			buf = append(buf, column.Type)
+		}
+		buf = appendUint16(buf, uint16(len(table.Indexes)))
+		for _, index := range table.Indexes {
+			var err error
+			buf, err = appendCatalogIndex(buf, index, table.Columns)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return buf, nil
 }
 
 func decodeCatalogPayload(pageData []byte) (int, *CatalogData, error) {
@@ -212,8 +266,13 @@ func SaveCatalog(pager *Pager, cat *CatalogData) error {
 	}
 	freeListHead := uint32(0)
 	checkpointMeta := DirectoryCheckpointMetadata{}
+	currentMode := DirectoryCATDIRStorageModeEmbedded
 	if ValidateDirectoryPage(page.Data()) == nil {
 		freeListHead, err = DirectoryFreeListHead(page.Data())
+		if err != nil {
+			return err
+		}
+		currentMode, err = DirectoryCATDIRStorageMode(page.Data())
 		if err != nil {
 			return err
 		}
@@ -222,13 +281,14 @@ func SaveCatalog(pager *Pager, cat *CatalogData) error {
 			return err
 		}
 	}
-	buf, err := BuildCatalogPageDataWithDirectoryState(cat, freeListHead, checkpointMeta)
+	allocator := newCatalogOverflowAllocator(pager, &freeListHead)
+	plan, err := PrepareCatalogWritePlan(cat, currentMode, CurrentDBFormatVersion, &freeListHead, checkpointMeta, allocator.Allocate)
 	if err != nil {
 		return err
 	}
-	pager.MarkDirtyWithOriginal(page)
-	clear(page.data)
-	copy(page.data, buf)
+	if err := applyCatalogWritePlanToPager(pager, plan); err != nil {
+		return err
+	}
 	// Catalog mutation requires explicit dirty marking; later flush eligibility
 	// is driven by dirty tracking rather than implicit full flushes.
 	return nil
@@ -246,57 +306,11 @@ func BuildCatalogPageDataWithFreeListHead(cat *CatalogData, freeListHead uint32)
 
 // BuildCatalogPageDataWithDirectoryState encodes the wrapped page 0 image with directory state.
 func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint32, checkpointMeta DirectoryCheckpointMetadata) ([]byte, error) {
-	if cat == nil {
-		cat = &CatalogData{}
-	}
-	rootIDMappings := BuildDirectoryRootIDMappings(cat)
-	rootIDPayload, err := encodeDirectoryRootIDMappings(rootIDMappings)
+	plan, err := PrepareCatalogWritePlan(cat, DirectoryCATDIRStorageModeEmbedded, CurrentDBFormatVersion, &freeListHead, checkpointMeta, nil)
 	if err != nil {
 		return nil, err
 	}
-	maxCatalogPayloadSize := embeddedDirectoryCatalogPayloadCapacity(len(rootIDPayload))
-	buf := make([]byte, 0, maxCatalogPayloadSize)
-	buf = appendUint32(buf, catalogVersion)
-	buf = appendUint32(buf, uint32(len(cat.Tables)))
-
-	for _, table := range cat.Tables {
-		if table.Name == "" || len(table.Columns) == 0 {
-			return nil, errCorruptedCatalogPage
-		}
-		buf = appendString(buf, table.Name)
-		buf = appendUint32(buf, table.TableID)
-		buf = appendUint32(buf, table.RowCount)
-		buf = appendUint16(buf, uint16(len(table.Columns)))
-
-		for _, column := range table.Columns {
-			if column.Name == "" {
-				return nil, errCorruptedCatalogPage
-			}
-			if column.Type != CatalogColumnTypeInt && column.Type != CatalogColumnTypeText && column.Type != CatalogColumnTypeBool && column.Type != CatalogColumnTypeReal {
-				return nil, errCorruptedCatalogPage
-			}
-			buf = appendString(buf, column.Name)
-			buf = append(buf, column.Type)
-			if len(buf) > maxCatalogPayloadSize {
-				return nil, errCATDIRExceedsEmbeddedWrite
-			}
-		}
-		buf = appendUint16(buf, uint16(len(table.Indexes)))
-		for _, index := range table.Indexes {
-			var err error
-			buf, err = appendCatalogIndex(buf, index, table.Columns)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if len(buf) > maxCatalogPayloadSize {
-			return nil, errCATDIRExceedsEmbeddedWrite
-		}
-	}
-
-	// Current metadata writes choose embedded CAT/DIR storage whenever the
-	// committed payload fits in page 0; overflow writes are added later.
-	return buildDirectoryCatalogPage(buf, CurrentDBFormatVersion, freeListHead, rootIDMappings, checkpointMeta)
+	return plan.DirectoryPage, nil
 }
 
 func isZeroPage(data []byte) bool {
@@ -406,7 +420,6 @@ func appendCatalogIndex(buf []byte, index CatalogIndex, columns []CatalogColumn)
 	if index.Name == "" || len(index.Columns) == 0 {
 		return nil, errCorruptedIndexMetadata
 	}
-	maxCatalogPayloadSize := PageSize - directoryCatalogOffset
 	validColumns := make(map[string]struct{}, len(columns))
 	for _, column := range columns {
 		validColumns[column.Name] = struct{}{}
@@ -438,9 +451,139 @@ func appendCatalogIndex(buf []byte, index CatalogIndex, columns []CatalogColumn)
 		} else {
 			buf = append(buf, 0)
 		}
-		if len(buf) > maxCatalogPayloadSize {
-			return nil, errCatalogTooLarge
-		}
 	}
 	return buf, nil
+}
+
+func PrepareCatalogWritePlan(cat *CatalogData, currentMode uint32, formatVersion uint32, freeListHead *uint32, checkpointMeta DirectoryCheckpointMetadata, allocate CatalogOverflowPageAllocator) (*CatalogWritePlan, error) {
+	if freeListHead == nil {
+		return nil, errCorruptedDirectoryPage
+	}
+	rootIDMappings := BuildDirectoryRootIDMappings(cat)
+	rootIDPayload, err := encodeDirectoryRootIDMappings(rootIDMappings)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := encodeCatalogPayload(cat)
+	if err != nil {
+		return nil, err
+	}
+
+	if currentMode != DirectoryCATDIRStorageModeOverflow && canStoreCatalogPayloadEmbedded(payload, rootIDPayload) {
+		directoryPage, err := buildEmbeddedDirectoryCatalogPage(payload, formatVersion, *freeListHead, rootIDMappings, checkpointMeta)
+		if err != nil {
+			return nil, err
+		}
+		return &CatalogWritePlan{
+			DirectoryPage:     directoryPage,
+			FreeListHead:      *freeListHead,
+			CATDIRStorageMode: DirectoryCATDIRStorageModeEmbedded,
+		}, nil
+	}
+	if allocate == nil {
+		return nil, errCATDIRExceedsEmbeddedWrite
+	}
+	requiredPages := catalogOverflowRequiredPageCount(len(payload))
+	pageIDs := make([]PageID, 0, requiredPages)
+	pageAlloc := make([]CatalogWritePage, 0, requiredPages)
+	for i := 0; i < requiredPages; i++ {
+		pageID, isNew, err := allocate()
+		if err != nil {
+			return nil, err
+		}
+		pageIDs = append(pageIDs, pageID)
+		pageAlloc = append(pageAlloc, CatalogWritePage{PageID: pageID, IsNew: isNew})
+	}
+	overflowImages, err := BuildCatalogOverflowPageChain(payload, pageIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range overflowImages {
+		pageAlloc[i].Data = overflowImages[i].Data
+	}
+	directoryPage, err := buildOverflowDirectoryCatalogPage(uint32(len(payload)), overflowImages[0].PageID, uint32(len(overflowImages)), formatVersion, *freeListHead, rootIDMappings, checkpointMeta)
+	if err != nil {
+		return nil, err
+	}
+	return &CatalogWritePlan{
+		DirectoryPage:     directoryPage,
+		OverflowPages:     pageAlloc,
+		FreeListHead:      *freeListHead,
+		CATDIRStorageMode: DirectoryCATDIRStorageModeOverflow,
+	}, nil
+}
+
+type catalogOverflowPagerAllocator struct {
+	pager        *Pager
+	nextFreshID  PageID
+	freeListHead *uint32
+}
+
+var newCatalogOverflowAllocator = newCatalogOverflowPagerAllocator
+
+func newCatalogOverflowPagerAllocator(pager *Pager, freeListHead *uint32) *catalogOverflowPagerAllocator {
+	return &catalogOverflowPagerAllocator{
+		pager:        pager,
+		nextFreshID:  pager.NextPageID(),
+		freeListHead: freeListHead,
+	}
+}
+
+func (a *catalogOverflowPagerAllocator) Allocate() (PageID, bool, error) {
+	if a == nil || a.pager == nil || a.freeListHead == nil {
+		return 0, false, errCorruptedDirectoryPage
+	}
+	allocator := PageAllocator{
+		NextPageID: uint32(a.nextFreshID),
+		FreePage: FreePageState{
+			HeadPageID: *a.freeListHead,
+		},
+		ReadFreeNext: func(pageID uint32) (uint32, error) {
+			pageData, err := a.pager.ReadPage(PageID(pageID))
+			if err != nil {
+				return 0, err
+			}
+			return FreePageNext(pageData)
+		},
+	}
+	allocated, reused, err := allocator.Allocate()
+	if err != nil {
+		return 0, false, err
+	}
+	a.nextFreshID = PageID(allocator.NextPageID)
+	*a.freeListHead = allocator.FreePage.HeadPageID
+	return PageID(allocated), !reused, nil
+}
+
+func applyCatalogWritePlanToPager(pager *Pager, plan *CatalogWritePlan) error {
+	if pager == nil || plan == nil {
+		return errCorruptedDirectoryPage
+	}
+	for _, overflowPage := range plan.OverflowPages {
+		var page *Page
+		var err error
+		if overflowPage.IsNew {
+			page = pager.NewPage()
+			if page.ID() != overflowPage.PageID {
+				pager.DiscardNewPage(page.ID())
+				return errCorruptedCatalogOverflow
+			}
+		} else {
+			page, err = pager.Get(overflowPage.PageID)
+			if err != nil {
+				return err
+			}
+		}
+		pager.MarkDirtyWithOriginal(page)
+		clear(page.data)
+		copy(page.data, overflowPage.Data)
+	}
+	page, err := pager.Get(catalogPageID)
+	if err != nil {
+		return err
+	}
+	pager.MarkDirtyWithOriginal(page)
+	clear(page.data)
+	copy(page.data, plan.DirectoryPage)
+	return nil
 }

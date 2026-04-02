@@ -989,11 +989,14 @@ func TestApplyErrorTriggersRollback(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		catalogData, err := storage.BuildCatalogPageData(catalogFromTables(stagedTables))
+		catalogWrite, err := db.buildCatalogPageData(stagedTables, []stagedPage{{
+			id:   table.RootPageID(),
+			data: tablePageData,
+		}})
 		if err != nil {
 			return err
 		}
-		if err := db.stageDirtyState(catalogData, []stagedPage{{
+		if err := db.stageDirtyState(catalogWrite, []stagedPage{{
 			id:   table.RootPageID(),
 			data: tablePageData,
 		}}); err != nil {

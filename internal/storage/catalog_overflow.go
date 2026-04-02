@@ -7,12 +7,19 @@ type CatalogOverflowPageImage struct {
 	Data   []byte
 }
 
+func catalogOverflowRequiredPageCount(payloadBytes int) int {
+	if payloadBytes <= 0 {
+		return 0
+	}
+	return (payloadBytes + CatalogOverflowPayloadCapacity - 1) / CatalogOverflowPayloadCapacity
+}
+
 // BuildCatalogOverflowPageChain encodes one CAT/DIR payload across supplied overflow pages.
 func BuildCatalogOverflowPageChain(payload []byte, pageIDs []PageID) ([]CatalogOverflowPageImage, error) {
 	if len(payload) == 0 {
 		return nil, nil
 	}
-	requiredPages := (len(payload) + CatalogOverflowPayloadCapacity - 1) / CatalogOverflowPayloadCapacity
+	requiredPages := catalogOverflowRequiredPageCount(len(payload))
 	if len(pageIDs) < requiredPages {
 		return nil, errCatalogTooLarge
 	}

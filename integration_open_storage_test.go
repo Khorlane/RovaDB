@@ -3,10 +3,13 @@ package rovadb
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/Khorlane/RovaDB/internal/executor"
 	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
@@ -219,6 +222,85 @@ func TestOpenLoadsCatalogFromCATDIROverflowMode(t *testing.T) {
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows.Err() error = %v", err)
+	}
+}
+
+func TestPersistCatalogStatePromotesCATDIRToOverflowWhenNeeded(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	stagedTables := cloneTables(db.tables)
+	stagedPages := make([]stagedPage, 0, 64)
+	nextTableID := uint32(1000)
+	nextRootPageID := db.pager.NextPageID()
+	for i := 0; i < 48; i++ {
+		rootPageID := nextRootPageID
+		nextRootPageID++
+		tableName := fmt.Sprintf("table_%03d_%s", i, strings.Repeat("x", 48))
+		columns := []parser.ColumnDef{
+			{Name: fmt.Sprintf("id_%02d_%s", i, strings.Repeat("a", 20)), Type: parser.ColumnTypeInt},
+			{Name: fmt.Sprintf("name_%02d_%s", i, strings.Repeat("b", 20)), Type: parser.ColumnTypeText},
+			{Name: fmt.Sprintf("city_%02d_%s", i, strings.Repeat("c", 20)), Type: parser.ColumnTypeText},
+			{Name: fmt.Sprintf("state_%02d_%s", i, strings.Repeat("d", 20)), Type: parser.ColumnTypeText},
+			{Name: fmt.Sprintf("zip_%02d_%s", i, strings.Repeat("e", 20)), Type: parser.ColumnTypeText},
+		}
+		table := &executor.Table{
+			Name:    tableName,
+			TableID: nextTableID,
+			Columns: columns,
+		}
+		table.SetStorageMeta(rootPageID, 0)
+		stagedTables[tableName] = table
+		stagedPages = append(stagedPages, stagedPage{
+			id:    rootPageID,
+			data:  storage.InitializeTablePage(uint32(rootPageID)),
+			isNew: true,
+		})
+		nextTableID++
+	}
+	if err := db.persistCatalogState(stagedTables, stagedPages); err != nil {
+		t.Fatalf("persistCatalogState() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	defer rawDB.Close()
+	page, err := pager.Get(storage.DirectoryControlPageID)
+	if err != nil {
+		t.Fatalf("pager.Get(directory) error = %v", err)
+	}
+	mode, err := storage.DirectoryCATDIRStorageMode(page.Data())
+	if err != nil {
+		t.Fatalf("DirectoryCATDIRStorageMode() error = %v", err)
+	}
+	if mode != storage.DirectoryCATDIRStorageModeOverflow {
+		t.Fatalf("DirectoryCATDIRStorageMode() = %d, want %d", mode, storage.DirectoryCATDIRStorageModeOverflow)
+	}
+	head, err := storage.DirectoryCATDIROverflowHeadPageID(page.Data())
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowHeadPageID() error = %v", err)
+	}
+	if head == 0 {
+		t.Fatal("DirectoryCATDIROverflowHeadPageID() = 0, want nonzero")
+	}
+	count, err := storage.DirectoryCATDIROverflowPageCount(page.Data())
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowPageCount() error = %v", err)
+	}
+	if count == 0 {
+		t.Fatal("DirectoryCATDIROverflowPageCount() = 0, want > 0")
+	}
+
+	got, err := storage.LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+	if len(got.Tables) != len(stagedTables) {
+		t.Fatalf("len(LoadCatalog().Tables) = %d, want %d", len(got.Tables), len(stagedTables))
 	}
 }
 

@@ -362,7 +362,7 @@ func WriteDirectoryRootIDMappings(file *os.File, mappings []DirectoryRootIDMappi
 	if err != nil {
 		return err
 	}
-	rebuilt, err := buildDirectoryCatalogPage(catalogPayload, CurrentDBFormatVersion, freeListHead, mappings, checkpointMeta)
+	rebuilt, err := buildEmbeddedDirectoryCatalogPage(catalogPayload, CurrentDBFormatVersion, freeListHead, mappings, checkpointMeta)
 	if err != nil {
 		return err
 	}
@@ -527,7 +527,7 @@ func ApplyDirectoryRootIDMappings(cat *CatalogData, mappings []DirectoryRootIDMa
 	return applied, nil
 }
 
-func buildDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, freeListHead uint32, idMappings []DirectoryRootIDMapping, checkpointMeta DirectoryCheckpointMetadata) ([]byte, error) {
+func buildEmbeddedDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, freeListHead uint32, idMappings []DirectoryRootIDMapping, checkpointMeta DirectoryCheckpointMetadata) ([]byte, error) {
 	rootIDPayload, err := encodeDirectoryRootIDMappings(idMappings)
 	if err != nil {
 		return nil, err
@@ -544,19 +544,62 @@ func buildDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, free
 	catalogStart := directoryCatalogOffset
 	copy(page[catalogStart:], catalogPayload)
 	checkpointOffset := catalogStart + len(catalogPayload)
-	binary.LittleEndian.PutUint64(page[checkpointOffset:checkpointOffset+8], checkpointMeta.LastCheckpointLSN)
-	binary.LittleEndian.PutUint32(page[checkpointOffset+8:checkpointOffset+12], checkpointMeta.LastCheckpointPageCount)
-	binary.LittleEndian.PutUint32(page[checkpointOffset+12:checkpointOffset+16], checkpointMeta.ReservedCheckpoint)
-	if len(rootIDPayload) > 0 {
-		trailerOffset := checkpointOffset + directoryCheckpointMetadataSize
-		binary.LittleEndian.PutUint32(page[trailerOffset:trailerOffset+4], uint32(len(idMappings)))
-		binary.LittleEndian.PutUint32(page[trailerOffset+4:trailerOffset+8], uint32(len(rootIDPayload)))
-		copy(page[trailerOffset+8:], rootIDPayload)
+	writeDirectoryCheckpointMetadata(page, checkpointOffset, checkpointMeta)
+	if err := writeDirectoryRootIDTrailer(page, checkpointOffset+directoryCheckpointMetadataSize, idMappings, rootIDPayload); err != nil {
+		return nil, err
 	}
 	if err := FinalizePageImage(page); err != nil {
 		return nil, err
 	}
 	return page, nil
+}
+
+func buildOverflowDirectoryCatalogPage(payloadByteLength uint32, overflowHeadPageID PageID, overflowPageCount uint32, formatVersion uint32, freeListHead uint32, idMappings []DirectoryRootIDMapping, checkpointMeta DirectoryCheckpointMetadata) ([]byte, error) {
+	rootIDPayload, err := encodeDirectoryRootIDMappings(idMappings)
+	if err != nil {
+		return nil, err
+	}
+	rootIDTrailerSize := 0
+	if len(rootIDPayload) > 0 {
+		rootIDTrailerSize = directoryRootIDTrailerHeaderSize + len(rootIDPayload)
+	}
+	if directoryCheckpointMetadataSize+rootIDTrailerSize > PageSize-directoryCatalogOffset {
+		return nil, errCatalogTooLarge
+	}
+	page := InitDirectoryPage(uint32(DirectoryControlPageID), formatVersion)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetFreeListHead:directoryBodyOffsetFreeListHead+4], freeListHead)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIRStorageMode:directoryBodyOffsetCATDIRStorageMode+4], DirectoryCATDIRStorageModeOverflow)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIROverflowHead:directoryBodyOffsetCATDIROverflowHead+4], uint32(overflowHeadPageID))
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIROverflowCount:directoryBodyOffsetCATDIROverflowCount+4], overflowPageCount)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIRPayloadByteSize:directoryBodyOffsetCATDIRPayloadByteSize+4], payloadByteLength)
+	checkpointOffset := directoryCatalogOffset
+	writeDirectoryCheckpointMetadata(page, checkpointOffset, checkpointMeta)
+	if err := writeDirectoryRootIDTrailer(page, checkpointOffset+directoryCheckpointMetadataSize, idMappings, rootIDPayload); err != nil {
+		return nil, err
+	}
+	if err := FinalizePageImage(page); err != nil {
+		return nil, err
+	}
+	return page, nil
+}
+
+func writeDirectoryCheckpointMetadata(page []byte, checkpointOffset int, checkpointMeta DirectoryCheckpointMetadata) {
+	binary.LittleEndian.PutUint64(page[checkpointOffset:checkpointOffset+8], checkpointMeta.LastCheckpointLSN)
+	binary.LittleEndian.PutUint32(page[checkpointOffset+8:checkpointOffset+12], checkpointMeta.LastCheckpointPageCount)
+	binary.LittleEndian.PutUint32(page[checkpointOffset+12:checkpointOffset+16], checkpointMeta.ReservedCheckpoint)
+}
+
+func writeDirectoryRootIDTrailer(page []byte, trailerOffset int, idMappings []DirectoryRootIDMapping, rootIDPayload []byte) error {
+	if len(rootIDPayload) == 0 {
+		return nil
+	}
+	if trailerOffset+directoryRootIDTrailerHeaderSize+len(rootIDPayload) > len(page) {
+		return errCatalogTooLarge
+	}
+	binary.LittleEndian.PutUint32(page[trailerOffset:trailerOffset+4], uint32(len(idMappings)))
+	binary.LittleEndian.PutUint32(page[trailerOffset+4:trailerOffset+8], uint32(len(rootIDPayload)))
+	copy(page[trailerOffset+8:], rootIDPayload)
+	return nil
 }
 
 func directoryCatalogPayload(page []byte) ([]byte, error) {

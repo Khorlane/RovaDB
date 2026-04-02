@@ -1486,7 +1486,7 @@ func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, t
 	}
 	pages = append(pages, indexPages...)
 
-	catalogData, err := db.buildCatalogPageData(stagedTables)
+	catalogData, err := db.buildCatalogPageData(stagedTables, pages)
 	if err != nil {
 		return wrapStorageError(err)
 	}
@@ -1527,7 +1527,7 @@ func (db *DB) applyStagedInsert(stagedTables map[string]*executor.Table, tableNa
 	}
 	pages = append(pages, indexPages...)
 
-	catalogData, err := db.buildCatalogPageData(stagedTables)
+	catalogData, err := db.buildCatalogPageData(stagedTables, pages)
 	if err != nil {
 		return wrapStorageError(err)
 	}
@@ -1632,14 +1632,24 @@ func (db *DB) applyStagedIndexCreate(stagedTables map[string]*executor.Table, ta
 // Stage 5 correctness requires proposal/staging before apply so a single
 // statement cannot leak mixed committed and uncommitted visibility. Crash-safe
 // durability is still future work.
-func (db *DB) stageDirtyState(catalogData []byte, pages []stagedPage) error {
+func (db *DB) stageDirtyState(catalogWrite *storage.CatalogWritePlan, pages []stagedPage) error {
 	if db == nil || db.pager == nil {
 		return nil
 	}
+	if catalogWrite == nil {
+		return ErrInvalidArgument
+	}
 
-	stagedPages := make([]stagedPage, 0, len(pages)+1)
+	stagedPages := make([]stagedPage, 0, len(pages)+len(catalogWrite.OverflowPages)+1)
 	stagedPages = append(stagedPages, pages...)
-	stagedPages = append(stagedPages, stagedPage{id: 0, data: catalogData})
+	for _, overflowPage := range catalogWrite.OverflowPages {
+		stagedPages = append(stagedPages, stagedPage{
+			id:    overflowPage.PageID,
+			data:  overflowPage.Data,
+			isNew: overflowPage.IsNew,
+		})
+	}
+	stagedPages = append(stagedPages, stagedPage{id: 0, data: catalogWrite.DirectoryPage})
 
 	for _, staged := range stagedPages {
 		if err := db.stagePrivatePageData(staged); err != nil {
@@ -1650,6 +1660,7 @@ func (db *DB) stageDirtyState(catalogData []byte, pages []stagedPage) error {
 	if err := db.materializePendingPages(); err != nil {
 		return err
 	}
+	db.freeListHead = catalogWrite.FreeListHead
 	return nil
 }
 
@@ -1666,21 +1677,58 @@ func (db *DB) stageSchemaState(stagedTables map[string]*executor.Table, pages []
 	allPages = append(allPages, pages...)
 	allPages = append(allPages, systemPages...)
 
-	catalogData, err := db.buildCatalogPageData(stagedTables)
+	catalogWrite, err := db.buildCatalogPageData(stagedTables, allPages)
 	if err != nil {
 		return wrapStorageError(err)
 	}
-	return db.stageDirtyState(catalogData, allPages)
+	return db.stageDirtyState(catalogWrite, allPages)
 }
 
-func (db *DB) buildCatalogPageData(stagedTables map[string]*executor.Table) ([]byte, error) {
+func (db *DB) buildCatalogPageData(stagedTables map[string]*executor.Table, pages []stagedPage) (*storage.CatalogWritePlan, error) {
 	if db == nil {
 		return nil, ErrInvalidArgument
 	}
-	return storage.BuildCatalogPageDataWithDirectoryState(catalogFromTables(stagedTables), db.freeListHead, storage.DirectoryCheckpointMetadata{
+	freeListHead := db.freeListHead
+	nextFreshID := db.pager.NextPageID()
+	for _, staged := range pages {
+		if staged.isNew && staged.id >= nextFreshID {
+			nextFreshID = staged.id + 1
+		}
+	}
+	currentMode := storage.DirectoryCATDIRStorageModeEmbedded
+	if pageData, err := db.pager.ReadPage(storage.DirectoryControlPageID); err == nil && storage.ValidateDirectoryPage(pageData) == nil {
+		mode, err := storage.DirectoryCATDIRStorageMode(pageData)
+		if err != nil {
+			return nil, err
+		}
+		currentMode = mode
+	}
+	allocateOverflowPage := func() (storage.PageID, bool, error) {
+		allocator := storage.PageAllocator{
+			NextPageID: uint32(nextFreshID),
+			FreePage: storage.FreePageState{
+				HeadPageID: freeListHead,
+			},
+			ReadFreeNext: func(pageID uint32) (uint32, error) {
+				pageData, err := db.pager.ReadPage(storage.PageID(pageID))
+				if err != nil {
+					return 0, err
+				}
+				return storage.FreePageNext(pageData)
+			},
+		}
+		allocated, reused, err := allocator.Allocate()
+		if err != nil {
+			return 0, false, wrapStorageError(err)
+		}
+		nextFreshID = storage.PageID(allocator.NextPageID)
+		freeListHead = allocator.FreePage.HeadPageID
+		return storage.PageID(allocated), !reused, nil
+	}
+	return storage.PrepareCatalogWritePlan(catalogFromTables(stagedTables), currentMode, storage.CurrentDBFormatVersion, &freeListHead, storage.DirectoryCheckpointMetadata{
 		LastCheckpointLSN:       db.lastCheckpointLSN,
 		LastCheckpointPageCount: db.lastCheckpointPageCount,
-	})
+	}, allocateOverflowPage)
 }
 
 func (db *DB) persistCatalogState(stagedTables map[string]*executor.Table, pages []stagedPage) error {
@@ -1688,14 +1736,21 @@ func (db *DB) persistCatalogState(stagedTables map[string]*executor.Table, pages
 		return nil
 	}
 
-	catalogData, err := db.buildCatalogPageData(stagedTables)
+	catalogWrite, err := db.buildCatalogPageData(stagedTables, pages)
 	if err != nil {
 		return wrapStorageError(err)
 	}
 
-	stagedPages := make([]stagedPage, 0, len(pages)+1)
+	stagedPages := make([]stagedPage, 0, len(pages)+len(catalogWrite.OverflowPages)+1)
 	stagedPages = append(stagedPages, pages...)
-	stagedPages = append(stagedPages, stagedPage{id: 0, data: catalogData})
+	for _, overflowPage := range catalogWrite.OverflowPages {
+		stagedPages = append(stagedPages, stagedPage{
+			id:    overflowPage.PageID,
+			data:  overflowPage.Data,
+			isNew: overflowPage.IsNew,
+		})
+	}
+	stagedPages = append(stagedPages, stagedPage{id: 0, data: catalogWrite.DirectoryPage})
 	for _, staged := range stagedPages {
 		var page *storage.Page
 		if staged.isNew {
@@ -1717,6 +1772,7 @@ func (db *DB) persistCatalogState(stagedTables map[string]*executor.Table, pages
 	if err := db.pager.FlushDirty(); err != nil {
 		return wrapStorageError(err)
 	}
+	db.freeListHead = catalogWrite.FreeListHead
 	return nil
 }
 

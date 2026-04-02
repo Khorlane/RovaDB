@@ -305,7 +305,7 @@ func buildLegacyCatalogPageDataForTest(version uint32, cat *CatalogData) []byte 
 	return page
 }
 
-func TestSaveCatalogTooLarge(t *testing.T) {
+func TestSaveCatalogPromotesToOverflowWhenEmbeddedCapacityExceeded(t *testing.T) {
 	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog.db"))
 	if err != nil {
 		t.Fatalf("OpenOrCreate() error = %v", err)
@@ -321,6 +321,7 @@ func TestSaveCatalogTooLarge(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		cat.Tables = append(cat.Tables, CatalogTable{
 			Name:       fmt.Sprintf("table_%03d", i),
+			TableID:    uint32(i + 1),
 			RootPageID: uint32(i + 1),
 			RowCount:   0,
 			Columns: []CatalogColumn{
@@ -330,13 +331,67 @@ func TestSaveCatalogTooLarge(t *testing.T) {
 		})
 	}
 
-	err = SaveCatalog(pager, cat)
-	if !errors.Is(err, errCATDIRExceedsEmbeddedWrite) {
-		t.Fatalf("SaveCatalog() error = %v, want %v", err, errCATDIRExceedsEmbeddedWrite)
+	if err := SaveCatalog(pager, cat); err != nil {
+		t.Fatalf("SaveCatalog() error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	pageData, err := pager.ReadPage(DirectoryControlPageID)
+	if err != nil {
+		t.Fatalf("pager.ReadPage(directory) error = %v", err)
+	}
+	mode, err := DirectoryCATDIRStorageMode(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIRStorageMode() error = %v", err)
+	}
+	if mode != DirectoryCATDIRStorageModeOverflow {
+		t.Fatalf("DirectoryCATDIRStorageMode() = %d, want %d", mode, DirectoryCATDIRStorageModeOverflow)
+	}
+	overflowHead, err := DirectoryCATDIROverflowHeadPageID(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowHeadPageID() error = %v", err)
+	}
+	if overflowHead == 0 {
+		t.Fatal("DirectoryCATDIROverflowHeadPageID() = 0, want nonzero")
+	}
+	overflowCount, err := DirectoryCATDIROverflowPageCount(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowPageCount() error = %v", err)
+	}
+	if overflowCount == 0 {
+		t.Fatal("DirectoryCATDIROverflowPageCount() = 0, want > 0")
+	}
+	payloadLength, err := DirectoryCATDIRPayloadByteLength(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIRPayloadByteLength() error = %v", err)
+	}
+	payload, err := encodeCatalogPayload(cat)
+	if err != nil {
+		t.Fatalf("encodeCatalogPayload() error = %v", err)
+	}
+	if payloadLength != uint32(len(payload)) {
+		t.Fatalf("DirectoryCATDIRPayloadByteLength() = %d, want %d", payloadLength, len(payload))
+	}
+
+	reopenPager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() reopen error = %v", err)
+	}
+	got, err := LoadCatalog(reopenPager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+	if len(got.Tables) != len(cat.Tables) {
+		t.Fatalf("len(LoadCatalog().Tables) = %d, want %d", len(got.Tables), len(cat.Tables))
+	}
+	if got.Tables[0].TableID != cat.Tables[0].TableID || got.Tables[len(got.Tables)-1].TableID != cat.Tables[len(cat.Tables)-1].TableID {
+		t.Fatalf("LoadCatalog() table IDs = (%d,%d), want (%d,%d)", got.Tables[0].TableID, got.Tables[len(got.Tables)-1].TableID, cat.Tables[0].TableID, cat.Tables[len(cat.Tables)-1].TableID)
 	}
 }
 
-func TestSaveCatalogOversizeLeavesCommittedMetadataIntact(t *testing.T) {
+func TestSaveCatalogOverflowAllocationFailureLeavesCommittedMetadataIntact(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalog-intact.db")
 	dbFile, err := OpenOrCreate(path)
 	if err != nil {
@@ -368,16 +423,29 @@ func TestSaveCatalogOversizeLeavesCommittedMetadataIntact(t *testing.T) {
 	oversize := &CatalogData{}
 	for i := 0; i < 200; i++ {
 		oversize.Tables = append(oversize.Tables, CatalogTable{
-			Name:    fmt.Sprintf("table_%03d", i),
-			TableID: uint32(i + 1),
+			Name:       fmt.Sprintf("table_%03d", i),
+			TableID:    uint32(i + 1),
+			RootPageID: uint32(i + 10),
 			Columns: []CatalogColumn{
 				{Name: "id", Type: CatalogColumnTypeInt},
 				{Name: "name", Type: CatalogColumnTypeText},
 			},
 		})
 	}
-	if err := SaveCatalog(pager, oversize); !errors.Is(err, errCATDIRExceedsEmbeddedWrite) {
-		t.Fatalf("SaveCatalog(oversize) error = %v, want %v", err, errCATDIRExceedsEmbeddedWrite)
+
+	restoreAllocator := newCatalogOverflowAllocator
+	defer func() {
+		newCatalogOverflowAllocator = restoreAllocator
+	}()
+	newCatalogOverflowAllocator = func(pager *Pager, freeListHead *uint32) *catalogOverflowPagerAllocator {
+		return &catalogOverflowPagerAllocator{
+			pager:        nil,
+			nextFreshID:  0,
+			freeListHead: freeListHead,
+		}
+	}
+	if err := SaveCatalog(pager, oversize); !errors.Is(err, errCorruptedDirectoryPage) {
+		t.Fatalf("SaveCatalog(oversize) error = %v, want %v", err, errCorruptedDirectoryPage)
 	}
 	if err := dbFile.Close(); err != nil {
 		t.Fatalf("dbFile.Close() error = %v", err)

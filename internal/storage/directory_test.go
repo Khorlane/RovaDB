@@ -480,9 +480,9 @@ func TestDirectoryRootIDMappingsRoundTrip(t *testing.T) {
 		},
 	}
 
-	page, err := buildDirectoryCatalogPage(catalogPayload, CurrentDBFormatVersion, 19, mappings, DirectoryCheckpointMetadata{})
+	page, err := buildEmbeddedDirectoryCatalogPage(catalogPayload, CurrentDBFormatVersion, 19, mappings, DirectoryCheckpointMetadata{})
 	if err != nil {
-		t.Fatalf("buildDirectoryCatalogPage() error = %v", err)
+		t.Fatalf("buildEmbeddedDirectoryCatalogPage() error = %v", err)
 	}
 
 	got, err := directoryRootIDMappings(page)
