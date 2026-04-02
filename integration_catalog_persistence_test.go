@@ -194,6 +194,56 @@ func TestOpenFailsWhenCurrentCatalogIDsAreMissing(t *testing.T) {
 		t.Fatal("catalog missing users table")
 	}
 	users.TableID = 0
+	if err := storage.SaveCatalog(pager, catalog); err != nil {
+		t.Fatalf("SaveCatalog() error = %v", err)
+	}
+	if err := pager.FlushDirty(); err != nil {
+		t.Fatalf("pager.FlushDirty() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("reopen Open() error = nil, want zero durable table ID rejection")
+	}
+}
+
+func TestOpenRejectsZeroDurableIndexID(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	catalog, err := storage.LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+	catalog = catalogWithDirectoryRootsForSave(t, rawDB.File(), catalog)
+	var users *storage.CatalogTable
+	for i := range catalog.Tables {
+		if catalog.Tables[i].Name == "users" {
+			users = &catalog.Tables[i]
+			break
+		}
+	}
+	if users == nil {
+		t.Fatal("catalog missing users table")
+	}
 	if len(users.Indexes) == 0 {
 		t.Fatal("users catalog entry missing indexes")
 	}
@@ -211,11 +261,11 @@ func TestOpenFailsWhenCurrentCatalogIDsAreMissing(t *testing.T) {
 	db, err = Open(path)
 	if err == nil {
 		_ = db.Close()
-		t.Fatal("reopen Open() error = nil, want missing stable ID rejection")
+		t.Fatal("reopen Open() error = nil, want zero durable index ID rejection")
 	}
 }
 
-func TestOpenBootstrapsInternalSystemCatalogTables(t *testing.T) {
+func TestOpenBootstrapsInternalSystemCatalogTablesOnCurrentFormatDB(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
@@ -317,7 +367,7 @@ func TestOpenPreservesBootstrappedInternalSystemCatalogTables(t *testing.T) {
 	}
 }
 
-func TestOpenBootstrapsMissingInternalSystemCatalogTablesForOlderCatalog(t *testing.T) {
+func TestOpenBootstrapsMissingInternalSystemCatalogTablesOnCurrentFormatDB(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
@@ -354,7 +404,7 @@ func TestOpenBootstrapsMissingInternalSystemCatalogTablesForOlderCatalog(t *test
 
 	db, err = Open(path)
 	if err != nil {
-		t.Fatalf("upgrade Open() error = %v", err)
+		t.Fatalf("reopen Open() error = %v", err)
 	}
 	defer db.Close()
 
@@ -367,13 +417,13 @@ func TestOpenBootstrapsMissingInternalSystemCatalogTablesForOlderCatalog(t *test
 	} {
 		table := db.tables[name]
 		if table == nil {
-			t.Fatalf("upgraded db.tables[%q] = nil", name)
+			t.Fatalf("db.tables[%q] = nil", name)
 		}
 		if !table.IsSystem {
-			t.Fatalf("upgraded db.tables[%q].IsSystem = false, want true", name)
+			t.Fatalf("db.tables[%q].IsSystem = false, want true", name)
 		}
 		if table.TableID == 0 || table.RootPageID() == 0 {
-			t.Fatalf("upgraded db.tables[%q] has zero durable identifiers: tableID=%d rootPageID=%d", name, table.TableID, table.RootPageID())
+			t.Fatalf("db.tables[%q] has zero durable identifiers: tableID=%d rootPageID=%d", name, table.TableID, table.RootPageID())
 		}
 		gotNames = append(gotNames, name)
 	}
@@ -528,7 +578,7 @@ func TestSystemCatalogRowsRebuildAcrossDropOperations(t *testing.T) {
 	)
 }
 
-func TestOpenUpgradePopulatesSystemCatalogRowsForOlderDB(t *testing.T) {
+func TestOpenRebuildsSystemCatalogRowsForCurrentFormatDBMissingSystemTables(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
@@ -573,7 +623,7 @@ func TestOpenUpgradePopulatesSystemCatalogRowsForOlderDB(t *testing.T) {
 
 	db, err = Open(path)
 	if err != nil {
-		t.Fatalf("upgrade Open() error = %v", err)
+		t.Fatalf("reopen Open() error = %v", err)
 	}
 	defer db.Close()
 

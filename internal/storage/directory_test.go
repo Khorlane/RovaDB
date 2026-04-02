@@ -226,7 +226,7 @@ func TestEnsureDirectoryPageInitializesMissingPage(t *testing.T) {
 	}
 }
 
-func TestEnsureDirectoryPageUpgradesLegacyCatalogPage(t *testing.T) {
+func TestEnsureDirectoryPageRejectsLegacyCatalogPage(t *testing.T) {
 	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "legacy-directory.db"))
 	if err != nil {
 		t.Fatalf("OpenOrCreate() error = %v", err)
@@ -553,7 +553,7 @@ func TestApplyDirectoryRootIDMappingsUsesDirectoryRootsOnly(t *testing.T) {
 	}
 }
 
-func TestApplyDirectoryRootIDMappingsFallsBackWhenEmpty(t *testing.T) {
+func TestApplyDirectoryRootIDMappingsRejectsEmptyMappings(t *testing.T) {
 	catalog := &CatalogData{
 		Version: catalogVersion,
 		Tables: []CatalogTable{

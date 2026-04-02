@@ -666,7 +666,7 @@ func TestOpenFailsWithoutDirectoryRootsEvenIfCurrentCatalogSnapshotCarriesRoots(
 	}
 }
 
-func TestOpenFallsBackToLegacyCatalogRootsForV5PayloadWithoutDirectoryMappings(t *testing.T) {
+func TestOpenRejectsLegacyCatalogPayloadWithoutDirectoryMappings(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
