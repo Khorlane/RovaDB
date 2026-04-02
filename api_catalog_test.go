@@ -163,6 +163,9 @@ func TestCatalogIntrospectionOnClosedDBReturnsErrClosed(t *testing.T) {
 	if _, err := db.SchemaDigest(); !errors.Is(err, ErrClosed) {
 		t.Fatalf("SchemaDigest() error = %v, want ErrClosed", err)
 	}
+	if _, err := db.SchemaDigestFromSystemCatalog(); !errors.Is(err, ErrClosed) {
+		t.Fatalf("SchemaDigestFromSystemCatalog() error = %v, want ErrClosed", err)
+	}
 }
 
 func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
@@ -178,6 +181,7 @@ func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaDigest(empty) error = %v", err)
 	}
+	assertSchemaDigestMethodsMatch(t, db, emptyDigest)
 	repeatedEmptyDigest, err := db.SchemaDigest()
 	if err != nil {
 		t.Fatalf("SchemaDigest(repeat empty) error = %v", err)
@@ -193,6 +197,7 @@ func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaDigest(after create table) error = %v", err)
 	}
+	assertSchemaDigestMethodsMatch(t, db, tableDigest)
 	assertDigestChanged(t, emptyDigest, tableDigest)
 
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN active INT"); err != nil {
@@ -202,6 +207,7 @@ func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaDigest(after add column) error = %v", err)
 	}
+	assertSchemaDigestMethodsMatch(t, db, columnDigest)
 	assertDigestChanged(t, tableDigest, columnDigest)
 
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
@@ -211,6 +217,7 @@ func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaDigest(after create index) error = %v", err)
 	}
+	assertSchemaDigestMethodsMatch(t, db, indexDigest)
 	assertDigestChanged(t, columnDigest, indexDigest)
 
 	if _, err := db.Exec("DROP INDEX idx_users_name"); err != nil {
@@ -220,6 +227,7 @@ func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaDigest(after drop index) error = %v", err)
 	}
+	assertSchemaDigestMethodsMatch(t, db, dropIndexDigest)
 	assertDigestChanged(t, indexDigest, dropIndexDigest)
 	if dropIndexDigest != columnDigest {
 		t.Fatalf("digest after drop index = %q, want %q", dropIndexDigest, columnDigest)
@@ -232,6 +240,7 @@ func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaDigest(after drop table) error = %v", err)
 	}
+	assertSchemaDigestMethodsMatch(t, db, dropTableDigest)
 	if dropTableDigest != emptyDigest {
 		t.Fatalf("digest after drop table = %q, want %q", dropTableDigest, emptyDigest)
 	}
@@ -254,7 +263,8 @@ func TestSchemaDigestPreservedAcrossReopenAndIgnoresSystemTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaDigest(before reopen) error = %v", err)
 	}
-	if got, want := string(schemaDigestPayload(db.tables)), string(schemaDigestPayload(userOnlyTablesForDigestTest(db.tables))); got != want {
+	assertSchemaDigestMethodsMatch(t, db, beforeReopen)
+	if got, want := string(schemaDigestPayloadFromTables(db.tables)), string(schemaDigestPayloadFromTables(userOnlyTablesForDigestTest(db.tables))); got != want {
 		t.Fatalf("schemaDigestPayload() included system tables:\ngot  %q\nwant %q", got, want)
 	}
 	if _, ok := findPublicTableInfo(db.tables, systemTableTables); ok {
@@ -274,10 +284,11 @@ func TestSchemaDigestPreservedAcrossReopenAndIgnoresSystemTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaDigest(after reopen) error = %v", err)
 	}
+	assertSchemaDigestMethodsMatch(t, db, afterReopen)
 	if beforeReopen != afterReopen {
 		t.Fatalf("reopen digest mismatch: %q vs %q", beforeReopen, afterReopen)
 	}
-	if got, want := string(schemaDigestPayload(db.tables)), string(schemaDigestPayload(userOnlyTablesForDigestTest(db.tables))); got != want {
+	if got, want := string(schemaDigestPayloadFromTables(db.tables)), string(schemaDigestPayloadFromTables(userOnlyTablesForDigestTest(db.tables))); got != want {
 		t.Fatalf("schemaDigestPayload() after reopen included system tables:\ngot  %q\nwant %q", got, want)
 	}
 
@@ -290,6 +301,17 @@ func assertDigestChanged(t *testing.T, before, after string) {
 	t.Helper()
 	if before == after {
 		t.Fatalf("digest did not change: %q", before)
+	}
+}
+
+func assertSchemaDigestMethodsMatch(t *testing.T, db *DB, want string) {
+	t.Helper()
+	got, err := db.SchemaDigestFromSystemCatalog()
+	if err != nil {
+		t.Fatalf("SchemaDigestFromSystemCatalog() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("SchemaDigestFromSystemCatalog() = %q, want %q", got, want)
 	}
 }
 

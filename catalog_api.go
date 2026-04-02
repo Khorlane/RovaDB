@@ -73,11 +73,31 @@ func (db *DB) SchemaDigest() (string, error) {
 		return "", err
 	}
 
-	sum := sha256.Sum256(schemaDigestPayload(db.tables))
+	sum := sha256.Sum256(schemaDigestPayloadFromTables(db.tables))
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func schemaDigestPayload(tables map[string]*executor.Table) []byte {
+// SchemaDigestFromSystemCatalog returns the logical schema digest from __sys_* rows.
+func (db *DB) SchemaDigestFromSystemCatalog() (string, error) {
+	if db == nil {
+		return "", ErrInvalidArgument
+	}
+	if db.closed {
+		return "", ErrClosed
+	}
+	if err := db.validateTxnState(); err != nil {
+		return "", err
+	}
+
+	payload, err := db.schemaDigestPayloadFromSystemCatalog()
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func schemaDigestPayloadFromTables(tables map[string]*executor.Table) []byte {
 	if len(tables) == 0 {
 		return nil
 	}
@@ -97,24 +117,12 @@ func schemaDigestPayload(tables map[string]*executor.Table) []byte {
 		return userTables[i].Name < userTables[j].Name
 	})
 
-	var b strings.Builder
+	var b schemaDigestBuilder
 	for _, table := range userTables {
-		b.WriteString("T|")
-		b.WriteString(strconv.FormatUint(uint64(table.TableID), 10))
-		b.WriteString("|")
-		b.WriteString(table.Name)
-		b.WriteString("\n")
+		b.WriteTable(table.TableID, table.Name)
 
 		for ordinal, column := range table.Columns {
-			b.WriteString("C|")
-			b.WriteString(strconv.FormatUint(uint64(table.TableID), 10))
-			b.WriteString("|")
-			b.WriteString(strconv.Itoa(ordinal + 1))
-			b.WriteString("|")
-			b.WriteString(column.Name)
-			b.WriteString("|")
-			b.WriteString(column.Type)
-			b.WriteString("\n")
+			b.WriteColumn(table.TableID, ordinal+1, column.Name, column.Type)
 		}
 	}
 
@@ -139,38 +147,156 @@ func schemaDigestPayload(tables map[string]*executor.Table) []byte {
 	})
 
 	for _, entry := range indexEntries {
-		b.WriteString("I|")
-		b.WriteString(strconv.FormatUint(uint64(entry.IndexID), 10))
-		b.WriteString("|")
-		b.WriteString(strconv.FormatUint(uint64(entry.TableID), 10))
-		b.WriteString("|")
-		b.WriteString(entry.IndexDef.Name)
-		b.WriteString("|")
-		if entry.IndexDef.Unique {
-			b.WriteString("1")
-		} else {
-			b.WriteString("0")
-		}
-		b.WriteString("\n")
+		b.WriteIndex(entry.IndexID, entry.TableID, entry.IndexDef.Name, entry.IndexDef.Unique)
 
 		for ordinal, column := range entry.IndexDef.Columns {
-			b.WriteString("K|")
-			b.WriteString(strconv.FormatUint(uint64(entry.IndexID), 10))
-			b.WriteString("|")
-			b.WriteString(strconv.Itoa(ordinal + 1))
-			b.WriteString("|")
-			b.WriteString(column.Name)
-			b.WriteString("\n")
+			b.WriteIndexColumn(entry.IndexID, ordinal+1, column.Name)
 		}
 	}
 
-	return []byte(b.String())
+	return b.Bytes()
 }
 
 type schemaDigestIndexEntry struct {
 	TableID  uint32
 	IndexID  uint32
 	IndexDef storage.CatalogIndex
+}
+
+type schemaDigestBuilder struct {
+	b strings.Builder
+}
+
+func (b *schemaDigestBuilder) WriteTable(tableID uint32, tableName string) {
+	b.b.WriteString("T|")
+	b.b.WriteString(strconv.FormatUint(uint64(tableID), 10))
+	b.b.WriteString("|")
+	b.b.WriteString(tableName)
+	b.b.WriteString("\n")
+}
+
+func (b *schemaDigestBuilder) WriteColumn(tableID uint32, ordinal int, columnName, columnType string) {
+	b.b.WriteString("C|")
+	b.b.WriteString(strconv.FormatUint(uint64(tableID), 10))
+	b.b.WriteString("|")
+	b.b.WriteString(strconv.Itoa(ordinal))
+	b.b.WriteString("|")
+	b.b.WriteString(columnName)
+	b.b.WriteString("|")
+	b.b.WriteString(columnType)
+	b.b.WriteString("\n")
+}
+
+func (b *schemaDigestBuilder) WriteIndex(indexID, tableID uint32, indexName string, isUnique bool) {
+	b.b.WriteString("I|")
+	b.b.WriteString(strconv.FormatUint(uint64(indexID), 10))
+	b.b.WriteString("|")
+	b.b.WriteString(strconv.FormatUint(uint64(tableID), 10))
+	b.b.WriteString("|")
+	b.b.WriteString(indexName)
+	b.b.WriteString("|")
+	if isUnique {
+		b.b.WriteString("1")
+	} else {
+		b.b.WriteString("0")
+	}
+	b.b.WriteString("\n")
+}
+
+func (b *schemaDigestBuilder) WriteIndexColumn(indexID uint32, ordinal int, columnName string) {
+	b.b.WriteString("K|")
+	b.b.WriteString(strconv.FormatUint(uint64(indexID), 10))
+	b.b.WriteString("|")
+	b.b.WriteString(strconv.Itoa(ordinal))
+	b.b.WriteString("|")
+	b.b.WriteString(columnName)
+	b.b.WriteString("\n")
+}
+
+func (b *schemaDigestBuilder) Bytes() []byte {
+	return []byte(b.b.String())
+}
+
+func (db *DB) schemaDigestPayloadFromSystemCatalog() ([]byte, error) {
+	var b schemaDigestBuilder
+
+	rows, err := db.Query("SELECT table_id, table_name FROM __sys_tables ORDER BY table_id")
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		return nil, nil
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var tableID int
+		var tableName string
+		if err := rows.Scan(&tableID, &tableName); err != nil {
+			return nil, err
+		}
+		b.WriteTable(uint32(tableID), tableName)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	rows, err = db.Query("SELECT table_id, column_name, column_type, ordinal_position FROM __sys_columns ORDER BY table_id, ordinal_position, column_name")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var tableID int
+		var columnName string
+		var columnType string
+		var ordinal int
+		if err := rows.Scan(&tableID, &columnName, &columnType, &ordinal); err != nil {
+			return nil, err
+		}
+		b.WriteColumn(uint32(tableID), ordinal, columnName, columnType)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	rows, err = db.Query("SELECT index_id, index_name, table_id, is_unique FROM __sys_indexes ORDER BY index_id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var indexID int
+		var indexName string
+		var tableID int
+		var isUnique bool
+		if err := rows.Scan(&indexID, &indexName, &tableID, &isUnique); err != nil {
+			return nil, err
+		}
+		b.WriteIndex(uint32(indexID), uint32(tableID), indexName, isUnique)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	rows, err = db.Query("SELECT index_id, column_name, ordinal_position FROM __sys_index_columns ORDER BY index_id, ordinal_position, column_name")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var indexID int
+		var columnName string
+		var ordinal int
+		if err := rows.Scan(&indexID, &columnName, &ordinal); err != nil {
+			return nil, err
+		}
+		b.WriteIndexColumn(uint32(indexID), ordinal, columnName)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return b.Bytes(), nil
 }
 
 func publicTableInfos(tables map[string]*executor.Table) []TableInfo {
