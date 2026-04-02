@@ -3,6 +3,8 @@ package rovadb
 import (
 	"errors"
 	"testing"
+
+	"github.com/Khorlane/RovaDB/internal/executor"
 )
 
 func TestListTablesReturnsExpectedTableNames(t *testing.T) {
@@ -158,4 +160,146 @@ func TestCatalogIntrospectionOnClosedDBReturnsErrClosed(t *testing.T) {
 	if _, err := db.GetTableSchema("users"); !errors.Is(err, ErrClosed) {
 		t.Fatalf("GetTableSchema() error = %v, want ErrClosed", err)
 	}
+	if _, err := db.SchemaDigest(); !errors.Is(err, ErrClosed) {
+		t.Fatalf("SchemaDigest() error = %v, want ErrClosed", err)
+	}
+}
+
+func TestSchemaDigestTracksLogicalSchemaChanges(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	emptyDigest, err := db.SchemaDigest()
+	if err != nil {
+		t.Fatalf("SchemaDigest(empty) error = %v", err)
+	}
+	repeatedEmptyDigest, err := db.SchemaDigest()
+	if err != nil {
+		t.Fatalf("SchemaDigest(repeat empty) error = %v", err)
+	}
+	if emptyDigest != repeatedEmptyDigest {
+		t.Fatalf("empty digest mismatch: %q vs %q", emptyDigest, repeatedEmptyDigest)
+	}
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create users) error = %v", err)
+	}
+	tableDigest, err := db.SchemaDigest()
+	if err != nil {
+		t.Fatalf("SchemaDigest(after create table) error = %v", err)
+	}
+	assertDigestChanged(t, emptyDigest, tableDigest)
+
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN active INT"); err != nil {
+		t.Fatalf("Exec(alter users) error = %v", err)
+	}
+	columnDigest, err := db.SchemaDigest()
+	if err != nil {
+		t.Fatalf("SchemaDigest(after add column) error = %v", err)
+	}
+	assertDigestChanged(t, tableDigest, columnDigest)
+
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	indexDigest, err := db.SchemaDigest()
+	if err != nil {
+		t.Fatalf("SchemaDigest(after create index) error = %v", err)
+	}
+	assertDigestChanged(t, columnDigest, indexDigest)
+
+	if _, err := db.Exec("DROP INDEX idx_users_name"); err != nil {
+		t.Fatalf("Exec(drop index) error = %v", err)
+	}
+	dropIndexDigest, err := db.SchemaDigest()
+	if err != nil {
+		t.Fatalf("SchemaDigest(after drop index) error = %v", err)
+	}
+	assertDigestChanged(t, indexDigest, dropIndexDigest)
+	if dropIndexDigest != columnDigest {
+		t.Fatalf("digest after drop index = %q, want %q", dropIndexDigest, columnDigest)
+	}
+
+	if _, err := db.Exec("DROP TABLE users"); err != nil {
+		t.Fatalf("Exec(drop users) error = %v", err)
+	}
+	dropTableDigest, err := db.SchemaDigest()
+	if err != nil {
+		t.Fatalf("SchemaDigest(after drop table) error = %v", err)
+	}
+	if dropTableDigest != emptyDigest {
+		t.Fatalf("digest after drop table = %q, want %q", dropTableDigest, emptyDigest)
+	}
+}
+
+func TestSchemaDigestPreservedAcrossReopenAndIgnoresSystemTables(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create users) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE UNIQUE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	beforeReopen, err := db.SchemaDigest()
+	if err != nil {
+		t.Fatalf("SchemaDigest(before reopen) error = %v", err)
+	}
+	if got, want := string(schemaDigestPayload(db.tables)), string(schemaDigestPayload(userOnlyTablesForDigestTest(db.tables))); got != want {
+		t.Fatalf("schemaDigestPayload() included system tables:\ngot  %q\nwant %q", got, want)
+	}
+	if _, ok := findPublicTableInfo(db.tables, systemTableTables); ok {
+		t.Fatal("findPublicTableInfo(system table) = true, want false")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+
+	afterReopen, err := db.SchemaDigest()
+	if err != nil {
+		t.Fatalf("SchemaDigest(after reopen) error = %v", err)
+	}
+	if beforeReopen != afterReopen {
+		t.Fatalf("reopen digest mismatch: %q vs %q", beforeReopen, afterReopen)
+	}
+	if got, want := string(schemaDigestPayload(db.tables)), string(schemaDigestPayload(userOnlyTablesForDigestTest(db.tables))); got != want {
+		t.Fatalf("schemaDigestPayload() after reopen included system tables:\ngot  %q\nwant %q", got, want)
+	}
+
+	if _, ok := findPublicTableInfo(db.tables, systemTableTables); ok {
+		t.Fatal("findPublicTableInfo(system table after reopen) = true, want false")
+	}
+}
+
+func assertDigestChanged(t *testing.T, before, after string) {
+	t.Helper()
+	if before == after {
+		t.Fatalf("digest did not change: %q", before)
+	}
+}
+
+func userOnlyTablesForDigestTest(tables map[string]*executor.Table) map[string]*executor.Table {
+	filtered := make(map[string]*executor.Table)
+	for name, table := range tables {
+		if table == nil || table.IsSystem {
+			continue
+		}
+		filtered[name] = table
+	}
+	return filtered
 }

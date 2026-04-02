@@ -1,11 +1,15 @@
 package rovadb
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Khorlane/RovaDB/internal/executor"
+	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
 // TableInfo describes one table in the public catalog API.
@@ -55,6 +59,118 @@ func (db *DB) GetTableSchema(table string) (TableInfo, error) {
 		return TableInfo{}, fmt.Errorf("table not found: %s", table)
 	}
 	return info, nil
+}
+
+// SchemaDigest returns a deterministic digest of the current logical schema.
+func (db *DB) SchemaDigest() (string, error) {
+	if db == nil {
+		return "", ErrInvalidArgument
+	}
+	if db.closed {
+		return "", ErrClosed
+	}
+	if err := db.validateTxnState(); err != nil {
+		return "", err
+	}
+
+	sum := sha256.Sum256(schemaDigestPayload(db.tables))
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func schemaDigestPayload(tables map[string]*executor.Table) []byte {
+	if len(tables) == 0 {
+		return nil
+	}
+
+	userTables := make([]*executor.Table, 0, len(tables))
+	for _, table := range tables {
+		if table == nil || table.IsSystem {
+			continue
+		}
+		userTables = append(userTables, table)
+	}
+
+	sort.Slice(userTables, func(i, j int) bool {
+		if userTables[i].TableID != userTables[j].TableID {
+			return userTables[i].TableID < userTables[j].TableID
+		}
+		return userTables[i].Name < userTables[j].Name
+	})
+
+	var b strings.Builder
+	for _, table := range userTables {
+		b.WriteString("T|")
+		b.WriteString(strconv.FormatUint(uint64(table.TableID), 10))
+		b.WriteString("|")
+		b.WriteString(table.Name)
+		b.WriteString("\n")
+
+		for ordinal, column := range table.Columns {
+			b.WriteString("C|")
+			b.WriteString(strconv.FormatUint(uint64(table.TableID), 10))
+			b.WriteString("|")
+			b.WriteString(strconv.Itoa(ordinal + 1))
+			b.WriteString("|")
+			b.WriteString(column.Name)
+			b.WriteString("|")
+			b.WriteString(column.Type)
+			b.WriteString("\n")
+		}
+	}
+
+	indexEntries := make([]schemaDigestIndexEntry, 0)
+	for _, table := range userTables {
+		for _, indexDef := range table.IndexDefs {
+			indexEntries = append(indexEntries, schemaDigestIndexEntry{
+				TableID:  table.TableID,
+				IndexID:  indexDef.IndexID,
+				IndexDef: indexDef,
+			})
+		}
+	}
+	sort.Slice(indexEntries, func(i, j int) bool {
+		if indexEntries[i].IndexID != indexEntries[j].IndexID {
+			return indexEntries[i].IndexID < indexEntries[j].IndexID
+		}
+		if indexEntries[i].TableID != indexEntries[j].TableID {
+			return indexEntries[i].TableID < indexEntries[j].TableID
+		}
+		return indexEntries[i].IndexDef.Name < indexEntries[j].IndexDef.Name
+	})
+
+	for _, entry := range indexEntries {
+		b.WriteString("I|")
+		b.WriteString(strconv.FormatUint(uint64(entry.IndexID), 10))
+		b.WriteString("|")
+		b.WriteString(strconv.FormatUint(uint64(entry.TableID), 10))
+		b.WriteString("|")
+		b.WriteString(entry.IndexDef.Name)
+		b.WriteString("|")
+		if entry.IndexDef.Unique {
+			b.WriteString("1")
+		} else {
+			b.WriteString("0")
+		}
+		b.WriteString("\n")
+
+		for ordinal, column := range entry.IndexDef.Columns {
+			b.WriteString("K|")
+			b.WriteString(strconv.FormatUint(uint64(entry.IndexID), 10))
+			b.WriteString("|")
+			b.WriteString(strconv.Itoa(ordinal + 1))
+			b.WriteString("|")
+			b.WriteString(column.Name)
+			b.WriteString("\n")
+		}
+	}
+
+	return []byte(b.String())
+}
+
+type schemaDigestIndexEntry struct {
+	TableID  uint32
+	IndexID  uint32
+	IndexDef storage.CatalogIndex
 }
 
 func publicTableInfos(tables map[string]*executor.Table) []TableInfo {
