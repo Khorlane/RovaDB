@@ -13,6 +13,7 @@ var (
 	errCorruptedPageHeader     = dberr.NewStorage("corrupted page header")
 	errCorruptedDirectoryPage  = dberr.NewStorage("corrupted directory page")
 	errCorruptedCatalogPage    = dberr.NewStorage("corrupted catalog page")
+	errUnsupportedCatalogPage  = dberr.NewStorage("unsupported catalog payload version")
 	errCorruptedTablePage      = dberr.NewStorage("corrupted table page")
 	errCorruptedIndexPage      = dberr.NewStorage("corrupted index page")
 	errCorruptedRowData        = dberr.NewStorage("corrupted row data")

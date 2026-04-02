@@ -166,12 +166,12 @@ func TestCorruptedIndexMetadataDetected(t *testing.T) {
 	}
 }
 
-func corruptedIndexCatalogBytes(rootPageID uint32) []byte {
+func corruptedIndexCatalogBytes(_ uint32) []byte {
 	buf := make([]byte, 0, storage.PageSize)
-	buf = appendUint32LE(buf, 3)
+	buf = appendUint32LE(buf, 6)
 	buf = appendUint32LE(buf, 1)
 	buf = appendStringLE(buf, "users")
-	buf = appendUint32LE(buf, rootPageID)
+	buf = appendUint32LE(buf, 7)
 	buf = appendUint32LE(buf, 0)
 	buf = appendUint16LE(buf, 1)
 	buf = appendStringLE(buf, "id")
@@ -179,6 +179,7 @@ func corruptedIndexCatalogBytes(rootPageID uint32) []byte {
 	buf = appendUint16LE(buf, 1)
 	buf = appendStringLE(buf, "idx_users_missing")
 	buf = append(buf, 0)
+	buf = appendUint32LE(buf, 9)
 	buf = appendUint16LE(buf, 1)
 	buf = appendStringLE(buf, "missing")
 	buf = append(buf, 0)

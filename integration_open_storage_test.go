@@ -809,15 +809,9 @@ func TestOpenFallsBackToLegacyCatalogRootsForV5PayloadWithoutDirectoryMappings(t
 	}
 
 	db, err = Open(path)
-	if err != nil {
-		t.Fatalf("reopen Open() error = %v", err)
-	}
-	defer db.Close()
-	if got := uint32(db.tables["users"].RootPageID()); got != tableRoot {
-		t.Fatalf("users.RootPageID() = %d, want %d from legacy catalog fallback", got, tableRoot)
-	}
-	if got := db.tables["users"].IndexDefinition("idx_users_name").RootPageID; got != indexRoot {
-		t.Fatalf("index RootPageID = %d, want %d from legacy catalog fallback", got, indexRoot)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("reopen Open() error = nil, want legacy catalog payload rejection")
 	}
 }
 
@@ -1555,47 +1549,42 @@ func allNameRootMappingsForOpenTest(db *DB) []storage.DirectoryRootMapping {
 
 func buildLegacyV5DirectoryPageForOpenTest(cat *storage.CatalogData) []byte {
 	page := storage.InitDirectoryPage(uint32(storage.DirectoryControlPageID), storage.CurrentDBFormatVersion)
-	payload := encodeLegacyV5CatalogPayloadForOpenTest(cat)
-	copy(page[48:], payload)
-	return page
-}
-
-func encodeLegacyV5CatalogPayloadForOpenTest(cat *storage.CatalogData) []byte {
-	buf := make([]byte, 0, storage.PageSize)
-	buf = appendUint32ForOpenTest(buf, 5)
-	buf = appendUint32ForOpenTest(buf, uint32(len(cat.Tables)))
+	payload := make([]byte, 0, storage.PageSize)
+	payload = appendUint32ForOpenTest(payload, 5)
+	payload = appendUint32ForOpenTest(payload, uint32(len(cat.Tables)))
 	for _, table := range cat.Tables {
-		buf = appendStringForOpenTest(buf, table.Name)
-		buf = appendUint32ForOpenTest(buf, table.TableID)
-		buf = appendUint32ForOpenTest(buf, table.RootPageID)
-		buf = appendUint32ForOpenTest(buf, table.RowCount)
-		buf = appendUint16ForOpenTest(buf, uint16(len(table.Columns)))
+		payload = appendStringForOpenTest(payload, table.Name)
+		payload = appendUint32ForOpenTest(payload, table.TableID)
+		payload = appendUint32ForOpenTest(payload, table.RootPageID)
+		payload = appendUint32ForOpenTest(payload, table.RowCount)
+		payload = appendUint16ForOpenTest(payload, uint16(len(table.Columns)))
 		for _, column := range table.Columns {
-			buf = appendStringForOpenTest(buf, column.Name)
-			buf = append(buf, column.Type)
+			payload = appendStringForOpenTest(payload, column.Name)
+			payload = append(payload, column.Type)
 		}
-		buf = appendUint16ForOpenTest(buf, uint16(len(table.Indexes)))
+		payload = appendUint16ForOpenTest(payload, uint16(len(table.Indexes)))
 		for _, index := range table.Indexes {
-			buf = appendStringForOpenTest(buf, index.Name)
+			payload = appendStringForOpenTest(payload, index.Name)
 			if index.Unique {
-				buf = append(buf, 1)
+				payload = append(payload, 1)
 			} else {
-				buf = append(buf, 0)
+				payload = append(payload, 0)
 			}
-			buf = appendUint32ForOpenTest(buf, index.IndexID)
-			buf = appendUint32ForOpenTest(buf, index.RootPageID)
-			buf = appendUint16ForOpenTest(buf, uint16(len(index.Columns)))
+			payload = appendUint32ForOpenTest(payload, index.IndexID)
+			payload = appendUint32ForOpenTest(payload, index.RootPageID)
+			payload = appendUint16ForOpenTest(payload, uint16(len(index.Columns)))
 			for _, column := range index.Columns {
-				buf = appendStringForOpenTest(buf, column.Name)
+				payload = appendStringForOpenTest(payload, column.Name)
 				if column.Desc {
-					buf = append(buf, 1)
+					payload = append(payload, 1)
 				} else {
-					buf = append(buf, 0)
+					payload = append(payload, 0)
 				}
 			}
 		}
 	}
-	return buf
+	copy(page[48:], payload)
+	return page
 }
 
 func appendUint32ForOpenTest(buf []byte, value uint32) []byte {

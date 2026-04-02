@@ -5,13 +5,8 @@ import (
 )
 
 const (
-	catalogVersionV1 = 1
-	catalogVersionV2 = 2
-	catalogVersionV3 = 3
-	catalogVersionV4 = 4
-	catalogVersionV5 = 5
-	catalogVersion   = 6
-	catalogPageID    = 0
+	catalogVersion = 6
+	catalogPageID  = 0
 
 	CatalogColumnTypeInt  = 1
 	CatalogColumnTypeText = 2
@@ -101,8 +96,11 @@ func decodeCatalogPayload(pageData []byte) (int, *CatalogData, error) {
 
 	offset := 0
 	version, ok := readUint32(pageData, &offset)
-	if !ok || (version != catalogVersionV1 && version != catalogVersionV2 && version != catalogVersionV3 && version != catalogVersionV4 && version != catalogVersionV5 && version != catalogVersion) {
+	if !ok {
 		return 0, nil, errCorruptedCatalogPage
+	}
+	if version != catalogVersion {
+		return 0, nil, errUnsupportedCatalogPage
 	}
 	tableCount, ok := readUint32(pageData, &offset)
 	if !ok {
@@ -115,19 +113,9 @@ func decodeCatalogPayload(pageData []byte) (int, *CatalogData, error) {
 		if !ok || name == "" {
 			return 0, nil, errCorruptedCatalogPage
 		}
-		tableID := uint32(0)
-		if version >= catalogVersionV5 {
-			tableID, ok = readUint32(pageData, &offset)
-			if !ok {
-				return 0, nil, errCorruptedCatalogPage
-			}
-		}
-		rootPageID := uint32(0)
-		if version < catalogVersion {
-			rootPageID, ok = readUint32(pageData, &offset)
-			if !ok || rootPageID < 1 {
-				return 0, nil, errCorruptedCatalogPage
-			}
+		tableID, ok := readUint32(pageData, &offset)
+		if !ok {
+			return 0, nil, errCorruptedCatalogPage
 		}
 		rowCount, ok := readUint32(pageData, &offset)
 		if !ok {
@@ -141,7 +129,7 @@ func decodeCatalogPayload(pageData []byte) (int, *CatalogData, error) {
 		table := CatalogTable{
 			Name:       name,
 			TableID:    tableID,
-			RootPageID: rootPageID,
+			RootPageID: 0,
 			RowCount:   rowCount,
 			Columns:    make([]CatalogColumn, 0, columnCount),
 		}
@@ -169,20 +157,18 @@ func decodeCatalogPayload(pageData []byte) (int, *CatalogData, error) {
 				Type: columnType,
 			})
 		}
-		if version >= catalogVersionV2 {
-			indexCount, ok := readUint16(pageData, &offset)
-			if !ok {
-				return 0, nil, errCorruptedCatalogPage
+		indexCount, ok := readUint16(pageData, &offset)
+		if !ok {
+			return 0, nil, errCorruptedCatalogPage
+		}
+		table.Indexes = make([]CatalogIndex, 0, indexCount)
+		indexNames := make(map[string]struct{}, indexCount)
+		for j := uint16(0); j < indexCount; j++ {
+			index, err := readCatalogIndex(pageData, &offset, columnNames, indexNames)
+			if err != nil {
+				return 0, nil, err
 			}
-			table.Indexes = make([]CatalogIndex, 0, indexCount)
-			indexNames := make(map[string]struct{}, indexCount)
-			for j := uint16(0); j < indexCount; j++ {
-				index, err := readCatalogIndex(pageData, &offset, version, columnNames, indexNames)
-				if err != nil {
-					return 0, nil, err
-				}
-				table.Indexes = append(table.Indexes, index)
-			}
+			table.Indexes = append(table.Indexes, index)
 		}
 
 		cat.Tables = append(cat.Tables, table)
@@ -351,29 +337,7 @@ func readString(data []byte, offset *int) (string, bool) {
 	return value, true
 }
 
-func readCatalogIndex(data []byte, offset *int, version uint32, columnNames map[string]struct{}, indexNames map[string]struct{}) (CatalogIndex, error) {
-	if version == catalogVersionV2 {
-		columnName, ok := readString(data, offset)
-		if !ok || columnName == "" {
-			return CatalogIndex{}, errCorruptedCatalogPage
-		}
-		if _, exists := columnNames[columnName]; !exists {
-			return CatalogIndex{}, errCorruptedIndexMetadata
-		}
-		if _, exists := indexNames[columnName]; exists {
-			return CatalogIndex{}, errCorruptedIndexMetadata
-		}
-		indexNames[columnName] = struct{}{}
-		return CatalogIndex{
-			Name:       columnName,
-			Unique:     false,
-			RootPageID: 0,
-			Columns: []CatalogIndexColumn{
-				{Name: columnName},
-			},
-		}, nil
-	}
-
+func readCatalogIndex(data []byte, offset *int, columnNames map[string]struct{}, indexNames map[string]struct{}) (CatalogIndex, error) {
 	name, ok := readString(data, offset)
 	if !ok || name == "" {
 		return CatalogIndex{}, errCorruptedCatalogPage
@@ -386,22 +350,9 @@ func readCatalogIndex(data []byte, offset *int, version uint32, columnNames map[
 	}
 	unique := data[*offset] != 0
 	*offset++
-	indexID := uint32(0)
-	rootPageID := uint32(0)
-	if version >= catalogVersionV4 {
-		var ok bool
-		if version >= catalogVersionV5 {
-			indexID, ok = readUint32(data, offset)
-			if !ok {
-				return CatalogIndex{}, errCorruptedCatalogPage
-			}
-		}
-		if version < catalogVersion {
-			rootPageID, ok = readUint32(data, offset)
-			if !ok {
-				return CatalogIndex{}, errCorruptedCatalogPage
-			}
-		}
+	indexID, ok := readUint32(data, offset)
+	if !ok {
+		return CatalogIndex{}, errCorruptedCatalogPage
 	}
 	columnCount, ok := readUint16(data, offset)
 	if !ok || columnCount == 0 {
@@ -429,7 +380,7 @@ func readCatalogIndex(data []byte, offset *int, version uint32, columnNames map[
 		columns = append(columns, CatalogIndexColumn{Name: columnName, Desc: desc})
 	}
 	indexNames[name] = struct{}{}
-	return CatalogIndex{Name: name, Unique: unique, IndexID: indexID, RootPageID: rootPageID, Columns: columns}, nil
+	return CatalogIndex{Name: name, Unique: unique, IndexID: indexID, RootPageID: 0, Columns: columns}, nil
 }
 
 func appendCatalogIndex(buf []byte, index CatalogIndex, columns []CatalogColumn) ([]byte, error) {

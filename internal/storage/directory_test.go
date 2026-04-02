@@ -96,8 +96,8 @@ func TestDirectoryCheckpointMetadataRoundTrip(t *testing.T) {
 	}
 }
 
-func TestOlderWrappedDirectoryPayloadDefaultsCheckpointMetadataToZero(t *testing.T) {
-	catalogPayload := buildCatalogPageDataV1(&CatalogData{
+func TestOlderWrappedDirectoryPayloadRejectsLegacyCatalogPayload(t *testing.T) {
+	catalogPayload := buildLegacyCatalogPageDataForTest(1, &CatalogData{
 		Tables: []CatalogTable{
 			{
 				Name:       "users",
@@ -109,19 +109,11 @@ func TestOlderWrappedDirectoryPayloadDefaultsCheckpointMetadataToZero(t *testing
 	page := InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion)
 	copy(page[directoryCatalogOffset:], catalogPayload)
 
-	lsn, err := DirectoryLastCheckpointLSN(page)
-	if err != nil {
-		t.Fatalf("DirectoryLastCheckpointLSN() error = %v", err)
+	if _, err := DirectoryLastCheckpointLSN(page); !errors.Is(err, errUnsupportedCatalogPage) {
+		t.Fatalf("DirectoryLastCheckpointLSN() error = %v, want %v", err, errUnsupportedCatalogPage)
 	}
-	if lsn != 0 {
-		t.Fatalf("DirectoryLastCheckpointLSN() = %d, want 0", lsn)
-	}
-	pageCount, err := DirectoryLastCheckpointPageCount(page)
-	if err != nil {
-		t.Fatalf("DirectoryLastCheckpointPageCount() error = %v", err)
-	}
-	if pageCount != 0 {
-		t.Fatalf("DirectoryLastCheckpointPageCount() = %d, want 0", pageCount)
+	if _, err := DirectoryLastCheckpointPageCount(page); !errors.Is(err, errUnsupportedCatalogPage) {
+		t.Fatalf("DirectoryLastCheckpointPageCount() error = %v, want %v", err, errUnsupportedCatalogPage)
 	}
 }
 
@@ -239,7 +231,7 @@ func TestEnsureDirectoryPageUpgradesLegacyCatalogPage(t *testing.T) {
 	}
 	defer dbFile.Close()
 
-	legacyPage := buildCatalogPageDataV1(&CatalogData{
+	legacyPage := buildLegacyCatalogPageDataForTest(1, &CatalogData{
 		Tables: []CatalogTable{
 			{
 				Name:       "users",
@@ -255,23 +247,8 @@ func TestEnsureDirectoryPageUpgradesLegacyCatalogPage(t *testing.T) {
 		t.Fatalf("WriteAt() error = %v", err)
 	}
 
-	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
-		t.Fatalf("EnsureDirectoryPage() error = %v", err)
-	}
-
-	page := make([]byte, PageSize)
-	if _, err := dbFile.File().ReadAt(page, pageOffset(DirectoryControlPageID)); err != nil {
-		t.Fatalf("ReadAt() error = %v", err)
-	}
-	if err := ValidateDirectoryPage(page); err != nil {
-		t.Fatalf("ValidateDirectoryPage() error = %v", err)
-	}
-	catalog, err := LoadCatalogPageData(page)
-	if err != nil {
-		t.Fatalf("LoadCatalogPageData() error = %v", err)
-	}
-	if len(catalog.Tables) != 1 || catalog.Tables[0].Name != "users" {
-		t.Fatalf("catalog = %#v, want upgraded users table metadata", catalog)
+	if err := EnsureDirectoryPage(dbFile.File()); !errors.Is(err, errUnsupportedCatalogPage) {
+		t.Fatalf("EnsureDirectoryPage() error = %v, want %v", err, errUnsupportedCatalogPage)
 	}
 }
 

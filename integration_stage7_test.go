@@ -207,7 +207,7 @@ func TestStage7IndexEdgeCases(t *testing.T) {
 	})
 }
 
-func TestStage7OpenPreIndexCatalogStillWorks(t *testing.T) {
+func TestStage7OpenPreIndexCatalogFails(t *testing.T) {
 	path := testDBPath(t)
 	dbFile, pager := openRawStorage(t, path)
 	defer dbFile.Close()
@@ -234,14 +234,9 @@ func TestStage7OpenPreIndexCatalogStillWorks(t *testing.T) {
 	}))
 
 	db, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer db.Close()
-
-	assertQueryIntRows(t, db, "SELECT id FROM users", 1)
-	if db.tables["users"] == nil || len(db.tables["users"].Indexes) != 0 {
-		t.Fatalf("legacy db indexes = %#v, want empty", db.tables["users"])
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want legacy catalog payload rejection")
 	}
 }
 
