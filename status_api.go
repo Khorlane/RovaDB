@@ -60,6 +60,14 @@ type EngineSchemaInventory struct {
 	Indexes []EngineIndexInfo
 }
 
+// EngineSnapshot aggregates the existing engine diagnostic helpers.
+type EngineSnapshot struct {
+	Status    EngineStatus
+	Check     EngineCheckResult
+	PageUsage EnginePageUsage
+	Inventory EngineSchemaInventory
+}
+
 // EngineStatus returns a stable in-memory status snapshot for diagnostics.
 func (db *DB) EngineStatus() (EngineStatus, error) {
 	if db == nil {
@@ -252,6 +260,32 @@ func (db *DB) SchemaInventory() (EngineSchemaInventory, error) {
 		return left.TableName < right.TableName
 	})
 	return inventory, nil
+}
+
+// EngineSnapshot returns one deterministic aggregate diagnostic snapshot.
+func (db *DB) EngineSnapshot() (EngineSnapshot, error) {
+	status, err := db.EngineStatus()
+	if err != nil {
+		return EngineSnapshot{}, err
+	}
+	check, err := db.CheckEngineConsistency()
+	if err != nil {
+		return EngineSnapshot{}, err
+	}
+	pageUsage, err := db.PageUsage()
+	if err != nil {
+		return EngineSnapshot{}, err
+	}
+	inventory, err := db.SchemaInventory()
+	if err != nil {
+		return EngineSnapshot{}, err
+	}
+	return EngineSnapshot{
+		Status:    status,
+		Check:     check,
+		PageUsage: pageUsage,
+		Inventory: inventory,
+	}, nil
 }
 
 func statusUserTableCount(tables map[string]*executor.Table) int {

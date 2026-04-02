@@ -595,3 +595,135 @@ func TestSchemaInventoryOnClosedDBReturnsErrClosed(t *testing.T) {
 		t.Fatalf("SchemaInventory() error = %v, want ErrClosed", err)
 	}
 }
+
+func TestEngineSnapshotOnFreshDBMatchesHelpers(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	status, err := db.EngineStatus()
+	if err != nil {
+		t.Fatalf("EngineStatus() error = %v", err)
+	}
+	check, err := db.CheckEngineConsistency()
+	if err != nil {
+		t.Fatalf("CheckEngineConsistency() error = %v", err)
+	}
+	pageUsage, err := db.PageUsage()
+	if err != nil {
+		t.Fatalf("PageUsage() error = %v", err)
+	}
+	inventory, err := db.SchemaInventory()
+	if err != nil {
+		t.Fatalf("SchemaInventory() error = %v", err)
+	}
+
+	snapshot, err := db.EngineSnapshot()
+	if err != nil {
+		t.Fatalf("EngineSnapshot() error = %v", err)
+	}
+	if snapshot.Status != status {
+		t.Fatalf("EngineSnapshot().Status = %#v, want %#v", snapshot.Status, status)
+	}
+	if snapshot.Check != check {
+		t.Fatalf("EngineSnapshot().Check = %#v, want %#v", snapshot.Check, check)
+	}
+	if snapshot.PageUsage != pageUsage {
+		t.Fatalf("EngineSnapshot().PageUsage = %#v, want %#v", snapshot.PageUsage, pageUsage)
+	}
+	if len(snapshot.Inventory.Tables) != len(inventory.Tables) || len(snapshot.Inventory.Indexes) != len(inventory.Indexes) {
+		t.Fatalf("EngineSnapshot().Inventory = %#v, want %#v", snapshot.Inventory, inventory)
+	}
+	for i := range inventory.Tables {
+		if snapshot.Inventory.Tables[i] != inventory.Tables[i] {
+			t.Fatalf("EngineSnapshot().Inventory.Tables[%d] = %#v, want %#v", i, snapshot.Inventory.Tables[i], inventory.Tables[i])
+		}
+	}
+	for i := range inventory.Indexes {
+		if snapshot.Inventory.Indexes[i] != inventory.Indexes[i] {
+			t.Fatalf("EngineSnapshot().Inventory.Indexes[%d] = %#v, want %#v", i, snapshot.Inventory.Indexes[i], inventory.Indexes[i])
+		}
+	}
+}
+
+func TestEngineSnapshotReflectsSchemaAndDropChanges(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"CREATE INDEX idx_users_name ON users (name)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	snapshot, err := db.EngineSnapshot()
+	if err != nil {
+		t.Fatalf("EngineSnapshot() after create error = %v", err)
+	}
+	if snapshot.Status.TableCount != 1 || snapshot.Status.IndexCount != 1 {
+		t.Fatalf("EngineSnapshot().Status after create = %#v, want 1 table and 1 index", snapshot.Status)
+	}
+	if snapshot.Check.CheckedTableRoots != 1 || snapshot.Check.CheckedIndexRoots != 1 {
+		t.Fatalf("EngineSnapshot().Check after create = %#v, want 1 checked table root and 1 checked index root", snapshot.Check)
+	}
+	if len(snapshot.Inventory.Tables) != 1 || len(snapshot.Inventory.Indexes) != 1 {
+		t.Fatalf("EngineSnapshot().Inventory after create = %#v, want one table and one index", snapshot.Inventory)
+	}
+
+	indexRootPageID := db.tables["users"].IndexDefinition("idx_users_name").RootPageID
+	if _, err := db.Exec("DROP INDEX idx_users_name"); err != nil {
+		t.Fatalf("Exec(drop index) error = %v", err)
+	}
+	if _, err := db.Exec("DROP TABLE users"); err != nil {
+		t.Fatalf("Exec(drop table) error = %v", err)
+	}
+
+	snapshot, err = db.EngineSnapshot()
+	if err != nil {
+		t.Fatalf("EngineSnapshot() after drop error = %v", err)
+	}
+	if snapshot.Status.TableCount != 0 || snapshot.Status.IndexCount != 0 {
+		t.Fatalf("EngineSnapshot().Status after drop = %#v, want empty user schema", snapshot.Status)
+	}
+	if snapshot.Check.CheckedTableRoots != 0 || snapshot.Check.CheckedIndexRoots != 0 {
+		t.Fatalf("EngineSnapshot().Check after drop = %#v, want zero checked user roots", snapshot.Check)
+	}
+	if len(snapshot.Inventory.Tables) != 0 || len(snapshot.Inventory.Indexes) != 0 {
+		t.Fatalf("EngineSnapshot().Inventory after drop = %#v, want empty inventory", snapshot.Inventory)
+	}
+	if snapshot.PageUsage.FreePages == 0 {
+		t.Fatalf("EngineSnapshot().PageUsage = %#v, want freed pages after drop", snapshot.PageUsage)
+	}
+	if snapshot.Check.FreeListHead != indexRootPageID && snapshot.Check.FreeListHead == 0 {
+		t.Fatalf("EngineSnapshot().Check.FreeListHead = %d, want nonzero free-list head after drop", snapshot.Check.FreeListHead)
+	}
+}
+
+func TestEngineSnapshotOnClosedDBReturnsErrClosed(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	_, err = db.EngineSnapshot()
+	if !errors.Is(err, ErrClosed) {
+		t.Fatalf("EngineSnapshot() error = %v, want ErrClosed", err)
+	}
+}
