@@ -222,9 +222,7 @@ func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint3
 	if cat == nil {
 		cat = &CatalogData{}
 	}
-	rootState := BuildDirectoryRootStateFromCatalog(cat)
-	legacyRootMappings := rootState.RootMappings
-	rootIDMappings := rootState.RootIDMappings
+	rootIDMappings := BuildDirectoryRootIDMappings(cat)
 	rootIDPayload, err := encodeDirectoryRootIDMappings(rootIDMappings)
 	if err != nil {
 		return nil, err
@@ -274,9 +272,6 @@ func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint3
 		}
 	}
 
-	if catalogNeedsLegacyNameRootMappings(cat) {
-		return buildLegacyDirectoryCatalogPage(buf, CurrentDBFormatVersion, freeListHead, legacyRootMappings, rootIDMappings, checkpointMeta)
-	}
 	return buildDirectoryCatalogPage(buf, CurrentDBFormatVersion, freeListHead, rootIDMappings, checkpointMeta)
 }
 
@@ -424,21 +419,4 @@ func appendCatalogIndex(buf []byte, index CatalogIndex, columns []CatalogColumn)
 		}
 	}
 	return buf, nil
-}
-
-func catalogNeedsLegacyNameRootMappings(cat *CatalogData) bool {
-	if cat == nil {
-		return false
-	}
-	for _, table := range cat.Tables {
-		if table.RootPageID != 0 && table.TableID == 0 {
-			return true
-		}
-		for _, index := range table.Indexes {
-			if index.RootPageID != 0 && index.IndexID == 0 {
-				return true
-			}
-		}
-	}
-	return false
 }

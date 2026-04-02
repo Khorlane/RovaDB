@@ -381,7 +381,7 @@ func TestOpenFailsOnMalformedDirectoryPage(t *testing.T) {
 	}
 }
 
-func TestOpenFallsBackToLegacyNameBasedTableRootMappings(t *testing.T) {
+func TestOpenFailsOnLegacyNameBasedDirectoryMappings(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
@@ -391,74 +391,23 @@ func TestOpenFallsBackToLegacyNameBasedTableRootMappings(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	usersRoot := uint32(db.tables["users"].RootPageID())
-	nameMappings := allNameRootMappingsForOpenTest(db)
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 
 	rawDB, _ := openRawStorage(t, path)
-	if err := storage.WriteDirectoryRootIDMappings(rawDB.File(), nil); err != nil {
+	if err := injectLegacyNameMappingsForOpenTest(rawDB.File(), []byte{storage.DirectoryRootMappingObjectTable, 5, 0, 'u', 's', 'e', 'r', 's', 0, 0, 2, 0, 0, 0}); err != nil {
 		_ = rawDB.Close()
-		t.Fatalf("WriteDirectoryRootIDMappings() error = %v", err)
-	}
-	if err := storage.WriteDirectoryRootMappings(rawDB.File(), nameMappings); err != nil {
-		_ = rawDB.Close()
-		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
+		t.Fatalf("injectLegacyNameMappingsForOpenTest() error = %v", err)
 	}
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
 
 	db, err = Open(path)
-	if err != nil {
-		t.Fatalf("reopen Open() error = %v", err)
-	}
-	defer db.Close()
-	if got := uint32(db.tables["users"].RootPageID()); got != usersRoot {
-		t.Fatalf("reopened users.RootPageID() = %d, want %d", got, usersRoot)
-	}
-}
-
-func TestOpenFallsBackToLegacyNameBasedIndexRootMappings(t *testing.T) {
-	path := testDBPath(t)
-
-	db, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	if _, err := db.Exec("CREATE TABLE users (name TEXT)"); err != nil {
-		t.Fatalf("Exec(create table) error = %v", err)
-	}
-	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
-		t.Fatalf("Exec(create index) error = %v", err)
-	}
-	indexRoot := db.tables["users"].IndexDefinition("idx_users_name").RootPageID
-	nameMappings := allNameRootMappingsForOpenTest(db)
-	if err := db.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-
-	rawDB, _ := openRawStorage(t, path)
-	if err := storage.WriteDirectoryRootIDMappings(rawDB.File(), nil); err != nil {
-		_ = rawDB.Close()
-		t.Fatalf("WriteDirectoryRootIDMappings() error = %v", err)
-	}
-	if err := storage.WriteDirectoryRootMappings(rawDB.File(), nameMappings); err != nil {
-		_ = rawDB.Close()
-		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
-	}
-	if err := rawDB.Close(); err != nil {
-		t.Fatalf("rawDB.Close() error = %v", err)
-	}
-
-	db, err = Open(path)
-	if err != nil {
-		t.Fatalf("reopen Open() error = %v", err)
-	}
-	defer db.Close()
-	if got := db.tables["users"].IndexDefinition("idx_users_name").RootPageID; got != indexRoot {
-		t.Fatalf("reopened index RootPageID = %d, want %d", got, indexRoot)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("reopen Open() error = nil, want legacy directory mapping rejection")
 	}
 }
 
@@ -488,10 +437,6 @@ func TestDirectoryRootIDMappingsPersistAcrossReopen(t *testing.T) {
 	}
 
 	rawDB, _ := openRawStorage(t, path)
-	nameMappings, err := storage.ReadDirectoryRootMappings(rawDB.File())
-	if err != nil {
-		t.Fatalf("ReadDirectoryRootMappings() error = %v", err)
-	}
 	idMappings, err := storage.ReadDirectoryRootIDMappings(rawDB.File())
 	if err != nil {
 		t.Fatalf("ReadDirectoryRootIDMappings() error = %v", err)
@@ -499,10 +444,6 @@ func TestDirectoryRootIDMappingsPersistAcrossReopen(t *testing.T) {
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
-	if len(nameMappings) != 0 {
-		t.Fatalf("len(ReadDirectoryRootMappings()) = %d, want 0 on new writes", len(nameMappings))
-	}
-
 	foundTable := false
 	foundIndex := false
 	for _, mapping := range idMappings {
@@ -575,11 +516,6 @@ func TestDirectoryWritePathWritesIDMappingsOnly(t *testing.T) {
 		_ = rawDB.Close()
 		t.Fatalf("LoadCatalog() error = %v", err)
 	}
-	nameMappings, err := storage.ReadDirectoryRootMappings(rawDB.File())
-	if err != nil {
-		_ = rawDB.Close()
-		t.Fatalf("ReadDirectoryRootMappings() error = %v", err)
-	}
 	idMappings, err := storage.ReadDirectoryRootIDMappings(rawDB.File())
 	if err != nil {
 		_ = rawDB.Close()
@@ -589,9 +525,6 @@ func TestDirectoryWritePathWritesIDMappingsOnly(t *testing.T) {
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
 
-	if len(nameMappings) != 0 {
-		t.Fatalf("len(nameMappings) = %d, want 0 on new writes", len(nameMappings))
-	}
 	if catalog.Version != 6 {
 		t.Fatalf("catalog.Version = %d, want 6", catalog.Version)
 	}
@@ -624,7 +557,7 @@ func TestDirectoryWritePathWritesIDMappingsOnly(t *testing.T) {
 	}
 }
 
-func TestOpenIgnoresLegacyNameMappingsWhenIDMappingsPresent(t *testing.T) {
+func TestOpenFailsWhenLegacyNameMappingsPresentAlongsideIDMappings(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
@@ -637,38 +570,29 @@ func TestOpenIgnoresLegacyNameMappingsWhenIDMappingsPresent(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE teams (id INT)"); err != nil {
 		t.Fatalf("Exec(create teams) error = %v", err)
 	}
-	usersRoot := uint32(db.tables["users"].RootPageID())
-	teamsRoot := uint32(db.tables["teams"].RootPageID())
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 
 	rawDB, _ := openRawStorage(t, path)
-	if err := storage.WriteDirectoryRootMappings(rawDB.File(), []storage.DirectoryRootMapping{
-		{ObjectType: storage.DirectoryRootMappingObjectTable, TableName: "users", RootPageID: teamsRoot},
-		{ObjectType: storage.DirectoryRootMappingObjectTable, TableName: "teams", RootPageID: teamsRoot},
+	if err := injectLegacyNameMappingsForOpenTest(rawDB.File(), []byte{
+		storage.DirectoryRootMappingObjectTable, 5, 0, 'u', 's', 'e', 'r', 's', 0, 0, 2, 0, 0, 0,
 	}); err != nil {
 		_ = rawDB.Close()
-		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
+		t.Fatalf("injectLegacyNameMappingsForOpenTest() error = %v", err)
 	}
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
 
 	db, err = Open(path)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer db.Close()
-	if got := uint32(db.tables["users"].RootPageID()); got != usersRoot {
-		t.Fatalf("users.RootPageID() = %d, want %d from ID mappings", got, usersRoot)
-	}
-	if got := uint32(db.tables["teams"].RootPageID()); got != teamsRoot {
-		t.Fatalf("teams.RootPageID() = %d, want %d from ID mappings", got, teamsRoot)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want legacy directory mapping rejection")
 	}
 }
 
-func TestOpenFailsOnDirectoryRootMappingMismatch(t *testing.T) {
+func TestOpenFailsWhenNewCatalogPayloadHasNoDirectoryRoots(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
@@ -686,58 +610,6 @@ func TestOpenFailsOnDirectoryRootMappingMismatch(t *testing.T) {
 	if err := storage.WriteDirectoryRootIDMappings(rawDB.File(), nil); err != nil {
 		_ = rawDB.Close()
 		t.Fatalf("WriteDirectoryRootIDMappings() error = %v", err)
-	}
-	if err := storage.WriteDirectoryRootMappings(rawDB.File(), []storage.DirectoryRootMapping{{
-		ObjectType: storage.DirectoryRootMappingObjectTable,
-		TableName:  "users",
-		RootPageID: 999,
-	}}); err != nil {
-		_ = rawDB.Close()
-		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
-	}
-	if err := rawDB.Close(); err != nil {
-		t.Fatalf("rawDB.Close() error = %v", err)
-	}
-
-	db, err = Open(path)
-	if err == nil {
-		_ = db.Close()
-		t.Fatal("Open() error = nil, want directory root mapping mismatch failure")
-	}
-}
-
-func TestOpenFailsWhenNewCatalogPayloadHasNoDirectoryRoots(t *testing.T) {
-	path := testDBPath(t)
-
-	db, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	if _, err := db.Exec("CREATE TABLE users (name TEXT)"); err != nil {
-		t.Fatalf("Exec(create table) error = %v", err)
-	}
-	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
-		t.Fatalf("Exec(create index) error = %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-
-	rawDB, pager := openRawStorage(t, path)
-	catalog, err := storage.LoadCatalog(pager)
-	if err != nil {
-		t.Fatalf("LoadCatalog() error = %v", err)
-	}
-	if catalog.Version != 6 {
-		t.Fatalf("catalog.Version = %d, want 6", catalog.Version)
-	}
-	if err := storage.WriteDirectoryRootIDMappings(rawDB.File(), nil); err != nil {
-		_ = rawDB.Close()
-		t.Fatalf("WriteDirectoryRootIDMappings() error = %v", err)
-	}
-	if err := storage.WriteDirectoryRootMappings(rawDB.File(), nil); err != nil {
-		_ = rawDB.Close()
-		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
 	}
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
@@ -858,25 +730,20 @@ func TestOpenFailsWhenTableRootMappingPointsToIndexPage(t *testing.T) {
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
+	tableID := db.tables["users"].TableID
 	indexRoot := db.tables["users"].IndexDefinition("idx_users_name").RootPageID
-	nameMappings := allNameRootMappingsForOpenTest(db)
-	for i := range nameMappings {
-		if nameMappings[i].ObjectType == storage.DirectoryRootMappingObjectTable && nameMappings[i].TableName == "users" {
-			nameMappings[i].RootPageID = indexRoot
-		}
-	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 
 	rawDB, _ := openRawStorage(t, path)
-	if err := storage.WriteDirectoryRootIDMappings(rawDB.File(), nil); err != nil {
+	if err := storage.WriteDirectoryRootIDMappings(rawDB.File(), []storage.DirectoryRootIDMapping{{
+		ObjectType: storage.DirectoryRootMappingObjectTable,
+		ObjectID:   tableID,
+		RootPageID: indexRoot,
+	}}); err != nil {
 		_ = rawDB.Close()
 		t.Fatalf("WriteDirectoryRootIDMappings() error = %v", err)
-	}
-	if err := storage.WriteDirectoryRootMappings(rawDB.File(), nameMappings); err != nil {
-		_ = rawDB.Close()
-		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
 	}
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
@@ -903,21 +770,19 @@ func TestOpenFailsWhenIndexRootMappingPointsToTablePage(t *testing.T) {
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
+	tableID := db.tables["users"].TableID
+	indexDef := db.tables["users"].IndexDefinition("idx_users_name")
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 
 	rawDB, _ := openRawStorage(t, path)
-	if err := storage.WriteDirectoryRootIDMappings(rawDB.File(), nil); err != nil {
-		_ = rawDB.Close()
-		t.Fatalf("WriteDirectoryRootIDMappings() error = %v", err)
-	}
-	if err := storage.WriteDirectoryRootMappings(rawDB.File(), []storage.DirectoryRootMapping{
-		{ObjectType: storage.DirectoryRootMappingObjectTable, TableName: "users", RootPageID: tableRoot},
-		{ObjectType: storage.DirectoryRootMappingObjectIndex, TableName: "users", IndexName: "idx_users_name", RootPageID: tableRoot},
+	if err := storage.WriteDirectoryRootIDMappings(rawDB.File(), []storage.DirectoryRootIDMapping{
+		{ObjectType: storage.DirectoryRootMappingObjectTable, ObjectID: tableID, RootPageID: tableRoot},
+		{ObjectType: storage.DirectoryRootMappingObjectIndex, ObjectID: indexDef.IndexID, RootPageID: tableRoot},
 	}); err != nil {
 		_ = rawDB.Close()
-		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
+		t.Fatalf("WriteDirectoryRootIDMappings() error = %v", err)
 	}
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
@@ -1518,35 +1383,6 @@ func appendFreePageForTest(t *testing.T, pager *storage.Pager, next storage.Page
 	return pageID
 }
 
-func allNameRootMappingsForOpenTest(db *DB) []storage.DirectoryRootMapping {
-	if db == nil {
-		return nil
-	}
-	mappings := make([]storage.DirectoryRootMapping, 0)
-	for _, table := range db.tables {
-		if table == nil || table.RootPageID() == 0 {
-			continue
-		}
-		mappings = append(mappings, storage.DirectoryRootMapping{
-			ObjectType: storage.DirectoryRootMappingObjectTable,
-			TableName:  table.Name,
-			RootPageID: uint32(table.RootPageID()),
-		})
-		for _, index := range table.IndexDefs {
-			if index.RootPageID == 0 {
-				continue
-			}
-			mappings = append(mappings, storage.DirectoryRootMapping{
-				ObjectType: storage.DirectoryRootMappingObjectIndex,
-				TableName:  table.Name,
-				IndexName:  index.Name,
-				RootPageID: index.RootPageID,
-			})
-		}
-	}
-	return mappings
-}
-
 func buildLegacyV5DirectoryPageForOpenTest(cat *storage.CatalogData) []byte {
 	page := storage.InitDirectoryPage(uint32(storage.DirectoryControlPageID), storage.CurrentDBFormatVersion)
 	payload := make([]byte, 0, storage.PageSize)
@@ -1602,4 +1438,18 @@ func appendUint16ForOpenTest(buf []byte, value uint16) []byte {
 func appendStringForOpenTest(buf []byte, value string) []byte {
 	buf = appendUint16ForOpenTest(buf, uint16(len(value)))
 	return append(buf, value...)
+}
+
+func injectLegacyNameMappingsForOpenTest(file *os.File, payload []byte) error {
+	page := make([]byte, storage.PageSize)
+	if _, err := file.ReadAt(page, storage.HeaderSize); err != nil {
+		return err
+	}
+	binary.LittleEndian.PutUint32(page[40:44], 1)
+	binary.LittleEndian.PutUint32(page[44:48], uint32(len(payload)))
+	copy(page[48:], payload)
+	if _, err := file.WriteAt(page, storage.HeaderSize); err != nil {
+		return err
+	}
+	return file.Sync()
 }

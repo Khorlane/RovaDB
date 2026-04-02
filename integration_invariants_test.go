@@ -26,6 +26,7 @@ func TestOpenRejectsExactStorageRowCountMismatch(t *testing.T) {
 		Tables: []storage.CatalogTable{
 			{
 				Name:       "users",
+				TableID:    1,
 				RootPageID: uint32(rootPage.ID()),
 				RowCount:   2,
 				Columns: []storage.CatalogColumn{

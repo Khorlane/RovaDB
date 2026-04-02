@@ -28,14 +28,6 @@ const (
 	DirectoryRootMappingObjectIndex
 )
 
-// DirectoryRootMapping is the durable physical root-page mapping entry.
-type DirectoryRootMapping struct {
-	ObjectType uint8
-	TableName  string
-	IndexName  string
-	RootPageID uint32
-}
-
 // DirectoryRootIDMapping is the durable physical root-page mapping keyed by stable logical ID.
 type DirectoryRootIDMapping struct {
 	ObjectType uint8
@@ -53,15 +45,8 @@ type DirectoryCheckpointMetadata struct {
 // DirectoryControlState is the decoded durable control-plane state from page 0.
 type DirectoryControlState struct {
 	FreeListHead   uint32
-	RootMappings   []DirectoryRootMapping
 	RootIDMappings []DirectoryRootIDMapping
 	CheckpointMeta DirectoryCheckpointMetadata
-}
-
-// DirectoryRootState is the authoritative durable root-mapping state for page 0.
-type DirectoryRootState struct {
-	RootMappings   []DirectoryRootMapping
-	RootIDMappings []DirectoryRootIDMapping
 }
 
 // InitDirectoryPage initializes the durable directory/control page.
@@ -124,13 +109,16 @@ func ValidateDirectoryPage(page []byte) error {
 		return errCorruptedDirectoryPage
 	}
 	rootMapBytes := binary.LittleEndian.Uint32(page[directoryBodyOffsetRootMapBytes : directoryBodyOffsetRootMapBytes+4])
+	if rootMapBytes != 0 || binary.LittleEndian.Uint32(page[directoryBodyOffsetRootMapCount:directoryBodyOffsetRootMapCount+4]) != 0 {
+		return errUnsupportedDirectoryPage
+	}
 	if directoryCatalogOffset+int(rootMapBytes) > PageSize {
 		return errCorruptedDirectoryPage
 	}
 	return nil
 }
 
-// EnsureDirectoryPage initializes or upgrades the durable directory page in-place.
+// EnsureDirectoryPage initializes the durable directory page in-place.
 func EnsureDirectoryPage(file *os.File) error {
 	if file == nil {
 		return errCorruptedDirectoryPage
@@ -148,16 +136,7 @@ func EnsureDirectoryPage(file *os.File) error {
 	} else if looksLikeWrappedDirectoryPage(page) {
 		return err
 	}
-
-	cat, err := loadCatalogPayload(page)
-	if err != nil {
-		return err
-	}
-	upgraded, err := BuildCatalogPageData(cat)
-	if err != nil {
-		return err
-	}
-	return writeDirectoryPage(file, upgraded)
+	return errCorruptedDirectoryPage
 }
 
 // ReadDirectoryPage reads and validates the durable directory page.
@@ -239,15 +218,6 @@ func SetDirectoryLastCheckpointPageCount(page []byte, n uint32) error {
 	return rewriteDirectoryCheckpointMetadata(page, meta)
 }
 
-// ReadDirectoryRootMappings reads the durable root mappings from the directory page.
-func ReadDirectoryRootMappings(file *os.File) ([]DirectoryRootMapping, error) {
-	page, err := ReadDirectoryPage(file)
-	if err != nil {
-		return nil, err
-	}
-	return directoryRootMappings(page)
-}
-
 // ReadDirectoryCheckpointMetadata reads the durable checkpoint metadata from the directory page.
 func ReadDirectoryCheckpointMetadata(file *os.File) (DirectoryCheckpointMetadata, error) {
 	page, err := ReadDirectoryPage(file)
@@ -278,51 +248,6 @@ func ValidateDirectoryControlState(file *os.File, state DirectoryControlState) e
 		}
 		pageType := PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType : pageHeaderOffsetPageType+2]))
 		if IsValidPageType(pageType) && pageType != PageTypeFreePage {
-			return errCorruptedDirectoryPage
-		}
-	}
-
-	seenTableMappings := make(map[string]struct{}, len(state.RootMappings))
-	seenIndexMappings := make(map[string]struct{}, len(state.RootMappings))
-	for _, mapping := range state.RootMappings {
-		if mapping.RootPageID == 0 {
-			return errCorruptedDirectoryPage
-		}
-		if mapping.RootPageID == uint32(DirectoryControlPageID) {
-			return errCorruptedDirectoryPage
-		}
-
-		page, err := readStoragePage(file, PageID(mapping.RootPageID))
-		if err != nil {
-			return err
-		}
-		pageType := PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType : pageHeaderOffsetPageType+2]))
-
-		switch mapping.ObjectType {
-		case DirectoryRootMappingObjectTable:
-			if mapping.TableName == "" || mapping.IndexName != "" {
-				return errCorruptedDirectoryPage
-			}
-			if IsValidPageType(pageType) && pageType != PageTypeTable {
-				return errCorruptedTablePage
-			}
-			if _, exists := seenTableMappings[mapping.TableName]; exists {
-				return errCorruptedDirectoryPage
-			}
-			seenTableMappings[mapping.TableName] = struct{}{}
-		case DirectoryRootMappingObjectIndex:
-			if mapping.TableName == "" || mapping.IndexName == "" {
-				return errCorruptedDirectoryPage
-			}
-			if IsValidPageType(pageType) && pageType != PageTypeIndexLeaf && pageType != PageTypeIndexInternal {
-				return errCorruptedIndexPage
-			}
-			key := mapping.TableName + "\x00" + mapping.IndexName
-			if _, exists := seenIndexMappings[key]; exists {
-				return errCorruptedDirectoryPage
-			}
-			seenIndexMappings[key] = struct{}{}
-		default:
 			return errCorruptedDirectoryPage
 		}
 	}
@@ -371,35 +296,6 @@ func ValidateDirectoryControlState(file *os.File, state DirectoryControlState) e
 	return nil
 }
 
-// WriteDirectoryRootMappings rewrites the legacy name-based root mappings while preserving other directory state.
-func WriteDirectoryRootMappings(file *os.File, mappings []DirectoryRootMapping) error {
-	page, err := ReadDirectoryPage(file)
-	if err != nil {
-		return err
-	}
-	catalogPayload, err := directoryCatalogPayload(page)
-	if err != nil {
-		return err
-	}
-	freeListHead, err := DirectoryFreeListHead(page)
-	if err != nil {
-		return err
-	}
-	checkpointMeta, err := directoryCheckpointMetadata(page)
-	if err != nil {
-		return err
-	}
-	idMappings, err := directoryRootIDMappings(page)
-	if err != nil {
-		return err
-	}
-	rebuilt, err := buildLegacyDirectoryCatalogPage(catalogPayload, CurrentDBFormatVersion, freeListHead, mappings, idMappings, checkpointMeta)
-	if err != nil {
-		return err
-	}
-	return WriteDirectoryPage(file, rebuilt)
-}
-
 // WriteDirectoryRootIDMappings rewrites the durable ID-based root mappings while preserving other directory state.
 func WriteDirectoryRootIDMappings(file *os.File, mappings []DirectoryRootIDMapping) error {
 	page, err := ReadDirectoryPage(file)
@@ -425,21 +321,18 @@ func WriteDirectoryRootIDMappings(file *os.File, mappings []DirectoryRootIDMappi
 	return WriteDirectoryPage(file, rebuilt)
 }
 
-// BuildDirectoryRootStateFromCatalog derives both durable root-mapping sections from one schema snapshot.
-func BuildDirectoryRootStateFromCatalog(cat *CatalogData) DirectoryRootState {
+// BuildDirectoryRootIDMappings derives the durable physical root mappings keyed by stable logical IDs.
+func BuildDirectoryRootIDMappings(cat *CatalogData) []DirectoryRootIDMapping {
 	if cat == nil || len(cat.Tables) == 0 {
-		return DirectoryRootState{}
+		return nil
 	}
 
 	type tableRoot struct {
 		tableID    uint32
-		tableName  string
 		rootPageID uint32
 	}
 	type indexRoot struct {
 		indexID    uint32
-		tableName  string
-		indexName  string
 		rootPageID uint32
 	}
 
@@ -449,7 +342,6 @@ func BuildDirectoryRootStateFromCatalog(cat *CatalogData) DirectoryRootState {
 		if table.RootPageID != 0 {
 			tableRoots = append(tableRoots, tableRoot{
 				tableID:    table.TableID,
-				tableName:  table.Name,
 				rootPageID: table.RootPageID,
 			})
 		}
@@ -459,37 +351,9 @@ func BuildDirectoryRootStateFromCatalog(cat *CatalogData) DirectoryRootState {
 			}
 			indexRoots = append(indexRoots, indexRoot{
 				indexID:    index.IndexID,
-				tableName:  table.Name,
-				indexName:  index.Name,
 				rootPageID: index.RootPageID,
 			})
 		}
-	}
-
-	nameMappings := make([]DirectoryRootMapping, 0, len(tableRoots)+len(indexRoots))
-	sort.Slice(tableRoots, func(i, j int) bool {
-		return tableRoots[i].tableName < tableRoots[j].tableName
-	})
-	for _, table := range tableRoots {
-		nameMappings = append(nameMappings, DirectoryRootMapping{
-			ObjectType: DirectoryRootMappingObjectTable,
-			TableName:  table.tableName,
-			RootPageID: table.rootPageID,
-		})
-	}
-	sort.Slice(indexRoots, func(i, j int) bool {
-		if indexRoots[i].tableName != indexRoots[j].tableName {
-			return indexRoots[i].tableName < indexRoots[j].tableName
-		}
-		return indexRoots[i].indexName < indexRoots[j].indexName
-	})
-	for _, index := range indexRoots {
-		nameMappings = append(nameMappings, DirectoryRootMapping{
-			ObjectType: DirectoryRootMappingObjectIndex,
-			TableName:  index.tableName,
-			IndexName:  index.indexName,
-			RootPageID: index.rootPageID,
-		})
 	}
 
 	idMappings := make([]DirectoryRootIDMapping, 0, len(tableRoots)+len(indexRoots))
@@ -519,105 +383,7 @@ func BuildDirectoryRootStateFromCatalog(cat *CatalogData) DirectoryRootState {
 			RootPageID: index.rootPageID,
 		})
 	}
-
-	return DirectoryRootState{
-		RootMappings:   nameMappings,
-		RootIDMappings: idMappings,
-	}
-}
-
-// BuildDirectoryRootMappings derives the durable physical root mappings from catalog metadata.
-func BuildDirectoryRootMappings(cat *CatalogData) []DirectoryRootMapping {
-	return BuildDirectoryRootStateFromCatalog(cat).RootMappings
-}
-
-// BuildDirectoryRootIDMappings derives the durable physical root mappings keyed by stable logical IDs.
-func BuildDirectoryRootIDMappings(cat *CatalogData) []DirectoryRootIDMapping {
-	return BuildDirectoryRootStateFromCatalog(cat).RootIDMappings
-}
-
-// ApplyDirectoryRootMappings overlays directory-owned physical roots onto catalog metadata.
-func ApplyDirectoryRootMappings(cat *CatalogData, mappings []DirectoryRootMapping) (*CatalogData, error) {
-	if cat == nil || len(mappings) == 0 {
-		return cat, nil
-	}
-	strictRoots := cat.Version >= catalogVersion
-
-	tableMappings := make(map[string]uint32)
-	indexMappings := make(map[string]uint32)
-	for _, mapping := range mappings {
-		switch mapping.ObjectType {
-		case DirectoryRootMappingObjectTable:
-			if mapping.TableName == "" || mapping.IndexName != "" || mapping.RootPageID == 0 {
-				return nil, errCorruptedDirectoryPage
-			}
-			if _, exists := tableMappings[mapping.TableName]; exists {
-				return nil, errCorruptedDirectoryPage
-			}
-			tableMappings[mapping.TableName] = mapping.RootPageID
-		case DirectoryRootMappingObjectIndex:
-			if mapping.TableName == "" || mapping.IndexName == "" || mapping.RootPageID == 0 {
-				return nil, errCorruptedDirectoryPage
-			}
-			key := mapping.TableName + "\x00" + mapping.IndexName
-			if _, exists := indexMappings[key]; exists {
-				return nil, errCorruptedDirectoryPage
-			}
-			indexMappings[key] = mapping.RootPageID
-		default:
-			return nil, errCorruptedDirectoryPage
-		}
-	}
-
-	applied := &CatalogData{Tables: make([]CatalogTable, 0, len(cat.Tables))}
-	for _, table := range cat.Tables {
-		cloned := CatalogTable{
-			Name:       table.Name,
-			TableID:    table.TableID,
-			RootPageID: table.RootPageID,
-			RowCount:   table.RowCount,
-			Columns:    append([]CatalogColumn(nil), table.Columns...),
-			Indexes:    make([]CatalogIndex, 0, len(table.Indexes)),
-		}
-		mappedRootPageID, hasTableMapping := tableMappings[table.Name]
-		if hasTableMapping {
-			if cloned.RootPageID != 0 && cloned.RootPageID != mappedRootPageID {
-				return nil, errCorruptedDirectoryPage
-			}
-			cloned.RootPageID = mappedRootPageID
-			delete(tableMappings, table.Name)
-		} else if strictRoots {
-			return nil, errCorruptedDirectoryPage
-		}
-
-		for _, index := range table.Indexes {
-			clonedIndex := CatalogIndex{
-				Name:       index.Name,
-				Unique:     index.Unique,
-				IndexID:    index.IndexID,
-				RootPageID: index.RootPageID,
-				Columns:    append([]CatalogIndexColumn(nil), index.Columns...),
-			}
-			key := table.Name + "\x00" + index.Name
-			mappedRootPageID, hasIndexMapping := indexMappings[key]
-			if hasIndexMapping {
-				if clonedIndex.RootPageID != 0 && clonedIndex.RootPageID != mappedRootPageID {
-					return nil, errCorruptedDirectoryPage
-				}
-				clonedIndex.RootPageID = mappedRootPageID
-				delete(indexMappings, key)
-			} else if strictRoots {
-				return nil, errCorruptedDirectoryPage
-			}
-			cloned.Indexes = append(cloned.Indexes, clonedIndex)
-		}
-		applied.Tables = append(applied.Tables, cloned)
-	}
-
-	if len(tableMappings) != 0 || len(indexMappings) != 0 {
-		return nil, errCorruptedDirectoryPage
-	}
-	return applied, nil
+	return idMappings
 }
 
 // ApplyDirectoryRootIDMappings overlays directory-owned physical roots onto catalog metadata by stable logical ID.
@@ -702,14 +468,6 @@ func ApplyDirectoryRootIDMappings(cat *CatalogData, mappings []DirectoryRootIDMa
 }
 
 func buildDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, freeListHead uint32, idMappings []DirectoryRootIDMapping, checkpointMeta DirectoryCheckpointMetadata) ([]byte, error) {
-	return buildLegacyDirectoryCatalogPage(catalogPayload, formatVersion, freeListHead, nil, idMappings, checkpointMeta)
-}
-
-func buildLegacyDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, freeListHead uint32, mappings []DirectoryRootMapping, idMappings []DirectoryRootIDMapping, checkpointMeta DirectoryCheckpointMetadata) ([]byte, error) {
-	rootMapPayload, err := encodeDirectoryRootMappings(mappings)
-	if err != nil {
-		return nil, err
-	}
 	rootIDPayload, err := encodeDirectoryRootIDMappings(idMappings)
 	if err != nil {
 		return nil, err
@@ -718,15 +476,12 @@ func buildLegacyDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32
 	if len(rootIDPayload) > 0 {
 		rootIDTrailerSize = directoryRootIDTrailerHeaderSize + len(rootIDPayload)
 	}
-	if len(catalogPayload)+len(rootMapPayload)+directoryCheckpointMetadataSize+rootIDTrailerSize > PageSize-directoryCatalogOffset {
+	if len(catalogPayload)+directoryCheckpointMetadataSize+rootIDTrailerSize > PageSize-directoryCatalogOffset {
 		return nil, errCatalogTooLarge
 	}
 	page := InitDirectoryPage(uint32(DirectoryControlPageID), formatVersion)
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetFreeListHead:directoryBodyOffsetFreeListHead+4], freeListHead)
-	binary.LittleEndian.PutUint32(page[directoryBodyOffsetRootMapCount:directoryBodyOffsetRootMapCount+4], uint32(len(mappings)))
-	binary.LittleEndian.PutUint32(page[directoryBodyOffsetRootMapBytes:directoryBodyOffsetRootMapBytes+4], uint32(len(rootMapPayload)))
-	copy(page[directoryCatalogOffset:], rootMapPayload)
-	catalogStart := directoryCatalogOffset + len(rootMapPayload)
+	catalogStart := directoryCatalogOffset
 	copy(page[catalogStart:], catalogPayload)
 	checkpointOffset := catalogStart + len(catalogPayload)
 	binary.LittleEndian.PutUint64(page[checkpointOffset:checkpointOffset+8], checkpointMeta.LastCheckpointLSN)
@@ -748,8 +503,7 @@ func directoryCatalogPayload(page []byte) ([]byte, error) {
 	if err := ValidateDirectoryPage(page); err != nil {
 		return nil, err
 	}
-	rootMapBytes := binary.LittleEndian.Uint32(page[directoryBodyOffsetRootMapBytes : directoryBodyOffsetRootMapBytes+4])
-	start := directoryCatalogOffset + int(rootMapBytes)
+	start := directoryCatalogOffset
 	length, _, err := decodeCatalogPayload(page[start:])
 	if err != nil {
 		return nil, err
@@ -796,67 +550,6 @@ func looksLikeWrappedDirectoryPage(page []byte) bool {
 	}
 	return binary.LittleEndian.Uint32(page[pageHeaderOffsetPageID:pageHeaderOffsetPageID+4]) == uint32(DirectoryControlPageID) &&
 		PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType:pageHeaderOffsetPageType+2])) == PageTypeDirectory
-}
-
-func directoryRootMappings(page []byte) ([]DirectoryRootMapping, error) {
-	if err := ValidateDirectoryPage(page); err != nil {
-		return nil, err
-	}
-
-	rootMapCount := binary.LittleEndian.Uint32(page[directoryBodyOffsetRootMapCount : directoryBodyOffsetRootMapCount+4])
-	rootMapBytes := binary.LittleEndian.Uint32(page[directoryBodyOffsetRootMapBytes : directoryBodyOffsetRootMapBytes+4])
-	if rootMapCount == 0 && rootMapBytes == 0 {
-		return nil, nil
-	}
-	if rootMapCount == 0 || rootMapBytes == 0 {
-		return nil, errCorruptedDirectoryPage
-	}
-
-	payload := page[directoryCatalogOffset : directoryCatalogOffset+int(rootMapBytes)]
-	mappings := make([]DirectoryRootMapping, 0, rootMapCount)
-	offset := 0
-	for i := uint32(0); i < rootMapCount; i++ {
-		if offset >= len(payload) {
-			return nil, errCorruptedDirectoryPage
-		}
-		objectType := payload[offset]
-		offset++
-		tableName, ok := readString(payload, &offset)
-		if !ok || tableName == "" {
-			return nil, errCorruptedDirectoryPage
-		}
-		indexName, ok := readString(payload, &offset)
-		if !ok {
-			return nil, errCorruptedDirectoryPage
-		}
-		rootPageID, ok := readUint32(payload, &offset)
-		if !ok || rootPageID == 0 {
-			return nil, errCorruptedDirectoryPage
-		}
-		mapping := DirectoryRootMapping{
-			ObjectType: objectType,
-			TableName:  tableName,
-			IndexName:  indexName,
-			RootPageID: rootPageID,
-		}
-		switch objectType {
-		case DirectoryRootMappingObjectTable:
-			if indexName != "" {
-				return nil, errCorruptedDirectoryPage
-			}
-		case DirectoryRootMappingObjectIndex:
-			if indexName == "" {
-				return nil, errCorruptedDirectoryPage
-			}
-		default:
-			return nil, errCorruptedDirectoryPage
-		}
-		mappings = append(mappings, mapping)
-	}
-	if offset != len(payload) {
-		return nil, errCorruptedDirectoryPage
-	}
-	return mappings, nil
 }
 
 func directoryRootIDMappings(page []byte) ([]DirectoryRootIDMapping, error) {
@@ -918,36 +611,6 @@ func directoryRootIDMappings(page []byte) ([]DirectoryRootIDMapping, error) {
 	return mappings, nil
 }
 
-func encodeDirectoryRootMappings(mappings []DirectoryRootMapping) ([]byte, error) {
-	if len(mappings) == 0 {
-		return nil, nil
-	}
-
-	buf := make([]byte, 0, len(mappings)*16)
-	for _, mapping := range mappings {
-		if mapping.TableName == "" || mapping.RootPageID == 0 {
-			return nil, errCorruptedDirectoryPage
-		}
-		switch mapping.ObjectType {
-		case DirectoryRootMappingObjectTable:
-			if mapping.IndexName != "" {
-				return nil, errCorruptedDirectoryPage
-			}
-		case DirectoryRootMappingObjectIndex:
-			if mapping.IndexName == "" {
-				return nil, errCorruptedDirectoryPage
-			}
-		default:
-			return nil, errCorruptedDirectoryPage
-		}
-		buf = append(buf, mapping.ObjectType)
-		buf = appendString(buf, mapping.TableName)
-		buf = appendString(buf, mapping.IndexName)
-		buf = appendUint32(buf, mapping.RootPageID)
-	}
-	return buf, nil
-}
-
 func encodeDirectoryRootIDMappings(mappings []DirectoryRootIDMapping) ([]byte, error) {
 	if len(mappings) == 0 {
 		return nil, nil
@@ -1006,8 +669,7 @@ func rewriteDirectoryCheckpointMetadata(page []byte, meta DirectoryCheckpointMet
 }
 
 func directoryCheckpointOffset(page []byte) (int, error) {
-	rootMapBytes := binary.LittleEndian.Uint32(page[directoryBodyOffsetRootMapBytes : directoryBodyOffsetRootMapBytes+4])
-	start := directoryCatalogOffset + int(rootMapBytes)
+	start := directoryCatalogOffset
 	length, _, err := decodeCatalogPayload(page[start:])
 	if err != nil {
 		return 0, err

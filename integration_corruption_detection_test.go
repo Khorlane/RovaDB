@@ -155,7 +155,12 @@ func TestCorruptedIndexMetadataDetected(t *testing.T) {
 
 	rootPage := pager.NewPage()
 	storage.InitTableRootPage(rootPage)
-	writeMalformedCatalogPage(t, pager, corruptedIndexCatalogBytes(uint32(rootPage.ID())))
+	indexPage := pager.NewPage()
+	copy(indexPage.Data(), storage.InitIndexLeafPage(uint32(indexPage.ID())))
+	writeMalformedCatalogPageWithIDMappings(t, pager, corruptedIndexCatalogBytes(uint32(rootPage.ID())), []storage.DirectoryRootIDMapping{
+		{ObjectType: storage.DirectoryRootMappingObjectTable, ObjectID: 7, RootPageID: uint32(rootPage.ID())},
+		{ObjectType: storage.DirectoryRootMappingObjectIndex, ObjectID: 9, RootPageID: uint32(indexPage.ID())},
+	})
 
 	_, err := Open(path)
 	if err == nil {

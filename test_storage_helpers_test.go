@@ -1,6 +1,7 @@
 package rovadb
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"github.com/Khorlane/RovaDB/internal/storage"
@@ -29,7 +30,46 @@ func writeMalformedCatalogPage(t testFataler, pager *storage.Pager, data []byte)
 		t.Fatalf("pager.Get(0) error = %v", err)
 	}
 	clear(page.Data())
-	copy(page.Data(), data)
+	copy(page.Data(), storage.InitDirectoryPage(uint32(storage.DirectoryControlPageID), storage.CurrentDBFormatVersion))
+	copy(page.Data()[48:], data)
+	if err := storage.FinalizePageImage(page.Data()); err != nil {
+		t.Fatalf("storage.FinalizePageImage() error = %v", err)
+	}
+	page.MarkDirty()
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+}
+
+func writeMalformedCatalogPageWithIDMappings(t testFataler, pager *storage.Pager, data []byte, mappings []storage.DirectoryRootIDMapping) {
+	t.Helper()
+
+	page, err := pager.Get(0)
+	if err != nil {
+		t.Fatalf("pager.Get(0) error = %v", err)
+	}
+	clear(page.Data())
+	copy(page.Data(), storage.InitDirectoryPage(uint32(storage.DirectoryControlPageID), storage.CurrentDBFormatVersion))
+	copy(page.Data()[48:], data)
+
+	if len(mappings) > 0 {
+		offset := 48 + len(data) + 16
+		payload := make([]byte, 0, len(mappings)*9)
+		for _, mapping := range mappings {
+			payload = append(payload, mapping.ObjectType)
+			var raw [4]byte
+			binary.LittleEndian.PutUint32(raw[:], mapping.ObjectID)
+			payload = append(payload, raw[:]...)
+			binary.LittleEndian.PutUint32(raw[:], mapping.RootPageID)
+			payload = append(payload, raw[:]...)
+		}
+		binary.LittleEndian.PutUint32(page.Data()[offset:offset+4], uint32(len(mappings)))
+		binary.LittleEndian.PutUint32(page.Data()[offset+4:offset+8], uint32(len(payload)))
+		copy(page.Data()[offset+8:], payload)
+	}
+	if err := storage.FinalizePageImage(page.Data()); err != nil {
+		t.Fatalf("storage.FinalizePageImage() error = %v", err)
+	}
 	page.MarkDirty()
 	if err := pager.Flush(); err != nil {
 		t.Fatalf("pager.Flush() error = %v", err)

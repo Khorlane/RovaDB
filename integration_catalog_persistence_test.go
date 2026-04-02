@@ -160,7 +160,7 @@ func TestCreateMultipleTablesGetDistinctRootPages(t *testing.T) {
 	}
 }
 
-func TestOpenBackfillsMissingTableAndIndexIDs(t *testing.T) {
+func TestOpenFailsWhenCurrentCatalogIDsAreMissing(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
@@ -209,42 +209,9 @@ func TestOpenBackfillsMissingTableAndIndexIDs(t *testing.T) {
 	}
 
 	db, err = Open(path)
-	if err != nil {
-		t.Fatalf("reopen Open() error = %v", err)
-	}
-	table := db.tables["users"]
-	if table == nil {
+	if err == nil {
 		_ = db.Close()
-		t.Fatal("db.tables[users] = nil")
-	}
-	indexDef := table.IndexDefinition("idx_users_name")
-	if table.TableID == 0 {
-		_ = db.Close()
-		t.Fatal("table.TableID = 0 after backfill, want nonzero")
-	}
-	if indexDef == nil || indexDef.IndexID == 0 {
-		_ = db.Close()
-		t.Fatalf("indexDef = %#v, want nonzero IndexID after backfill", indexDef)
-	}
-	backfilledTableID := table.TableID
-	backfilledIndexID := indexDef.IndexID
-	if err := db.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-
-	db, err = Open(path)
-	if err != nil {
-		t.Fatalf("second reopen Open() error = %v", err)
-	}
-	defer db.Close()
-
-	table = db.tables["users"]
-	indexDef = table.IndexDefinition("idx_users_name")
-	if table.TableID != backfilledTableID {
-		t.Fatalf("table.TableID = %d, want %d", table.TableID, backfilledTableID)
-	}
-	if indexDef == nil || indexDef.IndexID != backfilledIndexID {
-		t.Fatalf("indexDef.IndexID = %v, want %d", indexDef, backfilledIndexID)
+		t.Fatal("reopen Open() error = nil, want missing stable ID rejection")
 	}
 }
 
@@ -727,23 +694,9 @@ func catalogWithDirectoryRootsForSave(t *testing.T, file *os.File, catalog *stor
 	if err != nil {
 		t.Fatalf("ReadDirectoryRootIDMappings() error = %v", err)
 	}
-	if len(idMappings) != 0 {
-		applied, err := storage.ApplyDirectoryRootIDMappings(catalog, idMappings)
-		if err != nil {
-			t.Fatalf("ApplyDirectoryRootIDMappings() error = %v", err)
-		}
-		return applied
-	}
-	nameMappings, err := storage.ReadDirectoryRootMappings(file)
+	applied, err := storage.ApplyDirectoryRootIDMappings(catalog, idMappings)
 	if err != nil {
-		t.Fatalf("ReadDirectoryRootMappings() error = %v", err)
+		t.Fatalf("ApplyDirectoryRootIDMappings() error = %v", err)
 	}
-	if len(nameMappings) != 0 {
-		applied, err := storage.ApplyDirectoryRootMappings(catalog, nameMappings)
-		if err != nil {
-			t.Fatalf("ApplyDirectoryRootMappings() error = %v", err)
-		}
-		return applied
-	}
-	return catalog
+	return applied
 }

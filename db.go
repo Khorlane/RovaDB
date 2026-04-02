@@ -169,19 +169,9 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
-	modernRootPath := useIDOnlyDirectoryMappingsForOpen(catalog, rootIDMappings)
-	rootMappings := []storage.DirectoryRootMapping(nil)
-	if !modernRootPath {
-		rootMappings, err = storage.ReadDirectoryRootMappings(file.File())
-		if err != nil {
-			_ = pager.Close()
-			_ = file.Close()
-			return nil, wrapStorageError(err)
-		}
-	}
+	backfillStableCatalogIDsOnOpen(catalog)
 	if err := storage.ValidateDirectoryControlState(file.File(), storage.DirectoryControlState{
 		FreeListHead:   freeListHead,
-		RootMappings:   rootMappings,
 		RootIDMappings: rootIDMappings,
 		CheckpointMeta: checkpointMeta,
 	}); err != nil {
@@ -189,7 +179,7 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
-	catalog, err = applyDirectoryRootMappingsForOpen(catalog, rootMappings, rootIDMappings, modernRootPath)
+	catalog, err = storage.ApplyDirectoryRootIDMappings(catalog, rootIDMappings)
 	if err != nil {
 		_ = pager.Close()
 		_ = file.Close()
@@ -296,39 +286,58 @@ func replayCommittedWAL(path string) error {
 	return storage.ApplyWALFramesToDB(path, frames)
 }
 
-func applyDirectoryRootMappingsForOpen(cat *storage.CatalogData, rootMappings []storage.DirectoryRootMapping, rootIDMappings []storage.DirectoryRootIDMapping, modernRootPath bool) (*storage.CatalogData, error) {
-	if modernRootPath {
-		return storage.ApplyDirectoryRootIDMappings(cat, rootIDMappings)
+func backfillStableCatalogIDsOnOpen(cat *storage.CatalogData) {
+	if cat == nil {
+		return
 	}
-	if len(rootIDMappings) == 0 {
-		return storage.ApplyDirectoryRootMappings(cat, rootMappings)
-	}
-
-	idApplied, err := storage.ApplyDirectoryRootIDMappings(cat, rootIDMappings)
-	if err != nil {
-		return nil, err
-	}
-	if len(rootMappings) == 0 {
-		return idApplied, nil
-	}
-	return storage.ApplyDirectoryRootMappings(idApplied, rootMappings)
-}
-
-func useIDOnlyDirectoryMappingsForOpen(cat *storage.CatalogData, rootIDMappings []storage.DirectoryRootIDMapping) bool {
-	if cat == nil || len(rootIDMappings) == 0 {
-		return false
-	}
-	for _, table := range cat.Tables {
-		if table.TableID == 0 {
-			return false
+	nextTableID := nextCatalogTableID(cat)
+	nextIndexID := nextCatalogIndexID(cat)
+	for i := range cat.Tables {
+		if cat.Tables[i].TableID == 0 {
+			cat.Tables[i].TableID = nextTableID
+			nextTableID++
 		}
-		for _, index := range table.Indexes {
-			if index.IndexID == 0 {
-				return false
+		for j := range cat.Tables[i].Indexes {
+			if cat.Tables[i].Indexes[j].IndexID == 0 {
+				cat.Tables[i].Indexes[j].IndexID = nextIndexID
+				nextIndexID++
 			}
 		}
 	}
-	return true
+}
+
+func nextCatalogTableID(cat *storage.CatalogData) uint32 {
+	maxID := uint32(0)
+	if cat == nil {
+		return 1
+	}
+	for _, table := range cat.Tables {
+		if table.TableID > maxID {
+			maxID = table.TableID
+		}
+	}
+	if maxID == 0 {
+		return 1
+	}
+	return maxID + 1
+}
+
+func nextCatalogIndexID(cat *storage.CatalogData) uint32 {
+	maxID := uint32(0)
+	if cat == nil {
+		return 1
+	}
+	for _, table := range cat.Tables {
+		for _, index := range table.Indexes {
+			if index.IndexID > maxID {
+				maxID = index.IndexID
+			}
+		}
+	}
+	if maxID == 0 {
+		return 1
+	}
+	return maxID + 1
 }
 
 // Exec executes a non-SELECT statement and returns a write result.

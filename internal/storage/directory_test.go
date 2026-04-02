@@ -247,8 +247,8 @@ func TestEnsureDirectoryPageUpgradesLegacyCatalogPage(t *testing.T) {
 		t.Fatalf("WriteAt() error = %v", err)
 	}
 
-	if err := EnsureDirectoryPage(dbFile.File()); !errors.Is(err, errUnsupportedCatalogPage) {
-		t.Fatalf("EnsureDirectoryPage() error = %v, want %v", err, errUnsupportedCatalogPage)
+	if err := EnsureDirectoryPage(dbFile.File()); !errors.Is(err, errCorruptedDirectoryPage) {
+		t.Fatalf("EnsureDirectoryPage() error = %v, want %v", err, errCorruptedDirectoryPage)
 	}
 }
 
@@ -307,103 +307,12 @@ func TestDirectoryFreeListHeadPersistsAcrossReopen(t *testing.T) {
 	}
 }
 
-func TestDirectoryRootMappingsRoundTrip(t *testing.T) {
-	mappings := []DirectoryRootMapping{
-		{
-			ObjectType: DirectoryRootMappingObjectTable,
-			TableName:  "users",
-			RootPageID: 7,
-		},
-		{
-			ObjectType: DirectoryRootMappingObjectIndex,
-			TableName:  "users",
-			IndexName:  "idx_users_name",
-			RootPageID: 11,
-		},
-	}
-
-	page, err := buildLegacyDirectoryCatalogPage([]byte{1, 2, 3}, CurrentDBFormatVersion, 19, mappings, nil, DirectoryCheckpointMetadata{})
-	if err != nil {
-		t.Fatalf("buildDirectoryCatalogPage() error = %v", err)
-	}
-
-	got, err := directoryRootMappings(page)
-	if err != nil {
-		t.Fatalf("directoryRootMappings() error = %v", err)
-	}
-	if len(got) != len(mappings) {
-		t.Fatalf("len(directoryRootMappings()) = %d, want %d", len(got), len(mappings))
-	}
-	for i := range mappings {
-		if got[i] != mappings[i] {
-			t.Fatalf("mapping[%d] = %#v, want %#v", i, got[i], mappings[i])
-		}
-	}
-}
-
-func TestReadDirectoryRootMappingsEmptyRoundTrip(t *testing.T) {
-	page, err := buildDirectoryCatalogPage([]byte{1, 2, 3}, CurrentDBFormatVersion, 0, nil, DirectoryCheckpointMetadata{})
-	if err != nil {
-		t.Fatalf("buildDirectoryCatalogPage() error = %v", err)
-	}
-
-	got, err := directoryRootMappings(page)
-	if err != nil {
-		t.Fatalf("directoryRootMappings() error = %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("len(directoryRootMappings()) = %d, want 0", len(got))
-	}
-}
-
-func TestReadDirectoryRootMappingsRejectsMalformedPayload(t *testing.T) {
+func TestValidateDirectoryPageRejectsLegacyNameMappings(t *testing.T) {
 	page := InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion)
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetRootMapCount:directoryBodyOffsetRootMapCount+4], 1)
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetRootMapBytes:directoryBodyOffsetRootMapBytes+4], 2)
-	copy(page[directoryCatalogOffset:], []byte{DirectoryRootMappingObjectTable, 0})
-
-	_, err := directoryRootMappings(page)
-	if !errors.Is(err, errCorruptedDirectoryPage) {
-		t.Fatalf("directoryRootMappings() error = %v, want %v", err, errCorruptedDirectoryPage)
-	}
-}
-
-func TestWriteDirectoryRootMappingsPersistsDurably(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "directory-root-map.db")
-
-	dbFile, err := OpenOrCreate(path)
-	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
-	}
-	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
-		t.Fatalf("EnsureDirectoryPage() error = %v", err)
-	}
-	mappings := []DirectoryRootMapping{
-		{
-			ObjectType: DirectoryRootMappingObjectTable,
-			TableName:  "users",
-			RootPageID: 5,
-		},
-	}
-	if err := WriteDirectoryRootMappings(dbFile.File(), mappings); err != nil {
-		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
-	}
-	if err := dbFile.Close(); err != nil {
-		t.Fatalf("dbFile.Close() error = %v", err)
-	}
-
-	dbFile, err = OpenOrCreate(path)
-	if err != nil {
-		t.Fatalf("reopen OpenOrCreate() error = %v", err)
-	}
-	defer dbFile.Close()
-
-	got, err := ReadDirectoryRootMappings(dbFile.File())
-	if err != nil {
-		t.Fatalf("ReadDirectoryRootMappings() error = %v", err)
-	}
-	if len(got) != 1 || got[0] != mappings[0] {
-		t.Fatalf("ReadDirectoryRootMappings() = %#v, want %#v", got, mappings)
+	if err := ValidateDirectoryPage(page); !errors.Is(err, errUnsupportedDirectoryPage) {
+		t.Fatalf("ValidateDirectoryPage() error = %v, want %v", err, errUnsupportedDirectoryPage)
 	}
 }
 
@@ -456,7 +365,7 @@ func TestDirectoryRootIDMappingsRoundTrip(t *testing.T) {
 	}
 }
 
-func TestBuildDirectoryRootStateFromCatalogOrdersMappingsDeterministically(t *testing.T) {
+func TestBuildDirectoryRootIDMappingsOrdersDeterministically(t *testing.T) {
 	catalog := &CatalogData{
 		Tables: []CatalogTable{
 			{
@@ -481,14 +390,7 @@ func TestBuildDirectoryRootStateFromCatalogOrdersMappingsDeterministically(t *te
 		},
 	}
 
-	state := BuildDirectoryRootStateFromCatalog(catalog)
-	wantNameMappings := []DirectoryRootMapping{
-		{ObjectType: DirectoryRootMappingObjectTable, TableName: "accounts", RootPageID: 9},
-		{ObjectType: DirectoryRootMappingObjectTable, TableName: "users", RootPageID: 11},
-		{ObjectType: DirectoryRootMappingObjectIndex, TableName: "accounts", IndexName: "idx_accounts_b", RootPageID: 32},
-		{ObjectType: DirectoryRootMappingObjectIndex, TableName: "users", IndexName: "idx_users_a", RootPageID: 31},
-		{ObjectType: DirectoryRootMappingObjectIndex, TableName: "users", IndexName: "idx_users_z", RootPageID: 33},
-	}
+	got := BuildDirectoryRootIDMappings(catalog)
 	wantIDMappings := []DirectoryRootIDMapping{
 		{ObjectType: DirectoryRootMappingObjectTable, ObjectID: 3, RootPageID: 9},
 		{ObjectType: DirectoryRootMappingObjectTable, ObjectID: 7, RootPageID: 11},
@@ -497,20 +399,12 @@ func TestBuildDirectoryRootStateFromCatalogOrdersMappingsDeterministically(t *te
 		{ObjectType: DirectoryRootMappingObjectIndex, ObjectID: 22, RootPageID: 33},
 	}
 
-	if len(state.RootMappings) != len(wantNameMappings) {
-		t.Fatalf("len(state.RootMappings) = %d, want %d", len(state.RootMappings), len(wantNameMappings))
-	}
-	for i := range wantNameMappings {
-		if state.RootMappings[i] != wantNameMappings[i] {
-			t.Fatalf("state.RootMappings[%d] = %#v, want %#v", i, state.RootMappings[i], wantNameMappings[i])
-		}
-	}
-	if len(state.RootIDMappings) != len(wantIDMappings) {
-		t.Fatalf("len(state.RootIDMappings) = %d, want %d", len(state.RootIDMappings), len(wantIDMappings))
+	if len(got) != len(wantIDMappings) {
+		t.Fatalf("len(BuildDirectoryRootIDMappings()) = %d, want %d", len(got), len(wantIDMappings))
 	}
 	for i := range wantIDMappings {
-		if state.RootIDMappings[i] != wantIDMappings[i] {
-			t.Fatalf("state.RootIDMappings[%d] = %#v, want %#v", i, state.RootIDMappings[i], wantIDMappings[i])
+		if got[i] != wantIDMappings[i] {
+			t.Fatalf("BuildDirectoryRootIDMappings()[%d] = %#v, want %#v", i, got[i], wantIDMappings[i])
 		}
 	}
 }
@@ -533,12 +427,11 @@ func TestBuildCatalogPageDataWritesIDMappingsOnly(t *testing.T) {
 		t.Fatalf("BuildCatalogPageData() error = %v", err)
 	}
 
-	nameMappings, err := directoryRootMappings(page)
-	if err != nil {
-		t.Fatalf("directoryRootMappings() error = %v", err)
+	if binary.LittleEndian.Uint32(page[directoryBodyOffsetRootMapCount:directoryBodyOffsetRootMapCount+4]) != 0 {
+		t.Fatalf("rootMapCount = %d, want 0 on new writes", binary.LittleEndian.Uint32(page[directoryBodyOffsetRootMapCount:directoryBodyOffsetRootMapCount+4]))
 	}
-	if len(nameMappings) != 0 {
-		t.Fatalf("len(directoryRootMappings()) = %d, want 0 on new writes", len(nameMappings))
+	if binary.LittleEndian.Uint32(page[directoryBodyOffsetRootMapBytes:directoryBodyOffsetRootMapBytes+4]) != 0 {
+		t.Fatalf("rootMapBytes = %d, want 0 on new writes", binary.LittleEndian.Uint32(page[directoryBodyOffsetRootMapBytes:directoryBodyOffsetRootMapBytes+4]))
 	}
 
 	idMappings, err := directoryRootIDMappings(page)
@@ -614,53 +507,6 @@ func TestWriteDirectoryRootIDMappingsPersistsDurably(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != mappings[0] {
 		t.Fatalf("ReadDirectoryRootIDMappings() = %#v, want %#v", got, mappings)
-	}
-}
-
-func TestApplyDirectoryRootMappingsRejectsMismatch(t *testing.T) {
-	catalog := &CatalogData{
-		Tables: []CatalogTable{
-			{
-				Name:       "users",
-				RootPageID: 5,
-				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
-				Indexes: []CatalogIndex{
-					{Name: "idx_users_id", RootPageID: 7, Columns: []CatalogIndexColumn{{Name: "id"}}},
-				},
-			},
-		},
-	}
-	mappings := []DirectoryRootMapping{
-		{
-			ObjectType: DirectoryRootMappingObjectTable,
-			TableName:  "users",
-			RootPageID: 9,
-		},
-	}
-
-	_, err := ApplyDirectoryRootMappings(catalog, mappings)
-	if !errors.Is(err, errCorruptedDirectoryPage) {
-		t.Fatalf("ApplyDirectoryRootMappings() error = %v, want %v", err, errCorruptedDirectoryPage)
-	}
-}
-
-func TestApplyDirectoryRootMappingsFallsBackWhenEmpty(t *testing.T) {
-	catalog := &CatalogData{
-		Tables: []CatalogTable{
-			{
-				Name:       "users",
-				RootPageID: 5,
-				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
-			},
-		},
-	}
-
-	got, err := ApplyDirectoryRootMappings(catalog, nil)
-	if err != nil {
-		t.Fatalf("ApplyDirectoryRootMappings() error = %v", err)
-	}
-	if got.Tables[0].RootPageID != 5 {
-		t.Fatalf("got.Tables[0].RootPageID = %d, want 5", got.Tables[0].RootPageID)
 	}
 }
 
@@ -750,9 +596,9 @@ func TestValidateDirectoryControlStateRejectsInvalidTableRootPageType(t *testing
 	}
 
 	err = ValidateDirectoryControlState(dbFile.File(), DirectoryControlState{
-		RootMappings: []DirectoryRootMapping{{
+		RootIDMappings: []DirectoryRootIDMapping{{
 			ObjectType: DirectoryRootMappingObjectTable,
-			TableName:  "users",
+			ObjectID:   1,
 			RootPageID: 2,
 		}},
 	})
@@ -776,53 +622,14 @@ func TestValidateDirectoryControlStateRejectsInvalidIndexRootPageType(t *testing
 	}
 
 	err = ValidateDirectoryControlState(dbFile.File(), DirectoryControlState{
-		RootMappings: []DirectoryRootMapping{{
+		RootIDMappings: []DirectoryRootIDMapping{{
 			ObjectType: DirectoryRootMappingObjectIndex,
-			TableName:  "users",
-			IndexName:  "idx_users_name",
+			ObjectID:   1,
 			RootPageID: 2,
 		}},
 	})
 	if !errors.Is(err, errCorruptedIndexPage) {
 		t.Fatalf("ValidateDirectoryControlState() error = %v, want %v", err, errCorruptedIndexPage)
-	}
-}
-
-func TestValidateDirectoryControlStateRejectsDuplicateMappings(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "directory-validate-duplicates.db")
-	dbFile, err := OpenOrCreate(path)
-	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
-	}
-	defer dbFile.Close()
-	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
-		t.Fatalf("EnsureDirectoryPage() error = %v", err)
-	}
-	if _, err := dbFile.File().WriteAt(InitializeTablePage(2), pageOffset(2)); err != nil {
-		t.Fatalf("WriteAt(table) error = %v", err)
-	}
-	indexPage := InitIndexLeafPage(3)
-	if _, err := dbFile.File().WriteAt(indexPage, pageOffset(3)); err != nil {
-		t.Fatalf("WriteAt(index) error = %v", err)
-	}
-	err = ValidateDirectoryControlState(dbFile.File(), DirectoryControlState{
-		RootMappings: []DirectoryRootMapping{
-			{ObjectType: DirectoryRootMappingObjectTable, TableName: "users", RootPageID: 2},
-			{ObjectType: DirectoryRootMappingObjectTable, TableName: "users", RootPageID: 2},
-		},
-	})
-	if !errors.Is(err, errCorruptedDirectoryPage) {
-		t.Fatalf("ValidateDirectoryControlState(table dup) error = %v, want %v", err, errCorruptedDirectoryPage)
-	}
-
-	err = ValidateDirectoryControlState(dbFile.File(), DirectoryControlState{
-		RootMappings: []DirectoryRootMapping{
-			{ObjectType: DirectoryRootMappingObjectIndex, TableName: "users", IndexName: "idx_users_name", RootPageID: 3},
-			{ObjectType: DirectoryRootMappingObjectIndex, TableName: "users", IndexName: "idx_users_name", RootPageID: 3},
-		},
-	})
-	if !errors.Is(err, errCorruptedDirectoryPage) {
-		t.Fatalf("ValidateDirectoryControlState(index dup) error = %v, want %v", err, errCorruptedDirectoryPage)
 	}
 }
 
@@ -841,9 +648,9 @@ func TestValidateDirectoryControlStateRejectsUnsupportedObjectType(t *testing.T)
 	}
 
 	err = ValidateDirectoryControlState(dbFile.File(), DirectoryControlState{
-		RootMappings: []DirectoryRootMapping{{
+		RootIDMappings: []DirectoryRootIDMapping{{
 			ObjectType: 99,
-			TableName:  "users",
+			ObjectID:   1,
 			RootPageID: 2,
 		}},
 	})
