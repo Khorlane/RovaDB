@@ -2,6 +2,7 @@ package rovadb
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/storage"
@@ -725,5 +726,128 @@ func TestEngineSnapshotOnClosedDBReturnsErrClosed(t *testing.T) {
 	_, err = db.EngineSnapshot()
 	if !errors.Is(err, ErrClosed) {
 		t.Fatalf("EngineSnapshot() error = %v, want ErrClosed", err)
+	}
+}
+
+func TestEngineSnapshotStringOnFreshDBIsStable(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	snapshot, err := db.EngineSnapshot()
+	if err != nil {
+		t.Fatalf("EngineSnapshot() error = %v", err)
+	}
+
+	got := snapshot.String()
+	want := "Engine Status\n" +
+		"DB format: 1\n" +
+		"WAL version: 1\n" +
+		"Checkpoint: LSN=0 pages=0\n" +
+		"Free list head: 0\n" +
+		"Tables: 0\n" +
+		"Indexes: 0\n\n" +
+		"Consistency\n" +
+		"OK: true\n" +
+		"Checked table roots: 0\n" +
+		"Checked index roots: 0\n\n" +
+		"Page Usage\n" +
+		"Total: 5\n" +
+		"Table: 4\n" +
+		"Index leaf: 0\n" +
+		"Index internal: 0\n" +
+		"Free: 0\n" +
+		"Directory: 1\n\n" +
+		"Schema Inventory\n" +
+		"Tables:\n" +
+		"Indexes:\n"
+	if got != want {
+		t.Fatalf("EngineSnapshot().String() = %q, want %q", got, want)
+	}
+}
+
+func TestEngineSnapshotStringIncludesSchemaDetails(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"CREATE INDEX idx_users_name ON users (name)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	snapshot, err := db.EngineSnapshot()
+	if err != nil {
+		t.Fatalf("EngineSnapshot() error = %v", err)
+	}
+	formatted := snapshot.String()
+
+	for _, want := range []string{
+		"Engine Status\n",
+		"\nConsistency\n",
+		"\nPage Usage\n",
+		"\nSchema Inventory\n",
+		"Tables:\n- users (id=",
+		"Indexes:\n- users.idx_users_name (id=",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("EngineSnapshot().String() missing %q in %q", want, formatted)
+		}
+	}
+}
+
+func TestEngineSnapshotStringOrderingIsDeterministic(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"CREATE TABLE accounts (id INT, email TEXT)",
+		"CREATE INDEX idx_users_name ON users (name)",
+		"CREATE UNIQUE INDEX idx_accounts_email ON accounts (email)",
+		"CREATE INDEX idx_accounts_id ON accounts (id)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	snapshot, err := db.EngineSnapshot()
+	if err != nil {
+		t.Fatalf("EngineSnapshot() error = %v", err)
+	}
+	formatted := snapshot.String()
+
+	accountsTablePos := strings.Index(formatted, "- accounts (id=")
+	usersTablePos := strings.Index(formatted, "- users (id=")
+	if accountsTablePos == -1 || usersTablePos == -1 || accountsTablePos >= usersTablePos {
+		t.Fatalf("EngineSnapshot().String() table order incorrect: %q", formatted)
+	}
+
+	accountsEmailPos := strings.Index(formatted, "- accounts.idx_accounts_email (id=")
+	accountsIDPos := strings.Index(formatted, "- accounts.idx_accounts_id (id=")
+	usersIndexPos := strings.Index(formatted, "- users.idx_users_name (id=")
+	if accountsEmailPos == -1 || accountsIDPos == -1 || usersIndexPos == -1 {
+		t.Fatalf("EngineSnapshot().String() missing expected index lines: %q", formatted)
+	}
+	if !(accountsEmailPos < accountsIDPos && accountsIDPos < usersIndexPos) {
+		t.Fatalf("EngineSnapshot().String() index order incorrect: %q", formatted)
 	}
 }

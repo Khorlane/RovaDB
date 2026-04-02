@@ -2,7 +2,9 @@ package rovadb
 
 import (
 	"encoding/binary"
+	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/Khorlane/RovaDB/internal/executor"
 	"github.com/Khorlane/RovaDB/internal/storage"
@@ -66,6 +68,42 @@ type EngineSnapshot struct {
 	Check     EngineCheckResult
 	PageUsage EnginePageUsage
 	Inventory EngineSchemaInventory
+}
+
+// String formats the snapshot into a compact deterministic text block.
+func (s EngineSnapshot) String() string {
+	var b strings.Builder
+	b.WriteString("Engine Status\n")
+	fmt.Fprintf(&b, "DB format: %d\n", s.Status.DBFormatVersion)
+	fmt.Fprintf(&b, "WAL version: %d\n", s.Status.WALVersion)
+	fmt.Fprintf(&b, "Checkpoint: LSN=%d pages=%d\n", s.Status.LastCheckpointLSN, s.Status.LastCheckpointPageCount)
+	fmt.Fprintf(&b, "Free list head: %d\n", s.Status.FreeListHead)
+	fmt.Fprintf(&b, "Tables: %d\n", s.Status.TableCount)
+	fmt.Fprintf(&b, "Indexes: %d\n\n", s.Status.IndexCount)
+
+	b.WriteString("Consistency\n")
+	fmt.Fprintf(&b, "OK: %t\n", s.Check.OK)
+	fmt.Fprintf(&b, "Checked table roots: %d\n", s.Check.CheckedTableRoots)
+	fmt.Fprintf(&b, "Checked index roots: %d\n\n", s.Check.CheckedIndexRoots)
+
+	b.WriteString("Page Usage\n")
+	fmt.Fprintf(&b, "Total: %d\n", s.PageUsage.TotalPages)
+	fmt.Fprintf(&b, "Table: %d\n", s.PageUsage.TablePages)
+	fmt.Fprintf(&b, "Index leaf: %d\n", s.PageUsage.IndexLeafPages)
+	fmt.Fprintf(&b, "Index internal: %d\n", s.PageUsage.IndexInternalPages)
+	fmt.Fprintf(&b, "Free: %d\n", s.PageUsage.FreePages)
+	fmt.Fprintf(&b, "Directory: %d\n\n", s.PageUsage.DirectoryPages)
+
+	b.WriteString("Schema Inventory\n")
+	b.WriteString("Tables:\n")
+	for _, table := range s.Inventory.Tables {
+		fmt.Fprintf(&b, "- %s (id=%d, root=%d, indexes=%d)\n", table.TableName, table.TableID, table.RootPageID, table.IndexCount)
+	}
+	b.WriteString("Indexes:\n")
+	for _, index := range s.Inventory.Indexes {
+		fmt.Fprintf(&b, "- %s.%s (id=%d, root=%d, unique=%t)\n", index.TableName, index.IndexName, index.IndexID, index.RootPageID, index.IsUnique)
+	}
+	return b.String()
 }
 
 // EngineStatus returns a stable in-memory status snapshot for diagnostics.
