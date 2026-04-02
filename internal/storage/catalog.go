@@ -222,6 +222,8 @@ func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint3
 	if cat == nil {
 		cat = &CatalogData{}
 	}
+	// Current format persists all CAT/DIR payload in page 0 only; see
+	// docs/dev/MULTI_PAGE_CATALOG_DIRECTORY_STORAGE_design.md.
 	rootIDMappings := BuildDirectoryRootIDMappings(cat)
 	rootIDPayload, err := encodeDirectoryRootIDMappings(rootIDMappings)
 	if err != nil {
