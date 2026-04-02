@@ -478,6 +478,113 @@ func TestDirectoryRootMappingsPersistIndexRootAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestDirectoryRootIDMappingsPersistAcrossReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	tableID := db.tables["users"].TableID
+	tableRoot := uint32(db.tables["users"].RootPageID())
+	indexDef := db.tables["users"].IndexDefinition("idx_users_name")
+	if indexDef == nil {
+		t.Fatal("IndexDefinition(idx_users_name) = nil")
+	}
+	indexID := indexDef.IndexID
+	indexRoot := indexDef.RootPageID
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, _ := openRawStorage(t, path)
+	idMappings, err := storage.ReadDirectoryRootIDMappings(rawDB.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryRootIDMappings() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	foundTable := false
+	foundIndex := false
+	for _, mapping := range idMappings {
+		switch {
+		case mapping.ObjectType == storage.DirectoryRootMappingObjectTable && mapping.ObjectID == tableID:
+			foundTable = true
+			if mapping.RootPageID != tableRoot {
+				t.Fatalf("table ID root mapping = %d, want %d", mapping.RootPageID, tableRoot)
+			}
+		case mapping.ObjectType == storage.DirectoryRootMappingObjectIndex && mapping.ObjectID == indexID:
+			foundIndex = true
+			if mapping.RootPageID != indexRoot {
+				t.Fatalf("index ID root mapping = %d, want %d", mapping.RootPageID, indexRoot)
+			}
+		}
+	}
+	if !foundTable {
+		t.Fatal("table ID root mapping not found")
+	}
+	if !foundIndex {
+		t.Fatal("index ID root mapping not found")
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+	if got := db.tables["users"].RootPageID(); uint32(got) != tableRoot {
+		t.Fatalf("reopened users.RootPageID() = %d, want %d", got, tableRoot)
+	}
+	if got := db.tables["users"].IndexDefinition("idx_users_name").RootPageID; got != indexRoot {
+		t.Fatalf("reopened index RootPageID = %d, want %d", got, indexRoot)
+	}
+}
+
+func TestOpenFailsWhenNameAndIDRootMappingsDisagree(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create users) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE teams (id INT)"); err != nil {
+		t.Fatalf("Exec(create teams) error = %v", err)
+	}
+	teamsRoot := uint32(db.tables["teams"].RootPageID())
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, _ := openRawStorage(t, path)
+	if err := storage.WriteDirectoryRootMappings(rawDB.File(), []storage.DirectoryRootMapping{
+		{ObjectType: storage.DirectoryRootMappingObjectTable, TableName: "users", RootPageID: teamsRoot},
+		{ObjectType: storage.DirectoryRootMappingObjectTable, TableName: "teams", RootPageID: teamsRoot},
+	}); err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want conflicting name/id mapping failure")
+	}
+}
+
 func TestOpenFailsOnDirectoryRootMappingMismatch(t *testing.T) {
 	path := testDBPath(t)
 

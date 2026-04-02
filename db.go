@@ -150,6 +150,11 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
+	rootIDMappings, err := storage.ReadDirectoryRootIDMappings(file.File())
+	if err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
 	checkpointMeta, err := storage.ReadDirectoryCheckpointMetadata(file.File())
 	if err != nil {
 		_ = file.Close()
@@ -158,6 +163,7 @@ func Open(path string) (*DB, error) {
 	if err := storage.ValidateDirectoryControlState(file.File(), storage.DirectoryControlState{
 		FreeListHead:   freeListHead,
 		RootMappings:   rootMappings,
+		RootIDMappings: rootIDMappings,
 		CheckpointMeta: checkpointMeta,
 	}); err != nil {
 		_ = file.Close()
@@ -178,7 +184,7 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
-	catalog, err = storage.ApplyDirectoryRootMappings(catalog, rootMappings)
+	catalog, err = applyDirectoryRootMappingsForOpen(catalog, rootMappings, rootIDMappings)
 	if err != nil {
 		_ = pager.Close()
 		_ = file.Close()
@@ -285,6 +291,29 @@ func replayCommittedWAL(path string) error {
 		return err
 	}
 	return storage.ApplyWALFramesToDB(path, frames)
+}
+
+func applyDirectoryRootMappingsForOpen(cat *storage.CatalogData, rootMappings []storage.DirectoryRootMapping, rootIDMappings []storage.DirectoryRootIDMapping) (*storage.CatalogData, error) {
+	if len(rootIDMappings) == 0 {
+		return storage.ApplyDirectoryRootMappings(cat, rootMappings)
+	}
+
+	idApplied, err := storage.ApplyDirectoryRootIDMappings(cat, rootIDMappings)
+	if err != nil {
+		return nil, err
+	}
+	if len(rootMappings) == 0 {
+		return idApplied, nil
+	}
+
+	nameApplied, err := storage.ApplyDirectoryRootMappings(cat, rootMappings)
+	if err != nil {
+		return nil, err
+	}
+	if !reflect.DeepEqual(idApplied, nameApplied) {
+		return nil, newStorageError("corrupted directory page")
+	}
+	return idApplied, nil
 }
 
 // Exec executes a non-SELECT statement and returns a write result.
