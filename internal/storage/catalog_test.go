@@ -331,8 +331,73 @@ func TestSaveCatalogTooLarge(t *testing.T) {
 	}
 
 	err = SaveCatalog(pager, cat)
-	if !errors.Is(err, errCatalogTooLarge) {
-		t.Fatalf("SaveCatalog() error = %v, want %v", err, errCatalogTooLarge)
+	if !errors.Is(err, errCATDIRExceedsEmbeddedWrite) {
+		t.Fatalf("SaveCatalog() error = %v, want %v", err, errCATDIRExceedsEmbeddedWrite)
+	}
+}
+
+func TestSaveCatalogOversizeLeavesCommittedMetadataIntact(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog-intact.db")
+	dbFile, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+	original := &CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				TableID:    1,
+				RootPageID: 3,
+				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
+			},
+		},
+	}
+	if err := SaveCatalog(pager, original); err != nil {
+		t.Fatalf("SaveCatalog(original) error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	oversize := &CatalogData{}
+	for i := 0; i < 200; i++ {
+		oversize.Tables = append(oversize.Tables, CatalogTable{
+			Name:    fmt.Sprintf("table_%03d", i),
+			TableID: uint32(i + 1),
+			Columns: []CatalogColumn{
+				{Name: "id", Type: CatalogColumnTypeInt},
+				{Name: "name", Type: CatalogColumnTypeText},
+			},
+		})
+	}
+	if err := SaveCatalog(pager, oversize); !errors.Is(err, errCATDIRExceedsEmbeddedWrite) {
+		t.Fatalf("SaveCatalog(oversize) error = %v, want %v", err, errCATDIRExceedsEmbeddedWrite)
+	}
+	if err := dbFile.Close(); err != nil {
+		t.Fatalf("dbFile.Close() error = %v", err)
+	}
+
+	dbFile, err = OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("reopen OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+	reopenPager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager(reopen) error = %v", err)
+	}
+	got, err := LoadCatalog(reopenPager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+	if len(got.Tables) != 1 || got.Tables[0].Name != "users" || got.Tables[0].TableID != 1 {
+		t.Fatalf("reopened catalog = %#v, want original committed metadata", got)
 	}
 }
 

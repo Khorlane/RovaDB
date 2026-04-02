@@ -249,19 +249,12 @@ func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint3
 	if cat == nil {
 		cat = &CatalogData{}
 	}
-	// Current format persists all CAT/DIR payload in page 0 only; see
-	// docs/dev/MULTI_PAGE_CATALOG_DIRECTORY_STORAGE_design.md.
 	rootIDMappings := BuildDirectoryRootIDMappings(cat)
 	rootIDPayload, err := encodeDirectoryRootIDMappings(rootIDMappings)
 	if err != nil {
 		return nil, err
 	}
-	rootIDTrailerSize := 0
-	if len(rootIDPayload) > 0 {
-		rootIDTrailerSize = directoryRootIDTrailerHeaderSize + len(rootIDPayload)
-	}
-
-	maxCatalogPayloadSize := PageSize - directoryCatalogOffset - directoryCheckpointMetadataSize - rootIDTrailerSize
+	maxCatalogPayloadSize := embeddedDirectoryCatalogPayloadCapacity(len(rootIDPayload))
 	buf := make([]byte, 0, maxCatalogPayloadSize)
 	buf = appendUint32(buf, catalogVersion)
 	buf = appendUint32(buf, uint32(len(cat.Tables)))
@@ -285,7 +278,7 @@ func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint3
 			buf = appendString(buf, column.Name)
 			buf = append(buf, column.Type)
 			if len(buf) > maxCatalogPayloadSize {
-				return nil, errCatalogTooLarge
+				return nil, errCATDIRExceedsEmbeddedWrite
 			}
 		}
 		buf = appendUint16(buf, uint16(len(table.Indexes)))
@@ -297,10 +290,12 @@ func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint3
 			}
 		}
 		if len(buf) > maxCatalogPayloadSize {
-			return nil, errCatalogTooLarge
+			return nil, errCATDIRExceedsEmbeddedWrite
 		}
 	}
 
+	// Current metadata writes choose embedded CAT/DIR storage whenever the
+	// committed payload fits in page 0; overflow writes are added later.
 	return buildDirectoryCatalogPage(buf, CurrentDBFormatVersion, freeListHead, rootIDMappings, checkpointMeta)
 }
 

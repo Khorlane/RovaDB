@@ -369,6 +369,18 @@ func WriteDirectoryRootIDMappings(file *os.File, mappings []DirectoryRootIDMappi
 	return WriteDirectoryPage(file, rebuilt)
 }
 
+func embeddedDirectoryCatalogPayloadCapacity(rootIDPayloadBytes int) int {
+	rootIDTrailerSize := 0
+	if rootIDPayloadBytes > 0 {
+		rootIDTrailerSize = directoryRootIDTrailerHeaderSize + rootIDPayloadBytes
+	}
+	return PageSize - directoryCatalogOffset - directoryCheckpointMetadataSize - rootIDTrailerSize
+}
+
+func canStoreCatalogPayloadEmbedded(catalogPayload []byte, rootIDPayload []byte) bool {
+	return len(catalogPayload) <= embeddedDirectoryCatalogPayloadCapacity(len(rootIDPayload))
+}
+
 // BuildDirectoryRootIDMappings derives the durable physical root mappings keyed by stable logical IDs.
 func BuildDirectoryRootIDMappings(cat *CatalogData) []DirectoryRootIDMapping {
 	if cat == nil || len(cat.Tables) == 0 {
@@ -520,12 +532,8 @@ func buildDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, free
 	if err != nil {
 		return nil, err
 	}
-	rootIDTrailerSize := 0
-	if len(rootIDPayload) > 0 {
-		rootIDTrailerSize = directoryRootIDTrailerHeaderSize + len(rootIDPayload)
-	}
-	if len(catalogPayload)+directoryCheckpointMetadataSize+rootIDTrailerSize > PageSize-directoryCatalogOffset {
-		return nil, errCatalogTooLarge
+	if !canStoreCatalogPayloadEmbedded(catalogPayload, rootIDPayload) {
+		return nil, errCATDIRExceedsEmbeddedWrite
 	}
 	page := InitDirectoryPage(uint32(DirectoryControlPageID), formatVersion)
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetFreeListHead:directoryBodyOffsetFreeListHead+4], freeListHead)

@@ -21,8 +21,9 @@ var (
 	errCorruptedRowData         = dberr.NewStorage("corrupted row data")
 	errCorruptedIndexMetadata   = dberr.NewStorage("corrupted index metadata")
 
-	errCatalogTooLarge = dberr.NewStorage("catalog too large")
-	errTablePageFull   = errors.New("storage: table page full")
-	errIndexPageFull   = dberr.NewStorage("index page full")
-	errInvalidRowData  = errCorruptedRowData
+	errCatalogTooLarge            = dberr.NewStorage("catalog too large")
+	errCATDIRExceedsEmbeddedWrite = dberr.NewStorage("catalog metadata exceeds embedded page-0 capacity")
+	errTablePageFull              = errors.New("storage: table page full")
+	errIndexPageFull              = dberr.NewStorage("index page full")
+	errInvalidRowData             = errCorruptedRowData
 )

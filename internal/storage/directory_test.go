@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"path/filepath"
@@ -236,6 +237,23 @@ func TestBuildCatalogPageDataPersistsEmbeddedCATDIRPayloadLength(t *testing.T) {
 	}
 	if payloadBytes != uint32(len(payload)) {
 		t.Fatalf("DirectoryCATDIRPayloadByteLength() = %d, want %d", payloadBytes, len(payload))
+	}
+}
+
+func TestEmbeddedDirectoryCatalogPayloadCapacityFitsBoundary(t *testing.T) {
+	capacity := embeddedDirectoryCatalogPayloadCapacity(0)
+	if capacity <= 0 {
+		t.Fatalf("embeddedDirectoryCatalogPayloadCapacity(0) = %d, want > 0", capacity)
+	}
+	if !canStoreCatalogPayloadEmbedded(bytes.Repeat([]byte("x"), capacity), nil) {
+		t.Fatal("canStoreCatalogPayloadEmbedded(exact boundary) = false, want true")
+	}
+}
+
+func TestEmbeddedDirectoryCatalogPayloadCapacityRejectsOversize(t *testing.T) {
+	capacity := embeddedDirectoryCatalogPayloadCapacity(0)
+	if canStoreCatalogPayloadEmbedded(bytes.Repeat([]byte("x"), capacity+1), nil) {
+		t.Fatal("canStoreCatalogPayloadEmbedded(oversize) = true, want false")
 	}
 }
 
