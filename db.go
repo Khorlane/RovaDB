@@ -211,30 +211,10 @@ func Open(path string) (*DB, error) {
 		lastCheckpointLSN:       checkpointMeta.LastCheckpointLSN,
 		lastCheckpointPageCount: checkpointMeta.LastCheckpointPageCount,
 	}
-	backfilled, err := backfillStableCatalogIDs(tables)
-	if err != nil {
+	if err := db.reconcileSystemCatalogOnOpen(tables); err != nil {
 		_ = pager.Close()
 		_ = file.Close()
 		return nil, err
-	}
-	newSystemPageIDs, bootstrapped, err := db.ensureSystemCatalogTables(tables)
-	if err != nil {
-		_ = pager.Close()
-		_ = file.Close()
-		return nil, err
-	}
-	systemPages, rebuiltSystemRows, err := db.rebuildSystemCatalogRows(tables, newSystemPageIDs)
-	if err != nil {
-		_ = pager.Close()
-		_ = file.Close()
-		return nil, err
-	}
-	if backfilled || bootstrapped || rebuiltSystemRows {
-		if err := db.persistCatalogState(tables, systemPages); err != nil {
-			_ = pager.Close()
-			_ = file.Close()
-			return nil, err
-		}
 	}
 	if err := validatePersistedIndexRoots(pool, tables); err != nil {
 		_ = pager.Close()
@@ -262,6 +242,29 @@ func Open(path string) (*DB, error) {
 
 	db.nextWALLSN = nextWALLSN
 	return db, nil
+}
+
+func (db *DB) reconcileSystemCatalogOnOpen(tables map[string]*executor.Table) error {
+	if db == nil {
+		return ErrInvalidArgument
+	}
+
+	backfilled, err := backfillStableCatalogIDs(tables)
+	if err != nil {
+		return err
+	}
+	newSystemPageIDs, bootstrapped, err := db.ensureSystemCatalogTables(tables)
+	if err != nil {
+		return err
+	}
+	systemPages, rebuiltSystemRows, err := db.rebuildSystemCatalogRows(tables, newSystemPageIDs)
+	if err != nil {
+		return err
+	}
+	if !backfilled && !bootstrapped && !rebuiltSystemRows {
+		return nil
+	}
+	return db.persistCatalogState(tables, systemPages)
 }
 
 // Close releases database resources.
