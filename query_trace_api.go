@@ -57,6 +57,14 @@ func (db *DB) ExplainQueryPath(sql string, args ...any) (QueryExecutionTrace, er
 	if err != nil {
 		return QueryExecutionTrace{}, err
 	}
+	if plan.ScanType == planner.ScanTypeTable {
+		if tableName, columnName, ok := simpleEqualityPlanningTarget(sel); ok {
+			table := db.tables[tableName]
+			if hasMalformedSimpleLogicalIndex(table, columnName) {
+				return QueryExecutionTrace{}, newExecError("invalid select plan")
+			}
+		}
+	}
 
 	switch plan.ScanType {
 	case planner.ScanTypeTable:
@@ -67,11 +75,11 @@ func (db *DB) ExplainQueryPath(sql string, args ...any) (QueryExecutionTrace, er
 		if table == nil {
 			return QueryExecutionTrace{}, newExecError("table not found: " + plan.IndexScan.TableName)
 		}
-		index := runtimeSimpleIndexMetadata(table, plan.IndexScan.ColumnName)
-		if index == nil {
-			return QueryExecutionTrace{}, newExecError("invalid select plan")
+		indexDef, err := db.resolveSimpleLogicalIndex(table, plan.IndexScan.ColumnName)
+		if err != nil {
+			return QueryExecutionTrace{}, err
 		}
-		indexDef, err := db.validateIndexLookupMetadata(table, index)
+		indexDef, err = db.validateIndexLookupMetadata(table, indexDef)
 		if err != nil {
 			return QueryExecutionTrace{}, err
 		}

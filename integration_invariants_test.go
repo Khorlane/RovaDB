@@ -163,6 +163,43 @@ func TestQueryRejectsIndexScanWhenRootPageIsNotAnIndexPage(t *testing.T) {
 	}
 }
 
+func TestQueryRejectsIndexScanWhenLogicalIndexMetadataIsIncomplete(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"INSERT INTO users VALUES (1, 'alice')",
+		"CREATE INDEX idx_users_name ON users (name)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	indexDef := db.tables["users"].IndexDefinition("idx_users_name")
+	if indexDef == nil {
+		t.Fatal("IndexDefinition(idx_users_name) = nil")
+	}
+	indexDef.IndexID = 0
+
+	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() == nil || rows.Err().Error() != "execution: invalid select plan" {
+		t.Fatalf("Rows.Err() = %v, want %q", rows.Err(), "execution: invalid select plan")
+	}
+}
+
 func TestQueryRejectsInvalidTransactionState(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

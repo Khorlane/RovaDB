@@ -646,19 +646,19 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 			if table == nil {
 				return &Rows{err: newExecError("table not found: " + plan.IndexScan.TableName), idx: -1}, nil
 			}
-			index := runtimeSimpleIndexMetadata(table, plan.IndexScan.ColumnName)
-			if index == nil {
-				return &Rows{err: newExecError("invalid select plan"), idx: -1}, nil
+			indexDef, err := db.resolveSimpleLogicalIndex(table, plan.IndexScan.ColumnName)
+			if err != nil {
+				return &Rows{err: err, idx: -1}, nil
 			}
 			execTable := cloneSelectTableMeta(table)
 			if sel.IsCountStar {
-				count, err := db.countIndexedRows(execTable, index, plan.IndexScan.Value)
+				count, err := db.countIndexedRows(execTable, indexDef, plan.IndexScan.Value)
 				if err != nil {
 					return &Rows{err: err, idx: -1}, nil
 				}
 				return newRows([]string{"count"}, [][]any{{count}}), nil
 			}
-			candidateRows, err := db.lookupIndexedRows(table, index, plan.IndexScan.Value)
+			candidateRows, err := db.lookupIndexedRows(table, indexDef, plan.IndexScan.Value)
 			if err != nil {
 				return &Rows{err: err, idx: -1}, nil
 			}
@@ -671,6 +671,12 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 				return &Rows{err: err, idx: -1}, nil
 			}
 			return newRows(columns, materializeRows(rows)), nil
+		}
+		if tableName, columnName, ok := simpleEqualityPlanningTarget(sel); ok {
+			table := db.tables[tableName]
+			if hasMalformedSimpleLogicalIndex(table, columnName) {
+				return &Rows{err: newExecError("invalid select plan"), idx: -1}, nil
+			}
 		}
 		execTables, err := db.tablesForSelect(plan)
 		if err != nil {
@@ -737,23 +743,6 @@ func materializeRows(rows [][]parser.Value) [][]any {
 	return materialized
 }
 
-func runtimeSimpleIndexMetadata(table *executor.Table, columnName string) *planner.BasicIndex {
-	if table == nil || columnName == "" {
-		return nil
-	}
-	for _, indexDef := range table.IndexDefs {
-		legacyColumnName, ok := executor.LegacyBasicIndexColumn(indexDef)
-		if !ok || legacyColumnName != columnName || indexDef.IndexID == 0 || indexDef.RootPageID == 0 {
-			continue
-		}
-		index := planner.NewBasicIndex(table.Name, columnName)
-		index.IndexID = indexDef.IndexID
-		index.RootPageID = indexDef.RootPageID
-		return index
-	}
-	return nil
-}
-
 func (db *DB) tablesForSelect(plan *planner.SelectPlan) (map[string]*executor.Table, error) {
 	if plan == nil || plan.Stmt == nil || plan.Stmt.TableName == "" {
 		return db.tables, nil
@@ -808,8 +797,8 @@ func (db *DB) scanTableRows(table *executor.Table) ([][]parser.Value, error) {
 	return cloneRows(rows), nil
 }
 
-func (db *DB) lookupIndexedRows(table *executor.Table, idx *planner.BasicIndex, searchValue parser.Value) ([][]parser.Value, error) {
-	locators, err := db.lookupIndexedLocators(table, idx, searchValue)
+func (db *DB) lookupIndexedRows(table *executor.Table, indexDef *storage.CatalogIndex, searchValue parser.Value) ([][]parser.Value, error) {
+	locators, err := db.lookupIndexedLocators(table, indexDef, searchValue)
 	if err != nil {
 		return nil, err
 	}
@@ -825,11 +814,11 @@ func (db *DB) lookupIndexedRows(table *executor.Table, idx *planner.BasicIndex, 
 	return rows, nil
 }
 
-func (db *DB) lookupIndexedLocators(table *executor.Table, idx *planner.BasicIndex, searchValue parser.Value) ([]storage.RowLocator, error) {
-	if db == nil || table == nil || idx == nil {
+func (db *DB) lookupIndexedLocators(table *executor.Table, indexDef *storage.CatalogIndex, searchValue parser.Value) ([]storage.RowLocator, error) {
+	if db == nil || table == nil || indexDef == nil {
 		return nil, ErrInvalidArgument
 	}
-	indexDef, err := db.validateIndexLookupMetadata(table, idx)
+	indexDef, err := db.validateIndexLookupMetadata(table, indexDef)
 	if err != nil {
 		return nil, err
 	}
@@ -845,8 +834,8 @@ func (db *DB) lookupIndexedLocators(table *executor.Table, idx *planner.BasicInd
 	return locators, nil
 }
 
-func (db *DB) countIndexedRows(table *executor.Table, idx *planner.BasicIndex, searchValue parser.Value) (int, error) {
-	locators, err := db.lookupIndexedLocators(table, idx, searchValue)
+func (db *DB) countIndexedRows(table *executor.Table, indexDef *storage.CatalogIndex, searchValue parser.Value) (int, error) {
+	locators, err := db.lookupIndexedLocators(table, indexDef, searchValue)
 	if err != nil {
 		return 0, err
 	}
@@ -861,21 +850,14 @@ func (db *DB) countIndexedRows(table *executor.Table, idx *planner.BasicIndex, s
 	return count, nil
 }
 
-func (db *DB) validateIndexLookupMetadata(table *executor.Table, idx *planner.BasicIndex) (*storage.CatalogIndex, error) {
-	if db == nil || table == nil || idx == nil {
+func (db *DB) resolveSimpleLogicalIndex(table *executor.Table, columnName string) (*storage.CatalogIndex, error) {
+	if table == nil || columnName == "" {
 		return nil, ErrInvalidArgument
 	}
-	if db.pool == nil || table.Name == "" || table.TableID == 0 || idx.TableName != table.Name || idx.ColumnName == "" {
-		return nil, newExecError("index/table mismatch")
-	}
-	if !tableHasColumn(table, idx.ColumnName) {
-		return nil, newExecError("index/table mismatch")
-	}
-
 	var indexDef *storage.CatalogIndex
 	for i := range table.IndexDefs {
-		columnName, ok := executor.LegacyBasicIndexColumn(table.IndexDefs[i])
-		if !ok || columnName != idx.ColumnName {
+		legacyColumnName, ok := executor.LegacyBasicIndexColumn(table.IndexDefs[i])
+		if !ok || legacyColumnName != columnName {
 			continue
 		}
 		if indexDef != nil {
@@ -886,10 +868,25 @@ func (db *DB) validateIndexLookupMetadata(table *executor.Table, idx *planner.Ba
 	if indexDef == nil || indexDef.IndexID == 0 || indexDef.RootPageID == 0 {
 		return nil, newExecError("index/table mismatch")
 	}
-	if idx.IndexID == 0 || idx.RootPageID == 0 {
+	return indexDef, nil
+}
+
+func (db *DB) validateIndexLookupMetadata(table *executor.Table, indexDef *storage.CatalogIndex) (*storage.CatalogIndex, error) {
+	if db == nil || table == nil || indexDef == nil {
+		return nil, ErrInvalidArgument
+	}
+	if db.pool == nil || table.Name == "" || table.TableID == 0 {
 		return nil, newExecError("index/table mismatch")
 	}
-	if idx.IndexID != indexDef.IndexID || idx.RootPageID != indexDef.RootPageID {
+	columnName, ok := executor.LegacyBasicIndexColumn(*indexDef)
+	if !ok || !tableHasColumn(table, columnName) {
+		return nil, newExecError("index/table mismatch")
+	}
+	resolvedIndexDef, err := db.resolveSimpleLogicalIndex(table, columnName)
+	if err != nil {
+		return nil, err
+	}
+	if resolvedIndexDef.Name != indexDef.Name || resolvedIndexDef.IndexID != indexDef.IndexID || resolvedIndexDef.RootPageID != indexDef.RootPageID {
 		return nil, newExecError("index/table mismatch")
 	}
 
@@ -920,6 +917,106 @@ func tableHasColumn(table *executor.Table, columnName string) bool {
 		}
 	}
 	return false
+}
+
+func hasMalformedSimpleLogicalIndex(table *executor.Table, columnName string) bool {
+	if table == nil || columnName == "" {
+		return false
+	}
+	for _, indexDef := range table.IndexDefs {
+		legacyColumnName, ok := executor.LegacyBasicIndexColumn(indexDef)
+		if !ok || legacyColumnName != columnName {
+			continue
+		}
+		if indexDef.IndexID == 0 || indexDef.RootPageID == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func simpleEqualityPlanningTarget(sel *parser.SelectExpr) (string, string, bool) {
+	if sel == nil || sel.TableName == "" {
+		return "", "", false
+	}
+	tableRef := sel.PrimaryTableRef()
+	if sel.Predicate != nil {
+		if sel.Predicate.Kind != parser.PredicateKindComparison || sel.Predicate.Comparison == nil {
+			return "", "", false
+		}
+		cond := sel.Predicate.Comparison
+		if cond.Operator != "=" || cond.RightRef != "" {
+			return "", "", false
+		}
+		if cond.LeftExpr != nil && cond.RightExpr != nil {
+			leftIsLiteral, leftColumnName, ok := simplePlanningOperandShape(cond.LeftExpr)
+			if !ok || leftColumnName == "" || leftIsLiteral {
+				return "", "", false
+			}
+			rightIsLiteral, rightColumnName, ok := simplePlanningOperandShape(cond.RightExpr)
+			if !ok || rightColumnName != "" || !rightIsLiteral {
+				return "", "", false
+			}
+			columnName, ok := normalizeSimplePlanningColumnName(leftColumnName, tableRef)
+			if !ok {
+				return "", "", false
+			}
+			return sel.TableName, columnName, true
+		}
+		if cond.LeftExpr != nil || cond.RightExpr != nil {
+			return "", "", false
+		}
+		columnName, ok := normalizeSimplePlanningColumnName(cond.Left, tableRef)
+		if !ok {
+			return "", "", false
+		}
+		return sel.TableName, columnName, true
+	}
+	if sel.Where == nil || len(sel.Where.Items) != 1 {
+		return "", "", false
+	}
+	item := sel.Where.Items[0]
+	if item.Op != "" || item.Condition.Operator != "=" || item.Condition.RightRef != "" || item.Condition.LeftExpr != nil || item.Condition.RightExpr != nil {
+		return "", "", false
+	}
+	columnName, ok := normalizeSimplePlanningColumnName(item.Condition.Left, tableRef)
+	if !ok {
+		return "", "", false
+	}
+	return sel.TableName, columnName, true
+}
+
+func normalizeSimplePlanningColumnName(name string, tableRef *parser.TableRef) (string, bool) {
+	if !strings.Contains(name, ".") {
+		return name, true
+	}
+	parts := strings.Split(name, ".")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || tableRef == nil {
+		return "", false
+	}
+	if parts[0] != tableRef.Name && (tableRef.Alias == "" || parts[0] != tableRef.Alias) {
+		return "", false
+	}
+	return parts[1], true
+}
+
+func simplePlanningOperandShape(expr *parser.ValueExpr) (bool, string, bool) {
+	if expr == nil {
+		return false, "", false
+	}
+	switch expr.Kind {
+	case parser.ValueExprKindLiteral:
+		return true, "", true
+	case parser.ValueExprKindColumnRef:
+		if expr.Qualifier != "" {
+			return false, expr.Qualifier + "." + expr.Column, true
+		}
+		return false, expr.Column, true
+	case parser.ValueExprKindParen:
+		return simplePlanningOperandShape(expr.Inner)
+	default:
+		return false, "", false
+	}
 }
 
 func (db *DB) pageReaderForLookup(pageID uint32) ([]byte, error) {
