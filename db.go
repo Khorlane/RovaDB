@@ -726,7 +726,6 @@ func cloneSelectTableMeta(table *executor.Table) *executor.Table {
 		TableID:   table.TableID,
 		IsSystem:  table.IsSystem,
 		Columns:   append([]parser.ColumnDef(nil), table.Columns...),
-		Indexes:   table.Indexes,
 		IndexDefs: cloneIndexDefs(table.IndexDefs),
 	}
 	cloned.SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
@@ -781,7 +780,6 @@ func (db *DB) tablesForSelect(plan *planner.SelectPlan) (map[string]*executor.Ta
 			IsSystem:  table.IsSystem,
 			Columns:   append([]parser.ColumnDef(nil), table.Columns...),
 			Rows:      rows,
-			Indexes:   table.Indexes,
 			IndexDefs: cloneIndexDefs(table.IndexDefs),
 		}
 		execTables[table.Name].SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
@@ -870,8 +868,7 @@ func (db *DB) resolveSimpleLogicalIndex(table *executor.Table, columnName string
 	}
 	var indexDef *storage.CatalogIndex
 	for i := range table.IndexDefs {
-		legacyColumnName, ok := executor.LegacyBasicIndexColumn(table.IndexDefs[i])
-		if !ok || legacyColumnName != columnName {
+		if !isSimpleIndexOnColumn(table.IndexDefs[i], columnName) {
 			continue
 		}
 		if indexDef != nil {
@@ -892,7 +889,7 @@ func (db *DB) validateIndexLookupMetadata(table *executor.Table, indexDef *stora
 	if db.pool == nil || table.Name == "" || table.TableID == 0 {
 		return nil, newExecError("index/table mismatch")
 	}
-	columnName, ok := executor.LegacyBasicIndexColumn(*indexDef)
+	columnName, ok := simpleIndexColumn(*indexDef)
 	if !ok || !tableHasColumn(table, columnName) {
 		return nil, newExecError("index/table mismatch")
 	}
@@ -938,8 +935,7 @@ func hasMalformedSimpleLogicalIndex(table *executor.Table, columnName string) bo
 		return false
 	}
 	for _, indexDef := range table.IndexDefs {
-		legacyColumnName, ok := executor.LegacyBasicIndexColumn(indexDef)
-		if !ok || legacyColumnName != columnName {
+		if !isSimpleIndexOnColumn(indexDef, columnName) {
 			continue
 		}
 		if indexDef.IndexID == 0 || indexDef.RootPageID == 0 {
@@ -947,6 +943,18 @@ func hasMalformedSimpleLogicalIndex(table *executor.Table, columnName string) bo
 		}
 	}
 	return false
+}
+
+func simpleIndexColumn(indexDef storage.CatalogIndex) (string, bool) {
+	if indexDef.Unique || len(indexDef.Columns) != 1 || indexDef.Columns[0].Name == "" || indexDef.Columns[0].Desc {
+		return "", false
+	}
+	return indexDef.Columns[0].Name, true
+}
+
+func isSimpleIndexOnColumn(indexDef storage.CatalogIndex, columnName string) bool {
+	name, ok := simpleIndexColumn(indexDef)
+	return ok && name == columnName
 }
 
 func simpleEqualityPlanningTarget(sel *parser.SelectExpr) (string, string, bool) {
@@ -1124,7 +1132,7 @@ func plannerTableMetadata(tables map[string]*executor.Table) map[string]*planner
 		}
 		simpleIndexes := make(map[string]planner.SimpleIndex)
 		for _, indexDef := range table.IndexDefs {
-			columnName, ok := executor.LegacyBasicIndexColumn(indexDef)
+			columnName, ok := simpleIndexColumn(indexDef)
 			if !ok || indexDef.IndexID == 0 || indexDef.RootPageID == 0 {
 				continue
 			}
@@ -1567,11 +1575,6 @@ func (db *DB) applyStagedIndexCreate(stagedTables map[string]*executor.Table, ta
 	if indexDef.IndexID == 0 {
 		indexDef.IndexID = nextIndexID(stagedTables)
 	}
-	if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok {
-		if index := table.Indexes[columnName]; index != nil {
-			index.IndexID = indexDef.IndexID
-		}
-	}
 
 	var pages []stagedPage
 	if indexDef.RootPageID == 0 {
@@ -1580,12 +1583,6 @@ func (db *DB) applyStagedIndexCreate(stagedTables map[string]*executor.Table, ta
 			return err
 		}
 		indexDef.RootPageID = uint32(rootPageID)
-		if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok {
-			if index := table.Indexes[columnName]; index != nil {
-				index.IndexID = indexDef.IndexID
-				index.RootPageID = indexDef.RootPageID
-			}
-		}
 		pages = append(pages, stagedPage{
 			id:    rootPageID,
 			data:  storage.InitIndexLeafPage(uint32(rootPageID)),
@@ -2037,28 +2034,9 @@ func cloneTable(table *executor.Table) *executor.Table {
 		IsSystem:  table.IsSystem,
 		Columns:   columns,
 		Rows:      rows,
-		Indexes:   cloneIndexes(table.Indexes),
 		IndexDefs: cloneIndexDefs(table.IndexDefs),
 	}
 	cloned.SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
-	return cloned
-}
-
-func cloneIndexes(indexes map[string]*planner.BasicIndex) map[string]*planner.BasicIndex {
-	if len(indexes) == 0 {
-		return nil
-	}
-
-	cloned := make(map[string]*planner.BasicIndex, len(indexes))
-	for columnName, index := range indexes {
-		if index == nil {
-			continue
-		}
-		basic := planner.NewBasicIndex(index.TableName, index.ColumnName)
-		basic.IndexID = index.IndexID
-		basic.RootPageID = index.RootPageID
-		cloned[columnName] = basic
-	}
 	return cloned
 }
 
@@ -2222,11 +2200,6 @@ func (db *DB) buildRebuiltIndexPagesForDefs(table *executor.Table, rows [][]pars
 			id:   rootPageID,
 			data: storage.InitIndexLeafPage(indexDef.RootPageID),
 		})
-		if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok {
-			if index := table.Indexes[columnName]; index != nil {
-				index.RootPageID = indexDef.RootPageID
-			}
-		}
 
 		for rowIndex, row := range rows {
 			key, err := encodeIndexKeyForRow(row, table.Columns, *indexDef)
@@ -2400,11 +2373,6 @@ func (db *DB) propagateIndexSplit(table *executor.Table, indexDef *storage.Catal
 	}
 	stager.stage(stagedPage{id: newRootPageID, data: newRootPageData, isNew: newRootIsNew})
 	indexDef.RootPageID = uint32(newRootPageID)
-	if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok {
-		if index := table.Indexes[columnName]; index != nil {
-			index.RootPageID = indexDef.RootPageID
-		}
-	}
 	return nil
 }
 
@@ -2613,7 +2581,6 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 			TableID:   table.TableID,
 			IsSystem:  isSystemCatalogTableName(table.Name),
 			Columns:   columns,
-			Indexes:   make(map[string]*planner.BasicIndex),
 			IndexDefs: cloneIndexDefs(table.Indexes),
 		}
 		tables[table.Name].SetStorageMeta(rootPageID, table.RowCount)
@@ -2621,14 +2588,6 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 			if strictDirectoryRoots && index.RootPageID == 0 {
 				return nil, errInvalidStoredTableMeta
 			}
-			columnName, ok := executor.LegacyBasicIndexColumn(index)
-			if !ok {
-				continue
-			}
-			basic := planner.NewBasicIndex(table.Name, columnName)
-			basic.IndexID = index.IndexID
-			basic.RootPageID = index.RootPageID
-			tables[table.Name].Indexes[columnName] = basic
 		}
 	}
 
@@ -2675,13 +2634,6 @@ func executeCreateIndex(stmt *parser.CreateIndexStmt, tables map[string]*executo
 	if err := executor.ValidateUniqueIndexesForTable(table); err != nil {
 		table.IndexDefs = table.IndexDefs[:len(table.IndexDefs)-1]
 		return 0, nil, err
-	}
-	if columnName, ok := executor.LegacyBasicIndexColumn(indexDef); ok {
-		if table.Indexes == nil {
-			table.Indexes = make(map[string]*planner.BasicIndex)
-		}
-		index := planner.NewBasicIndex(table.Name, columnName)
-		table.Indexes[columnName] = index
 	}
 
 	return 0, tables, nil
@@ -2736,9 +2688,6 @@ func executeDropIndex(stmt *parser.DropIndexStmt, tables map[string]*executor.Ta
 		indexDef := table.IndexDefinition(stmt.Name)
 		if indexDef == nil {
 			continue
-		}
-		if columnName, ok := executor.LegacyBasicIndexColumn(*indexDef); ok && table.Indexes != nil {
-			delete(table.Indexes, columnName)
 		}
 		filtered := make([]storage.CatalogIndex, 0, len(table.IndexDefs)-1)
 		for _, existing := range table.IndexDefs {
@@ -2803,70 +2752,6 @@ func droppedTableRootPageIDs(tables map[string]*executor.Table, tableName string
 		pageIDs = append(pageIDs, table.RootPageID())
 	}
 	return pageIDs
-}
-
-func (db *DB) defineLegacyBasicIndex(tableName, columnName string) error {
-	if db == nil {
-		return ErrInvalidArgument
-	}
-
-	var committedTables map[string]*executor.Table
-	committed, err := db.execMutatingStatement(func() error {
-		stagedTables := cloneTables(db.tables)
-		if err := db.loadRowsIntoTables(stagedTables, tableName); err != nil {
-			return err
-		}
-		table := stagedTables[tableName]
-		if table == nil {
-			return newExecError("table not found")
-		}
-		found := false
-		for _, column := range table.Columns {
-			if column.Name == columnName {
-				found = true
-			}
-		}
-		if !found {
-			return newExecError("column not found")
-		}
-		if table.Indexes == nil {
-			table.Indexes = make(map[string]*planner.BasicIndex)
-		}
-		indexDef := storage.CatalogIndex{
-			Name:   columnName,
-			Unique: false,
-			Columns: []storage.CatalogIndexColumn{
-				{Name: columnName},
-			},
-		}
-		if table.IndexDefinition(indexDef.Name) != nil {
-			return newExecError("index already exists")
-		}
-		if table.HasEquivalentIndexDefinition(indexDef) {
-			return newExecError("equivalent index already exists")
-		}
-		table.IndexDefs = append(table.IndexDefs, indexDef)
-		index := planner.NewBasicIndex(tableName, columnName)
-		index.RootPageID = indexDef.RootPageID
-		table.Indexes[columnName] = index
-
-		if err := db.applyStagedIndexCreate(stagedTables, tableName, indexDef.Name); err != nil {
-			return err
-		}
-		committedTables = stagedTables
-		return nil
-	})
-	if committed {
-		if err := validateTables(committedTables, false); err != nil {
-			return err
-		}
-		clearLoadedRows(committedTables)
-		db.tables = committedTables
-	}
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 type pagerPageLoader struct {
@@ -3080,7 +2965,6 @@ func validateIndexConsistency(table *executor.Table) error {
 	}
 
 	seenIndexNames := make(map[string]struct{}, len(table.IndexDefs))
-	legacyIndexDefs := make(map[string]storage.CatalogIndex)
 	for _, indexDef := range table.IndexDefs {
 		if indexDef.Name == "" {
 			return newExecError("index/table mismatch")
@@ -3089,32 +2973,17 @@ func validateIndexConsistency(table *executor.Table) error {
 			return newExecError("index/table mismatch")
 		}
 		seenIndexNames[indexDef.Name] = struct{}{}
-		if columnName, ok := executor.LegacyBasicIndexColumn(indexDef); ok {
-			if _, exists := legacyIndexDefs[columnName]; exists {
-				return newExecError("index/table mismatch")
+		if columnName, ok := simpleIndexColumn(indexDef); ok {
+			for _, other := range table.IndexDefs {
+				if other.Name == indexDef.Name {
+					continue
+				}
+				if otherColumn, ok := simpleIndexColumn(other); ok && otherColumn == columnName {
+					return newExecError("index/table mismatch")
+				}
 			}
-			legacyIndexDefs[columnName] = indexDef
 		}
 	}
-	if len(table.Indexes) == 0 {
-		return nil
-	}
-
-	for columnName, index := range table.Indexes {
-		if index == nil {
-			return newExecError("index/table mismatch")
-		}
-		if _, exists := legacyIndexDefs[columnName]; !exists {
-			return newExecError("index/table mismatch")
-		}
-		if index.RootPageID != legacyIndexDefs[columnName].RootPageID {
-			return newExecError("index/table mismatch")
-		}
-		if index.TableName != table.Name || index.ColumnName != columnName {
-			return newExecError("index/table mismatch")
-		}
-	}
-
 	return nil
 }
 

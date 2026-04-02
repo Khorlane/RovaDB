@@ -120,7 +120,6 @@ func TestExplainQueryPathUsesLogicalIndexMetadataWhenLegacyEntriesAreCleared(t *
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	delete(db.tables["users"].Indexes, "name")
 
 	trace, err := db.ExplainQueryPath("SELECT id FROM users WHERE name = 'alice'")
 	if err != nil {
@@ -152,7 +151,6 @@ func TestExplainQueryPathUsesLogicalIndexMetadataWhenRuntimeShellIsAbsent(t *tes
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	delete(db.tables["users"].Indexes, "name")
 
 	trace, err := db.ExplainQueryPath("SELECT id FROM users WHERE name = 'alice'")
 	if err != nil {
@@ -181,12 +179,10 @@ func TestExplainQueryPathRejectsIndexScanWithNonIndexRoot(t *testing.T) {
 	}
 
 	table := db.tables["users"]
-	index := table.Indexes["name"]
 	indexDef := table.IndexDefinition("idx_users_name")
-	if table == nil || index == nil || indexDef == nil {
-		t.Fatalf("index setup failed: table=%v index=%v indexDef=%v", table, index, indexDef)
+	if table == nil || indexDef == nil {
+		t.Fatalf("index setup failed: table=%v indexDef=%v", table, indexDef)
 	}
-	index.RootPageID = uint32(table.RootPageID())
 	indexDef.RootPageID = uint32(table.RootPageID())
 
 	_, err = db.ExplainQueryPath("SELECT id FROM users WHERE name = 'alice'")

@@ -53,10 +53,6 @@ func TestExecAPIDropIndexRemovesDefinitionAndPlannerUse(t *testing.T) {
 	if table.IndexDefinition("idx_users_name") != nil {
 		t.Fatalf("IndexDefinition(idx_users_name) = %#v, want nil", table.IndexDefinition("idx_users_name"))
 	}
-	if len(table.Indexes) != 0 {
-		t.Fatalf("table.Indexes = %#v, want empty", table.Indexes)
-	}
-
 	plan, err = planner.PlanSelect(stmt, plannerTableMetadata(db.tables))
 	if err != nil {
 		t.Fatalf("PlanSelect(after drop) error = %v", err)
@@ -118,9 +114,6 @@ func TestExecAPIDropIndexLeavesOtherIndexesIntactAndPersistsAcrossReopen(t *test
 	}
 	if table.IndexDefinition("idx_users_name_score") == nil {
 		t.Fatalf("IndexDefinition(idx_users_name_score) = nil, want non-nil (defs=%#v)", table.IndexDefs)
-	}
-	if len(table.Indexes) != 0 {
-		t.Fatalf("table.Indexes = %#v, want no legacy index after dropping the only compatible one", table.Indexes)
 	}
 }
 

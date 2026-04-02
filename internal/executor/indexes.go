@@ -1,24 +1,8 @@
 package executor
 
-import (
-	"github.com/Khorlane/RovaDB/internal/parser"
-	"github.com/Khorlane/RovaDB/internal/planner"
-)
+import "github.com/Khorlane/RovaDB/internal/parser"
 
 func rebuildIndexesForTable(table *Table) error {
-	if table == nil || len(table.Indexes) == 0 {
-		return nil
-	}
-
-	for columnName, index := range table.Indexes {
-		if index == nil {
-			table.Indexes[columnName] = planner.NewBasicIndex(table.Name, columnName)
-			index = table.Indexes[columnName]
-		}
-		index.TableName = table.Name
-		index.ColumnName = columnName
-	}
-
 	return nil
 }
 

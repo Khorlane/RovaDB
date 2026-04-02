@@ -48,9 +48,6 @@ func TestInterruptedDropIndexRecoversLastCommittedIndexState(t *testing.T) {
 	if table.IndexDefinition("idx_users_name") != nil {
 		t.Fatalf("IndexDefinition(idx_users_name) = %#v, want nil after WAL recovery", table.IndexDefinition("idx_users_name"))
 	}
-	if len(table.Indexes) != 0 {
-		t.Fatalf("table.Indexes = %#v, want no active index after WAL recovery", table.Indexes)
-	}
 	if _, err := os.Stat(storage.JournalPath(path)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("journal stat error = %v, want not exists after recovery", err)
 	}
@@ -77,7 +74,7 @@ func TestDropIndexStateStaysGoneAcrossRepeatedReopen(t *testing.T) {
 	}
 
 	db = reopenDB(t, path)
-	if table := db.tables["users"]; table == nil || table.IndexDefinition("idx_users_name") != nil || len(table.Indexes) != 0 {
+	if table := db.tables["users"]; table == nil || table.IndexDefinition("idx_users_name") != nil {
 		t.Fatalf("after first reopen table = %#v, want no surviving index", table)
 	}
 	if err := db.Close(); err != nil {
@@ -86,7 +83,7 @@ func TestDropIndexStateStaysGoneAcrossRepeatedReopen(t *testing.T) {
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	if table := db.tables["users"]; table == nil || table.IndexDefinition("idx_users_name") != nil || len(table.Indexes) != 0 {
+	if table := db.tables["users"]; table == nil || table.IndexDefinition("idx_users_name") != nil {
 		t.Fatalf("after second reopen table = %#v, want no surviving index", table)
 	}
 }

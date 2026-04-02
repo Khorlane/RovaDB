@@ -2,7 +2,6 @@ package executor
 
 import (
 	"github.com/Khorlane/RovaDB/internal/parser"
-	"github.com/Khorlane/RovaDB/internal/planner"
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
@@ -24,7 +23,6 @@ type Table struct {
 	IsSystem          bool
 	Columns           []parser.ColumnDef
 	Rows              [][]parser.Value // transient operation rows; persisted storage is authoritative
-	Indexes           map[string]*planner.BasicIndex
 	IndexDefs         []storage.CatalogIndex
 	rootPageID        storage.PageID
 	persistedRowCount uint32

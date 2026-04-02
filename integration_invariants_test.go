@@ -50,77 +50,6 @@ func TestOpenRejectsExactStorageRowCountMismatch(t *testing.T) {
 	}
 }
 
-func TestQueryRejectsIndexTableMismatch(t *testing.T) {
-	db, err := Open(testDBPath(t))
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer db.Close()
-
-	for _, sql := range []string{
-		"CREATE TABLE users (id INT, name TEXT)",
-		"INSERT INTO users VALUES (1, 'alice')",
-		"INSERT INTO users VALUES (2, 'bob')",
-	} {
-		if _, err := db.Exec(sql); err != nil {
-			t.Fatalf("Exec(%q) error = %v", sql, err)
-		}
-	}
-	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
-	}
-
-	db.tables["users"].Indexes["name"].RootPageID++
-
-	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
-	if err != nil {
-		t.Fatalf("Query() error = %v", err)
-	}
-	defer rows.Close()
-
-	if rows.Next() {
-		t.Fatal("Next() = true, want false")
-	}
-	if rows.Err() == nil || rows.Err().Error() != "execution: index/table mismatch" {
-		t.Fatalf("Rows.Err() = %v, want %q", rows.Err(), "execution: index/table mismatch")
-	}
-}
-
-func TestQueryRejectsLegacyIndexWithoutMatchingDefinition(t *testing.T) {
-	db, err := Open(testDBPath(t))
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer db.Close()
-
-	for _, sql := range []string{
-		"CREATE TABLE users (id INT, name TEXT)",
-		"INSERT INTO users VALUES (1, 'alice')",
-	} {
-		if _, err := db.Exec(sql); err != nil {
-			t.Fatalf("Exec(%q) error = %v", sql, err)
-		}
-	}
-	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
-	}
-
-	db.tables["users"].IndexDefs = nil
-
-	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
-	if err != nil {
-		t.Fatalf("Query() error = %v", err)
-	}
-	defer rows.Close()
-
-	if rows.Next() {
-		t.Fatal("Next() = true, want false")
-	}
-	if rows.Err() == nil || rows.Err().Error() != "execution: index/table mismatch" {
-		t.Fatalf("Rows.Err() = %v, want %q", rows.Err(), "execution: index/table mismatch")
-	}
-}
-
 func TestQueryRejectsIndexScanWhenRootPageIsNotAnIndexPage(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
@@ -142,12 +71,10 @@ func TestQueryRejectsIndexScanWhenRootPageIsNotAnIndexPage(t *testing.T) {
 	if table == nil {
 		t.Fatal("db.tables[users] = nil")
 	}
-	index := table.Indexes["name"]
 	indexDef := table.IndexDefinition("idx_users_name")
-	if index == nil || indexDef == nil {
-		t.Fatalf("index setup failed: index=%v indexDef=%v", index, indexDef)
+	if indexDef == nil {
+		t.Fatalf("index setup failed: indexDef=%v", indexDef)
 	}
-	index.RootPageID = uint32(table.RootPageID())
 	indexDef.RootPageID = uint32(table.RootPageID())
 
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")

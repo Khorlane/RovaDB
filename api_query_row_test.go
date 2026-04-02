@@ -352,8 +352,6 @@ func TestQueryRowIndexedEqualityUsesDurableLookupPath(t *testing.T) {
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	delete(db.tables["users"].Indexes, "name")
-
 	row := db.QueryRow("SELECT id FROM users WHERE name = 'bob'")
 	var id int
 	if err := row.Scan(&id); err != nil {
@@ -386,8 +384,6 @@ func TestQueryRowIndexedEqualityDuplicateMatchesRemainMultipleRows(t *testing.T)
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	delete(db.tables["users"].Indexes, "name")
-
 	row := db.QueryRow("SELECT id FROM users WHERE name = 'alice'")
 	var id int
 	if err := row.Scan(&id); !errors.Is(err, ErrMultipleRows) {
@@ -416,8 +412,6 @@ func TestQueryRowIndexedEqualityNoMatchRemainsNoRows(t *testing.T) {
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	delete(db.tables["users"].Indexes, "name")
-
 	row := db.QueryRow("SELECT id FROM users WHERE name = 'zoe'")
 	var id int
 	if err := row.Scan(&id); !errors.Is(err, ErrNoRows) {
@@ -452,7 +446,6 @@ func TestQueryRowIndexedEqualityUsesLogicalIndexMetadataWhenRuntimeShellIsAbsent
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	delete(db.tables["users"].Indexes, "name")
 
 	row := db.QueryRow("SELECT id FROM users WHERE name = 'bob'")
 	var id int

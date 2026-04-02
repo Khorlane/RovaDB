@@ -6,7 +6,6 @@ import (
 
 	"github.com/Khorlane/RovaDB/internal/executor"
 	"github.com/Khorlane/RovaDB/internal/parser"
-	"github.com/Khorlane/RovaDB/internal/planner"
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
@@ -94,7 +93,6 @@ func (db *DB) ensureSystemCatalogTables(tables map[string]*executor.Table) (map[
 			TableID:   nextTableID(tables),
 			IsSystem:  true,
 			Columns:   append([]parser.ColumnDef(nil), spec.columns...),
-			Indexes:   make(map[string]*planner.BasicIndex),
 			IndexDefs: nil,
 		}
 		table.SetStorageMeta(rootPageID, 0)

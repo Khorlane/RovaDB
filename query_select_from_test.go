@@ -390,8 +390,8 @@ func TestQuerySelectWhereIndexedEquality(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
 	}
 
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
@@ -425,8 +425,6 @@ func TestQuerySelectWhereIndexedEqualityUsesPageBackedLookup(t *testing.T) {
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	delete(db.tables["users"].Indexes, "name")
-
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
@@ -449,8 +447,8 @@ func TestQuerySelectWhereIndexedEqualityNoMatch(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
-	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
 	}
 
 	rows, err := db.Query("SELECT * FROM users WHERE name = 'bob'")
@@ -483,8 +481,6 @@ func TestQuerySelectWhereIndexedEqualityNoMatchUsesPageBackedLookup(t *testing.T
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	delete(db.tables["users"].Indexes, "name")
-
 	rows, err := db.Query("SELECT * FROM users WHERE name = 'bob'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
@@ -518,8 +514,8 @@ func TestQuerySelectWhereIndexedEqualityWithProjectionAndOrderBy(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
 	}
 
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice' ORDER BY id DESC")
@@ -559,8 +555,6 @@ func TestQuerySelectWhereIndexedEqualityAfterReopenUsesPageBackedLookup(t *testi
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	delete(db.tables["users"].Indexes, "name")
-
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice' ORDER BY id DESC")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
@@ -589,8 +583,8 @@ func TestQuerySelectCountStarWithIndexedEquality(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
 	}
 
 	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE name = 'alice'")
@@ -624,8 +618,6 @@ func TestQuerySelectCountStarWithIndexedEqualitySingleMatch(t *testing.T) {
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	delete(db.tables["users"].Indexes, "name")
-
 	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE name = 'bob'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
@@ -657,8 +649,6 @@ func TestQuerySelectCountStarWithIndexedEqualityDuplicateMatchesThroughBTree(t *
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	delete(db.tables["users"].Indexes, "name")
-
 	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE name = 'alice'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
@@ -689,8 +679,6 @@ func TestQuerySelectCountStarWithIndexedEqualityNoMatchesThroughBTree(t *testing
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	delete(db.tables["users"].Indexes, "name")
-
 	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE name = 'zoe'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)

@@ -40,12 +40,3 @@ func EquivalentIndexDefinition(left, right storage.CatalogIndex) bool {
 	}
 	return true
 }
-
-// LegacyBasicIndexColumn returns the legacy planner-compatible column name for a
-// persisted definition when the definition can be represented as a BasicIndex.
-func LegacyBasicIndexColumn(index storage.CatalogIndex) (string, bool) {
-	if index.Unique || len(index.Columns) != 1 || index.Columns[0].Name == "" || index.Columns[0].Desc {
-		return "", false
-	}
-	return index.Columns[0].Name, true
-}

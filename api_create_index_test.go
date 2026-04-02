@@ -55,16 +55,6 @@ func TestExecAPICreateIndexSingleColumnPersistsAndSupportsQueryPath(t *testing.T
 	if indexDef.IndexID == 0 {
 		t.Fatal("IndexDefinition(idx_users_name).IndexID = 0, want nonzero")
 	}
-	if table.Indexes["name"] == nil {
-		t.Fatal("table.Indexes[name] = nil, want active BasicIndex")
-	}
-	if table.Indexes["name"].RootPageID != indexDef.RootPageID {
-		t.Fatalf("table.Indexes[name].RootPageID = %d, want %d", table.Indexes["name"].RootPageID, indexDef.RootPageID)
-	}
-	if table.Indexes["name"].IndexID != indexDef.IndexID {
-		t.Fatalf("table.Indexes[name].IndexID = %d, want %d", table.Indexes["name"].IndexID, indexDef.IndexID)
-	}
-
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice' ORDER BY id")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
@@ -195,9 +185,6 @@ func TestExecAPICreateIndexPersistsRichDefinitionWithoutActivatingLegacyIndex(t 
 	}
 	if len(indexDef.Columns) != 2 || indexDef.Columns[0].Name != "name" || indexDef.Columns[1].Name != "score" || !indexDef.Columns[1].Desc {
 		t.Fatalf("indexDef.Columns = %#v, want [name score DESC]", indexDef.Columns)
-	}
-	if len(table.Indexes) != 0 {
-		t.Fatalf("table.Indexes = %#v, want no active legacy index", table.Indexes)
 	}
 }
 
@@ -418,10 +405,6 @@ func TestExecAPIMultiColumnUniqueIndexPersistsAndEnforcesAfterReopen(t *testing.
 	if table.IndexDefinition("idx_users_full_name").RootPageID == 0 {
 		t.Fatal("IndexDefinition(idx_users_full_name).RootPageID = 0, want nonzero")
 	}
-	if len(table.Indexes) != 0 {
-		t.Fatalf("table.Indexes = %#v, want no legacy planner index for multi-column definition", table.Indexes)
-	}
-
 	if _, err := db.Exec("INSERT INTO users VALUES (3, 'Ada', 'Lovelace')"); err == nil || err.Error() != "execution: duplicate indexed key values already exist" {
 		t.Fatalf("Exec(insert duplicate tuple) error = %v, want %q", err, "execution: duplicate indexed key values already exist")
 	}
@@ -466,9 +449,6 @@ func TestCreateIndexRecoveryDoesNotExposePartialIndex(t *testing.T) {
 	}
 	if table.IndexDefinition("idx_users_name") == nil {
 		t.Fatalf("IndexDefinition(idx_users_name) = nil, want persisted index after WAL recovery")
-	}
-	if len(table.Indexes) == 0 {
-		t.Fatalf("table.Indexes = %#v, want active index after WAL recovery", table.Indexes)
 	}
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
 	if err != nil {

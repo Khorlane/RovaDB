@@ -29,8 +29,8 @@ func TestIndexMetadataPersistsAcrossReopen(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
-		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
+	if _, err := db.Exec("CREATE INDEX name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -43,19 +43,12 @@ func TestIndexMetadataPersistsAcrossReopen(t *testing.T) {
 	if table == nil {
 		t.Fatal("db.tables[\"users\"] = nil")
 	}
-	index := table.Indexes["name"]
-	if index == nil {
-		t.Fatal("table.Indexes[\"name\"] = nil")
-	}
-	if index.TableName != "users" || index.ColumnName != "name" {
-		t.Fatalf("index metadata = (%q, %q), want (%q, %q)", index.TableName, index.ColumnName, "users", "name")
-	}
 	indexDef := table.IndexDefinition("name")
 	if indexDef == nil {
 		t.Fatalf("IndexDefinition(name) = nil, defs=%#v", table.IndexDefs)
 	}
-	if index.IndexID != indexDef.IndexID || index.RootPageID != indexDef.RootPageID {
-		t.Fatalf("index metadata ids = (%d, %d), want (%d, %d)", index.IndexID, index.RootPageID, indexDef.IndexID, indexDef.RootPageID)
+	if indexDef.IndexID == 0 || indexDef.RootPageID == 0 {
+		t.Fatalf("indexDef = %#v, want nonzero durable metadata", indexDef)
 	}
 }
 
@@ -69,8 +62,8 @@ func TestCatalogRoundTripPreservesIndexMetadataForOpen(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if err := db.defineLegacyBasicIndex("users", "id"); err != nil {
-		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
+	if _, err := db.Exec("CREATE INDEX id ON users (id)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -135,14 +128,9 @@ func TestCatalogRoundTripPreservesIndexMetadataForOpen(t *testing.T) {
 	if indexDef.RootPageID != indexRoot {
 		t.Fatalf("IndexDefinition(id).RootPageID = %d, want %d", indexDef.RootPageID, indexRoot)
 	}
-	if basic := table.Indexes["id"]; basic == nil {
-		t.Fatal("table.Indexes[id] = nil")
-	} else if basic.RootPageID != indexRoot {
-		t.Fatalf("table.Indexes[id].RootPageID = %d, want %d", basic.RootPageID, indexRoot)
-	}
 }
 
-func TestOpenRetainsUnsupportedIndexDefinitionsWithoutActivatingBasicIndex(t *testing.T) {
+func TestOpenRetainsUnsupportedIndexDefinitions(t *testing.T) {
 	path := testDBPath(t)
 
 	dbFile, pager := openRawStorage(t, path)
@@ -198,9 +186,6 @@ func TestOpenRetainsUnsupportedIndexDefinitionsWithoutActivatingBasicIndex(t *te
 	}
 	if len(table.IndexDefs) != 1 || table.IndexDefs[0].Name != "idx_users_id_name" {
 		t.Fatalf("table.IndexDefs = %#v, want retained rich index definition", table.IndexDefs)
-	}
-	if len(table.Indexes) != 0 {
-		t.Fatalf("table.Indexes = %#v, want no active BasicIndex for unsupported definition", table.Indexes)
 	}
 }
 
@@ -442,8 +427,6 @@ func TestIndexedCountStarLookupSurvivesReopen(t *testing.T) {
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	delete(db.tables["users"].Indexes, "name")
-
 	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE name = 'alice'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
@@ -480,8 +463,6 @@ func TestIndexedQueryRowLookupSurvivesReopen(t *testing.T) {
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	delete(db.tables["users"].Indexes, "name")
-
 	row := db.QueryRow("SELECT id FROM users WHERE name = 'bob'")
 	var id int
 	if err := row.Scan(&id); err != nil {
@@ -520,8 +501,6 @@ func TestIndexedQueryLookupSurvivesReopenWithoutLegacyEntries(t *testing.T) {
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	delete(db.tables["users"].Indexes, "name")
-
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice' ORDER BY id")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
@@ -559,8 +538,6 @@ func TestIndexedQueryLookupSurvivesReopenWithoutRuntimeIndexShell(t *testing.T) 
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	delete(db.tables["users"].Indexes, "name")
-
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice' ORDER BY id")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
@@ -598,8 +575,6 @@ func TestIndexedCountStarSurvivesReopenWithoutRuntimeIndexShell(t *testing.T) {
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	delete(db.tables["users"].Indexes, "name")
-
 	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE name = 'alice'")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
@@ -926,7 +901,6 @@ func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
 		t.Fatal("directory index ID root mapping not found after root split")
 	}
 
-	delete(db.tables["users"].Indexes, "name")
 	rows, err := db.Query("SELECT name FROM users WHERE name = ?", insertedValue)
 	if err != nil {
 		t.Fatalf("Query(index lookup after split) error = %v", err)
