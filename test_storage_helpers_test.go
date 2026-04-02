@@ -92,6 +92,45 @@ func writeMalformedCatalogPageWithIDMappings(t testFataler, pager *storage.Pager
 	}
 }
 
+func writeOverflowCatalogPageWithIDMappings(t testFataler, pager *storage.Pager, payloadBytes uint32, headPageID storage.PageID, pageCount uint32, freeListHead uint32, mappings []storage.DirectoryRootIDMapping) {
+	t.Helper()
+
+	page, err := pager.Get(0)
+	if err != nil {
+		t.Fatalf("pager.Get(0) error = %v", err)
+	}
+	clear(page.Data())
+	copy(page.Data(), storage.InitDirectoryPage(uint32(storage.DirectoryControlPageID), storage.CurrentDBFormatVersion))
+	binary.LittleEndian.PutUint32(page.Data()[36:40], freeListHead)
+	binary.LittleEndian.PutUint32(page.Data()[testDirectoryCATDIRModeOffset:testDirectoryCATDIRModeOffset+4], storage.DirectoryCATDIRStorageModeOverflow)
+	binary.LittleEndian.PutUint32(page.Data()[testDirectoryCATDIROverflowHeadOff:testDirectoryCATDIROverflowHeadOff+4], uint32(headPageID))
+	binary.LittleEndian.PutUint32(page.Data()[testDirectoryCATDIROverflowCountOff:testDirectoryCATDIROverflowCountOff+4], pageCount)
+	binary.LittleEndian.PutUint32(page.Data()[testDirectoryCATDIRPayloadBytesOff:testDirectoryCATDIRPayloadBytesOff+4], payloadBytes)
+
+	if len(mappings) > 0 {
+		offset := testDirectoryCatalogOffset + 16
+		payload := make([]byte, 0, len(mappings)*9)
+		for _, mapping := range mappings {
+			payload = append(payload, mapping.ObjectType)
+			var raw [4]byte
+			binary.LittleEndian.PutUint32(raw[:], mapping.ObjectID)
+			payload = append(payload, raw[:]...)
+			binary.LittleEndian.PutUint32(raw[:], mapping.RootPageID)
+			payload = append(payload, raw[:]...)
+		}
+		binary.LittleEndian.PutUint32(page.Data()[offset:offset+4], uint32(len(mappings)))
+		binary.LittleEndian.PutUint32(page.Data()[offset+4:offset+8], uint32(len(payload)))
+		copy(page.Data()[offset+8:], payload)
+	}
+	if err := storage.RecomputePageChecksum(page.Data()); err != nil {
+		t.Fatalf("storage.RecomputePageChecksum() error = %v", err)
+	}
+	page.MarkDirty()
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+}
+
 type testFataler interface {
 	Helper()
 	Fatalf(format string, args ...any)

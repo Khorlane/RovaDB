@@ -115,6 +115,26 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
+	catdirMode, err := storage.DirectoryCATDIRStorageMode(directoryPage)
+	if err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
+	catdirOverflowHead, err := storage.DirectoryCATDIROverflowHeadPageID(directoryPage)
+	if err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
+	catdirOverflowCount, err := storage.DirectoryCATDIROverflowPageCount(directoryPage)
+	if err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
+	catdirPayloadBytes, err := storage.DirectoryCATDIRPayloadByteLength(directoryPage)
+	if err != nil {
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
 	directoryFormatVersion, err := storage.DirectoryFormatVersion(directoryPage)
 	if err != nil {
 		_ = file.Close()
@@ -170,9 +190,13 @@ func Open(path string) (*DB, error) {
 		return nil, wrapStorageError(err)
 	}
 	if err := storage.ValidateDirectoryControlState(file.File(), storage.DirectoryControlState{
-		FreeListHead:   freeListHead,
-		RootIDMappings: rootIDMappings,
-		CheckpointMeta: checkpointMeta,
+		FreeListHead:        freeListHead,
+		CATDIRStorageMode:   catdirMode,
+		CATDIROverflowHead:  catdirOverflowHead,
+		CATDIROverflowCount: catdirOverflowCount,
+		CATDIRPayloadBytes:  catdirPayloadBytes,
+		RootIDMappings:      rootIDMappings,
+		CheckpointMeta:      checkpointMeta,
 	}); err != nil {
 		_ = pager.Close()
 		_ = file.Close()

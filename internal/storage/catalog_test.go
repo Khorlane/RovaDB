@@ -464,6 +464,78 @@ func TestBuildCatalogOverflowPageChainRejectsZeroAndDuplicatePageIDs(t *testing.
 	}
 }
 
+func TestLoadCatalogReadsOverflowBackedDirectoryPayload(t *testing.T) {
+	embeddedPage, err := BuildCatalogPageData(&CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				TableID:    7,
+				RootPageID: 11,
+				Columns: []CatalogColumn{
+					{Name: "id", Type: CatalogColumnTypeInt},
+					{Name: "name", Type: CatalogColumnTypeText},
+				},
+				Indexes: []CatalogIndex{
+					{
+						Name:       "idx_users_name",
+						Unique:     false,
+						IndexID:    13,
+						RootPageID: 17,
+						Columns:    []CatalogIndexColumn{{Name: "name"}},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildCatalogPageData() error = %v", err)
+	}
+	payload, err := directoryCatalogPayload(embeddedPage)
+	if err != nil {
+		t.Fatalf("directoryCatalogPayload() error = %v", err)
+	}
+	overflowPages, err := BuildCatalogOverflowPageChain(payload, []PageID{7})
+	if err != nil {
+		t.Fatalf("BuildCatalogOverflowPageChain() error = %v", err)
+	}
+	directoryPage := InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion)
+	binary.LittleEndian.PutUint32(directoryPage[directoryBodyOffsetCATDIRStorageMode:directoryBodyOffsetCATDIRStorageMode+4], DirectoryCATDIRStorageModeOverflow)
+	binary.LittleEndian.PutUint32(directoryPage[directoryBodyOffsetCATDIROverflowHead:directoryBodyOffsetCATDIROverflowHead+4], uint32(overflowPages[0].PageID))
+	binary.LittleEndian.PutUint32(directoryPage[directoryBodyOffsetCATDIROverflowCount:directoryBodyOffsetCATDIROverflowCount+4], uint32(len(overflowPages)))
+	binary.LittleEndian.PutUint32(directoryPage[directoryBodyOffsetCATDIRPayloadByteSize:directoryBodyOffsetCATDIRPayloadByteSize+4], uint32(len(payload)))
+	if err := FinalizePageImage(directoryPage); err != nil {
+		t.Fatalf("FinalizePageImage(directory) error = %v", err)
+	}
+
+	reader := PageReaderFunc(func(pageID PageID) ([]byte, error) {
+		if pageID == DirectoryControlPageID {
+			return directoryPage, nil
+		}
+		for _, page := range overflowPages {
+			if page.PageID == pageID {
+				return page.Data, nil
+			}
+		}
+		return nil, errCorruptedCatalogOverflow
+	})
+	got, err := LoadCatalog(reader)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+	if got.Version != catalogVersion {
+		t.Fatalf("got.Version = %d, want %d", got.Version, catalogVersion)
+	}
+	if len(got.Tables) != 1 || got.Tables[0].Name != "users" {
+		t.Fatalf("got.Tables = %#v, want users table", got.Tables)
+	}
+	if got.Tables[0].RootPageID != 0 {
+		t.Fatalf("got.Tables[0].RootPageID = %d, want 0 from logical payload", got.Tables[0].RootPageID)
+	}
+	if len(got.Tables[0].Indexes) != 1 || got.Tables[0].Indexes[0].Name != "idx_users_name" {
+		t.Fatalf("got.Tables[0].Indexes = %#v, want idx_users_name", got.Tables[0].Indexes)
+	}
+}
+
 func TestReadCatalogOverflowPayloadSinglePage(t *testing.T) {
 	payload := []byte("catalog")
 	pages, err := BuildCatalogOverflowPageChain(payload, []PageID{7})

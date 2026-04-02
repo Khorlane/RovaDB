@@ -140,7 +140,89 @@ func TestOpenRevalidatesDirectoryPageOnReopen(t *testing.T) {
 	defer db.Close()
 }
 
-func TestOpenFailsOnUnsupportedCATDIROverflowMode(t *testing.T) {
+func TestOpenLoadsCatalogFromCATDIROverflowMode(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create users) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'ada')"); err != nil {
+		t.Fatalf("Exec(insert users) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	page, err := storage.ReadDirectoryPage(rawDB.File())
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("ReadDirectoryPage() error = %v", err)
+	}
+	payloadBytes, err := storage.DirectoryCATDIRPayloadByteLength(page)
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("DirectoryCATDIRPayloadByteLength() error = %v", err)
+	}
+	payload := append([]byte(nil), page[testDirectoryCatalogOffset:testDirectoryCatalogOffset+int(payloadBytes)]...)
+	mappings, err := storage.ReadDirectoryRootIDMappings(rawDB.File())
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("ReadDirectoryRootIDMappings() error = %v", err)
+	}
+	freeListHead, err := storage.ReadDirectoryFreeListHead(rawDB.File())
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("ReadDirectoryFreeListHead() error = %v", err)
+	}
+	overflowSlot := pager.NewPage()
+	overflowPages, err := storage.BuildCatalogOverflowPageChain(payload, []storage.PageID{overflowSlot.ID()})
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("BuildCatalogOverflowPageChain() error = %v", err)
+	}
+	clear(overflowSlot.Data())
+	copy(overflowSlot.Data(), overflowPages[0].Data)
+	pager.MarkDirty(overflowSlot)
+	writeOverflowCatalogPageWithIDMappings(t, pager, payloadBytes, overflowPages[0].PageID, uint32(len(overflowPages)), freeListHead, mappings)
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+	rows, err := db.Query("SELECT * FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("rows.Next() = false, want one row")
+	}
+	var id int
+	var name string
+	if err := rows.Scan(&id, &name); err != nil {
+		t.Fatalf("rows.Scan() error = %v", err)
+	}
+	if id != 1 || name != "ada" {
+		t.Fatalf("row = (%d, %q), want (1, %q)", id, name, "ada")
+	}
+	if rows.Next() {
+		t.Fatal("rows.Next() = true after first row, want one row")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err() error = %v", err)
+	}
+}
+
+func TestOpenRejectsMalformedCATDIROverflowModeWithZeroHead(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
@@ -157,9 +239,10 @@ func TestOpenFailsOnUnsupportedCATDIROverflowMode(t *testing.T) {
 		_ = rawDB.Close()
 		t.Fatalf("ReadDirectoryPage() error = %v", err)
 	}
-	binary.LittleEndian.PutUint32(page[40:44], storage.DirectoryCATDIRStorageModeOverflow)
-	binary.LittleEndian.PutUint32(page[44:48], 8)
-	binary.LittleEndian.PutUint32(page[48:52], 1)
+	binary.LittleEndian.PutUint32(page[testDirectoryCATDIRModeOffset:testDirectoryCATDIRModeOffset+4], storage.DirectoryCATDIRStorageModeOverflow)
+	binary.LittleEndian.PutUint32(page[testDirectoryCATDIROverflowHeadOff:testDirectoryCATDIROverflowHeadOff+4], 0)
+	binary.LittleEndian.PutUint32(page[testDirectoryCATDIROverflowCountOff:testDirectoryCATDIROverflowCountOff+4], 1)
+	binary.LittleEndian.PutUint32(page[testDirectoryCATDIRPayloadBytesOff:testDirectoryCATDIRPayloadBytesOff+4], 9)
 	if err := storage.RecomputePageChecksum(page); err != nil {
 		_ = rawDB.Close()
 		t.Fatalf("RecomputePageChecksum() error = %v", err)
@@ -175,7 +258,58 @@ func TestOpenFailsOnUnsupportedCATDIROverflowMode(t *testing.T) {
 	db, err = Open(path)
 	if err == nil {
 		_ = db.Close()
-		t.Fatal("Open() error = nil, want unsupported CAT/DIR overflow mode failure")
+		t.Fatal("Open() error = nil, want malformed CAT/DIR overflow state failure")
+	}
+}
+
+func TestOpenRejectsMalformedCATDIROverflowChainPageType(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create users) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	page, err := storage.ReadDirectoryPage(rawDB.File())
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("ReadDirectoryPage() error = %v", err)
+	}
+	payloadBytes, err := storage.DirectoryCATDIRPayloadByteLength(page)
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("DirectoryCATDIRPayloadByteLength() error = %v", err)
+	}
+	mappings, err := storage.ReadDirectoryRootIDMappings(rawDB.File())
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("ReadDirectoryRootIDMappings() error = %v", err)
+	}
+	freeListHead, err := storage.ReadDirectoryFreeListHead(rawDB.File())
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("ReadDirectoryFreeListHead() error = %v", err)
+	}
+	overflowPage := pager.NewPage()
+	clear(overflowPage.Data())
+	copy(overflowPage.Data(), storage.InitializeTablePage(uint32(overflowPage.ID())))
+	pager.MarkDirty(overflowPage)
+	writeOverflowCatalogPageWithIDMappings(t, pager, payloadBytes, overflowPage.ID(), 1, freeListHead, mappings)
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want malformed CAT/DIR overflow chain failure")
 	}
 }
 

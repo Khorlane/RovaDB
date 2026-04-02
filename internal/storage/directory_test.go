@@ -346,15 +346,19 @@ func TestValidateDirectoryPageRejectsEmbeddedModeWithOverflowPageCount(t *testin
 	}
 }
 
-func TestValidateDirectoryPageRejectsUnsupportedCATDIROverflowMode(t *testing.T) {
+func TestValidateDirectoryPageAcceptsValidCATDIROverflowMode(t *testing.T) {
 	page := InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion)
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIRStorageMode:directoryBodyOffsetCATDIRStorageMode+4], DirectoryCATDIRStorageModeOverflow)
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIROverflowHead:directoryBodyOffsetCATDIROverflowHead+4], 8)
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIROverflowCount:directoryBodyOffsetCATDIROverflowCount+4], 1)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIRPayloadByteSize:directoryBodyOffsetCATDIRPayloadByteSize+4], 9)
+	if err := RecomputePageChecksum(page); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
 
 	err := ValidateDirectoryPage(page)
-	if !errors.Is(err, errUnsupportedDirectoryPage) {
-		t.Fatalf("ValidateDirectoryPage() error = %v, want %v", err, errUnsupportedDirectoryPage)
+	if err != nil {
+		t.Fatalf("ValidateDirectoryPage() error = %v, want nil", err)
 	}
 }
 
@@ -413,13 +417,17 @@ func TestDirectoryFreeListHeadPersistsAcrossReopen(t *testing.T) {
 	}
 }
 
-func TestValidateDirectoryPageRejectsLegacyNameMappings(t *testing.T) {
+func TestValidateDirectoryPageAcceptsOverflowModeWithPayloadLength(t *testing.T) {
 	page := InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion)
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIRStorageMode:directoryBodyOffsetCATDIRStorageMode+4], DirectoryCATDIRStorageModeOverflow)
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIROverflowHead:directoryBodyOffsetCATDIROverflowHead+4], 8)
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIROverflowCount:directoryBodyOffsetCATDIROverflowCount+4], 1)
-	if err := ValidateDirectoryPage(page); !errors.Is(err, errUnsupportedDirectoryPage) {
-		t.Fatalf("ValidateDirectoryPage() error = %v, want %v", err, errUnsupportedDirectoryPage)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIRPayloadByteSize:directoryBodyOffsetCATDIRPayloadByteSize+4], 9)
+	if err := RecomputePageChecksum(page); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
+	if err := ValidateDirectoryPage(page); err != nil {
+		t.Fatalf("ValidateDirectoryPage() error = %v, want nil", err)
 	}
 }
 
@@ -741,6 +749,37 @@ func TestValidateDirectoryControlStateRejectsInvalidFreeListHeadPageType(t *test
 	})
 	if !errors.Is(err, errCorruptedDirectoryPage) {
 		t.Fatalf("ValidateDirectoryControlState() error = %v, want %v", err, errCorruptedDirectoryPage)
+	}
+}
+
+func TestValidateDirectoryControlStateAcceptsValidCATDIROverflowChain(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "directory-validate-overflow.db")
+	dbFile, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
+		t.Fatalf("EnsureDirectoryPage() error = %v", err)
+	}
+
+	payload := []byte("catalog-overflow")
+	pages, err := BuildCatalogOverflowPageChain(payload, []PageID{7})
+	if err != nil {
+		t.Fatalf("BuildCatalogOverflowPageChain() error = %v", err)
+	}
+	if _, err := dbFile.File().WriteAt(pages[0].Data, pageOffset(pages[0].PageID)); err != nil {
+		t.Fatalf("WriteAt() error = %v", err)
+	}
+
+	err = ValidateDirectoryControlState(dbFile.File(), DirectoryControlState{
+		CATDIRStorageMode:   DirectoryCATDIRStorageModeOverflow,
+		CATDIROverflowHead:  uint32(pages[0].PageID),
+		CATDIROverflowCount: uint32(len(pages)),
+		CATDIRPayloadBytes:  uint32(len(payload)),
+	})
+	if err != nil {
+		t.Fatalf("ValidateDirectoryControlState() error = %v, want nil", err)
 	}
 }
 

@@ -278,7 +278,14 @@ func ValidateDirectoryControlState(file *os.File, state DirectoryControlState) e
 			return errCorruptedDirectoryPage
 		}
 	} else if state.CATDIRStorageMode == DirectoryCATDIRStorageModeOverflow {
-		return errUnsupportedDirectoryPage
+		if state.CATDIROverflowHead == 0 || state.CATDIROverflowCount == 0 || state.CATDIRPayloadBytes == 0 {
+			return errCorruptedDirectoryPage
+		}
+		if _, err := ReadCatalogOverflowPayload(PageReaderFunc(func(pageID PageID) ([]byte, error) {
+			return readStoragePage(file, pageID)
+		}), PageID(state.CATDIROverflowHead), state.CATDIROverflowCount, state.CATDIRPayloadBytes); err != nil {
+			return err
+		}
 	} else if state.CATDIRStorageMode != 0 {
 		return errCorruptedDirectoryPage
 	}
@@ -549,6 +556,9 @@ func directoryCatalogPayload(page []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if control.mode != DirectoryCATDIRStorageModeEmbedded {
+		return nil, errUnsupportedDirectoryPage
+	}
 	length, _, err := decodeCatalogPayload(page[control.catalogOffset:])
 	if err != nil {
 		return nil, err
@@ -718,6 +728,9 @@ func directoryCheckpointOffset(page []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	if control.mode == DirectoryCATDIRStorageModeOverflow {
+		return directoryCatalogOffset, nil
+	}
 	return control.catalogOffset + int(control.payloadByteLength), nil
 }
 
@@ -794,10 +807,16 @@ func decodeCurrentCATDIRControl(page []byte) (directoryCATDIRControlState, bool,
 			payloadByteLength:  payloadBytes,
 		}, true, nil
 	case DirectoryCATDIRStorageModeOverflow:
-		if overflowHead == 0 || overflowCount == 0 {
+		if overflowHead == 0 || overflowCount == 0 || payloadBytes == 0 {
 			return directoryCATDIRControlState{}, true, errCorruptedDirectoryPage
 		}
-		return directoryCATDIRControlState{}, true, errUnsupportedDirectoryPage
+		return directoryCATDIRControlState{
+			catalogOffset:      directoryCatalogOffset,
+			mode:               mode,
+			overflowHeadPageID: overflowHead,
+			overflowPageCount:  overflowCount,
+			payloadByteLength:  payloadBytes,
+		}, true, nil
 	default:
 		return directoryCATDIRControlState{}, false, nil
 	}

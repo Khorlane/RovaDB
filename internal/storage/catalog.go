@@ -65,11 +65,11 @@ func (f PageReaderFunc) ReadPage(pageID PageID) ([]byte, error) {
 
 // LoadCatalog decodes the catalog stored in page 0.
 func LoadCatalog(reader PageReader) (*CatalogData, error) {
-	pageData, err := reader.ReadPage(catalogPageID)
+	payload, err := readCommittedCatalogPayload(reader)
 	if err != nil {
 		return nil, err
 	}
-	return LoadCatalogPageData(pageData)
+	return loadCatalogPayload(payload)
 }
 
 // LoadCatalogPageData decodes a catalog page image.
@@ -82,6 +82,33 @@ func LoadCatalogPageData(pageData []byte) (*CatalogData, error) {
 		return loadCatalogPayload(payload)
 	}
 	return loadCatalogPayload(pageData)
+}
+
+func readCommittedCatalogPayload(reader PageReader) ([]byte, error) {
+	pageData, err := reader.ReadPage(catalogPageID)
+	if err != nil {
+		return nil, err
+	}
+	if ValidateDirectoryPage(pageData) != nil {
+		return pageData, nil
+	}
+	return readDirectoryCatalogPayload(reader, pageData)
+}
+
+func readDirectoryCatalogPayload(reader PageReader, pageData []byte) ([]byte, error) {
+	control, err := directoryCATDIRControl(pageData)
+	if err != nil {
+		return nil, err
+	}
+	if control.mode == DirectoryCATDIRStorageModeEmbedded {
+		return directoryCatalogPayload(pageData)
+	}
+	return ReadCatalogOverflowPayload(
+		reader,
+		PageID(control.overflowHeadPageID),
+		control.overflowPageCount,
+		control.payloadByteLength,
+	)
 }
 
 func loadCatalogPayload(pageData []byte) (*CatalogData, error) {
