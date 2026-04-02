@@ -14,18 +14,26 @@ const (
 
 	directoryPageHeaderSize = 32
 
-	directoryBodyOffsetFormatVersion = directoryPageHeaderSize
-	directoryBodyOffsetFreeListHead  = directoryPageHeaderSize + 4
-	directoryBodyOffsetRootMapCount  = directoryPageHeaderSize + 8
-	directoryBodyOffsetRootMapBytes  = directoryPageHeaderSize + 12
-	directoryCatalogOffset           = directoryPageHeaderSize + 16
-	directoryCheckpointMetadataSize  = 16
-	directoryRootIDTrailerHeaderSize = 8
+	directoryBodyOffsetFormatVersion         = directoryPageHeaderSize
+	directoryBodyOffsetFreeListHead          = directoryPageHeaderSize + 4
+	directoryBodyOffsetCATDIRStorageMode     = directoryPageHeaderSize + 8
+	directoryBodyOffsetCATDIROverflowHead    = directoryPageHeaderSize + 12
+	directoryBodyOffsetCATDIROverflowCount   = directoryPageHeaderSize + 16
+	directoryBodyOffsetCATDIRPayloadByteSize = directoryPageHeaderSize + 20
+	directoryCatalogOffset                   = directoryPageHeaderSize + 24
+	legacyDirectoryCatalogOffset             = directoryPageHeaderSize + 16
+	directoryCheckpointMetadataSize          = 16
+	directoryRootIDTrailerHeaderSize         = 8
 )
 
 const (
 	DirectoryRootMappingObjectTable uint8 = 1 + iota
 	DirectoryRootMappingObjectIndex
+)
+
+const (
+	DirectoryCATDIRStorageModeEmbedded uint32 = iota
+	DirectoryCATDIRStorageModeOverflow
 )
 
 // DirectoryRootIDMapping is the durable physical root-page mapping keyed by stable logical ID.
@@ -44,9 +52,13 @@ type DirectoryCheckpointMetadata struct {
 
 // DirectoryControlState is the decoded durable control-plane state from page 0.
 type DirectoryControlState struct {
-	FreeListHead   uint32
-	RootIDMappings []DirectoryRootIDMapping
-	CheckpointMeta DirectoryCheckpointMetadata
+	FreeListHead        uint32
+	CATDIRStorageMode   uint32
+	CATDIROverflowHead  uint32
+	CATDIROverflowCount uint32
+	CATDIRPayloadBytes  uint32
+	RootIDMappings      []DirectoryRootIDMapping
+	CheckpointMeta      DirectoryCheckpointMetadata
 }
 
 // InitDirectoryPage initializes the durable directory/control page.
@@ -93,29 +105,49 @@ func SetDirectoryFreeListHead(page []byte, head uint32) error {
 	return nil
 }
 
+// DirectoryCATDIRStorageMode returns the durable CAT/DIR storage mode.
+func DirectoryCATDIRStorageMode(page []byte) (uint32, error) {
+	control, err := directoryCATDIRControl(page)
+	if err != nil {
+		return 0, err
+	}
+	return control.mode, nil
+}
+
+// DirectoryCATDIROverflowHeadPageID returns the durable CAT/DIR overflow head page ID.
+func DirectoryCATDIROverflowHeadPageID(page []byte) (uint32, error) {
+	control, err := directoryCATDIRControl(page)
+	if err != nil {
+		return 0, err
+	}
+	return control.overflowHeadPageID, nil
+}
+
+// DirectoryCATDIROverflowPageCount returns the durable CAT/DIR overflow page count.
+func DirectoryCATDIROverflowPageCount(page []byte) (uint32, error) {
+	control, err := directoryCATDIRControl(page)
+	if err != nil {
+		return 0, err
+	}
+	return control.overflowPageCount, nil
+}
+
+// DirectoryCATDIRPayloadByteLength returns the durable CAT/DIR payload byte length.
+func DirectoryCATDIRPayloadByteLength(page []byte) (uint32, error) {
+	control, err := directoryCATDIRControl(page)
+	if err != nil {
+		return 0, err
+	}
+	return control.payloadByteLength, nil
+}
+
 // ValidateDirectoryPage validates the shared header and fixed directory body.
 func ValidateDirectoryPage(page []byte) error {
-	if len(page) != PageSize {
-		return errCorruptedDirectoryPage
+	if err := validateDirectoryPageHeader(page); err != nil {
+		return err
 	}
-	if binary.LittleEndian.Uint32(page[pageHeaderOffsetPageID:pageHeaderOffsetPageID+4]) != uint32(DirectoryControlPageID) {
-		return errCorruptedDirectoryPage
-	}
-	if PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType:pageHeaderOffsetPageType+2])) != PageTypeDirectory {
-		return errCorruptedDirectoryPage
-	}
-	formatVersion := binary.LittleEndian.Uint32(page[directoryBodyOffsetFormatVersion : directoryBodyOffsetFormatVersion+4])
-	if !SupportedDBFormatVersion(formatVersion) {
-		return errCorruptedDirectoryPage
-	}
-	rootMapBytes := binary.LittleEndian.Uint32(page[directoryBodyOffsetRootMapBytes : directoryBodyOffsetRootMapBytes+4])
-	if rootMapBytes != 0 || binary.LittleEndian.Uint32(page[directoryBodyOffsetRootMapCount:directoryBodyOffsetRootMapCount+4]) != 0 {
-		return errUnsupportedDirectoryPage
-	}
-	if directoryCatalogOffset+int(rootMapBytes) > PageSize {
-		return errCorruptedDirectoryPage
-	}
-	return nil
+	_, err := directoryCATDIRControl(page)
+	return err
 }
 
 // EnsureDirectoryPage initializes the durable directory page in-place.
@@ -239,6 +271,15 @@ func ReadDirectoryRootIDMappings(file *os.File) ([]DirectoryRootIDMapping, error
 // ValidateDirectoryControlState validates the currently loaded directory/control metadata against disk pages.
 func ValidateDirectoryControlState(file *os.File, state DirectoryControlState) error {
 	if file == nil {
+		return errCorruptedDirectoryPage
+	}
+	if state.CATDIRStorageMode == DirectoryCATDIRStorageModeEmbedded {
+		if state.CATDIROverflowHead != 0 || state.CATDIROverflowCount != 0 {
+			return errCorruptedDirectoryPage
+		}
+	} else if state.CATDIRStorageMode == DirectoryCATDIRStorageModeOverflow {
+		return errUnsupportedDirectoryPage
+	} else if state.CATDIRStorageMode != 0 {
 		return errCorruptedDirectoryPage
 	}
 	if state.FreeListHead != 0 {
@@ -481,6 +522,10 @@ func buildDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, free
 	}
 	page := InitDirectoryPage(uint32(DirectoryControlPageID), formatVersion)
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetFreeListHead:directoryBodyOffsetFreeListHead+4], freeListHead)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIRStorageMode:directoryBodyOffsetCATDIRStorageMode+4], DirectoryCATDIRStorageModeEmbedded)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIROverflowHead:directoryBodyOffsetCATDIROverflowHead+4], 0)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIROverflowCount:directoryBodyOffsetCATDIROverflowCount+4], 0)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIRPayloadByteSize:directoryBodyOffsetCATDIRPayloadByteSize+4], uint32(len(catalogPayload)))
 	catalogStart := directoryCatalogOffset
 	copy(page[catalogStart:], catalogPayload)
 	checkpointOffset := catalogStart + len(catalogPayload)
@@ -500,15 +545,15 @@ func buildDirectoryCatalogPage(catalogPayload []byte, formatVersion uint32, free
 }
 
 func directoryCatalogPayload(page []byte) ([]byte, error) {
-	if err := ValidateDirectoryPage(page); err != nil {
-		return nil, err
-	}
-	start := directoryCatalogOffset
-	length, _, err := decodeCatalogPayload(page[start:])
+	control, err := directoryCATDIRControl(page)
 	if err != nil {
 		return nil, err
 	}
-	return page[start : start+length], nil
+	length, _, err := decodeCatalogPayload(page[control.catalogOffset:])
+	if err != nil {
+		return nil, err
+	}
+	return page[control.catalogOffset : control.catalogOffset+length], nil
 }
 
 func writeDirectoryPage(file *os.File, page []byte) error {
@@ -669,12 +714,116 @@ func rewriteDirectoryCheckpointMetadata(page []byte, meta DirectoryCheckpointMet
 }
 
 func directoryCheckpointOffset(page []byte) (int, error) {
-	start := directoryCatalogOffset
-	length, _, err := decodeCatalogPayload(page[start:])
+	control, err := directoryCATDIRControl(page)
 	if err != nil {
 		return 0, err
 	}
-	return start + length, nil
+	return control.catalogOffset + int(control.payloadByteLength), nil
+}
+
+func validateDirectoryPageHeader(page []byte) error {
+	if len(page) != PageSize {
+		return errCorruptedDirectoryPage
+	}
+	if binary.LittleEndian.Uint32(page[pageHeaderOffsetPageID:pageHeaderOffsetPageID+4]) != uint32(DirectoryControlPageID) {
+		return errCorruptedDirectoryPage
+	}
+	if PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType:pageHeaderOffsetPageType+2])) != PageTypeDirectory {
+		return errCorruptedDirectoryPage
+	}
+	formatVersion := binary.LittleEndian.Uint32(page[directoryBodyOffsetFormatVersion : directoryBodyOffsetFormatVersion+4])
+	if !SupportedDBFormatVersion(formatVersion) {
+		return errCorruptedDirectoryPage
+	}
+	return nil
+}
+
+type directoryCATDIRControlState struct {
+	catalogOffset      int
+	mode               uint32
+	overflowHeadPageID uint32
+	overflowPageCount  uint32
+	payloadByteLength  uint32
+}
+
+func directoryCATDIRControl(page []byte) (directoryCATDIRControlState, error) {
+	if err := validateDirectoryPageHeader(page); err != nil {
+		return directoryCATDIRControlState{}, err
+	}
+	if control, ok, err := decodeCurrentCATDIRControl(page); ok {
+		return control, err
+	}
+	if control, err := decodeLegacyEmbeddedCATDIRControl(page); err == nil {
+		return control, nil
+	}
+	return directoryCATDIRControlState{}, errCorruptedDirectoryPage
+}
+
+func decodeCurrentCATDIRControl(page []byte) (directoryCATDIRControlState, bool, error) {
+	mode := binary.LittleEndian.Uint32(page[directoryBodyOffsetCATDIRStorageMode : directoryBodyOffsetCATDIRStorageMode+4])
+	overflowHead := binary.LittleEndian.Uint32(page[directoryBodyOffsetCATDIROverflowHead : directoryBodyOffsetCATDIROverflowHead+4])
+	overflowCount := binary.LittleEndian.Uint32(page[directoryBodyOffsetCATDIROverflowCount : directoryBodyOffsetCATDIROverflowCount+4])
+	payloadBytes := binary.LittleEndian.Uint32(page[directoryBodyOffsetCATDIRPayloadByteSize : directoryBodyOffsetCATDIRPayloadByteSize+4])
+
+	switch mode {
+	case DirectoryCATDIRStorageModeEmbedded:
+		if overflowHead != 0 || overflowCount != 0 {
+			if overflowCount == 0 {
+				return directoryCATDIRControlState{}, true, errCorruptedDirectoryPage
+			}
+			return directoryCATDIRControlState{}, false, nil
+		}
+		length, _, err := decodeCatalogPayload(page[directoryCatalogOffset:])
+		if err != nil {
+			if payloadBytes != 0 {
+				return directoryCATDIRControlState{}, true, err
+			}
+			return directoryCATDIRControlState{}, false, nil
+		}
+		if payloadBytes != uint32(length) {
+			return directoryCATDIRControlState{}, true, errCorruptedDirectoryPage
+		}
+		if directoryCatalogOffset+length+directoryCheckpointMetadataSize > PageSize {
+			return directoryCATDIRControlState{}, true, errCorruptedDirectoryPage
+		}
+		return directoryCATDIRControlState{
+			catalogOffset:      directoryCatalogOffset,
+			mode:               mode,
+			overflowHeadPageID: overflowHead,
+			overflowPageCount:  overflowCount,
+			payloadByteLength:  payloadBytes,
+		}, true, nil
+	case DirectoryCATDIRStorageModeOverflow:
+		if overflowHead == 0 || overflowCount == 0 {
+			return directoryCATDIRControlState{}, true, errCorruptedDirectoryPage
+		}
+		return directoryCATDIRControlState{}, true, errUnsupportedDirectoryPage
+	default:
+		return directoryCATDIRControlState{}, false, nil
+	}
+}
+
+func decodeLegacyEmbeddedCATDIRControl(page []byte) (directoryCATDIRControlState, error) {
+	if binary.LittleEndian.Uint32(page[directoryBodyOffsetCATDIRStorageMode:directoryBodyOffsetCATDIRStorageMode+4]) != 0 {
+		return directoryCATDIRControlState{}, errCorruptedDirectoryPage
+	}
+	if binary.LittleEndian.Uint32(page[directoryBodyOffsetCATDIROverflowHead:directoryBodyOffsetCATDIROverflowHead+4]) != 0 {
+		return directoryCATDIRControlState{}, errCorruptedDirectoryPage
+	}
+	length, _, err := decodeCatalogPayload(page[legacyDirectoryCatalogOffset:])
+	if err != nil {
+		return directoryCATDIRControlState{}, err
+	}
+	if legacyDirectoryCatalogOffset+length+directoryCheckpointMetadataSize > PageSize {
+		return directoryCATDIRControlState{}, errCorruptedDirectoryPage
+	}
+	return directoryCATDIRControlState{
+		catalogOffset:      legacyDirectoryCatalogOffset,
+		mode:               DirectoryCATDIRStorageModeEmbedded,
+		overflowHeadPageID: 0,
+		overflowPageCount:  0,
+		payloadByteLength:  uint32(length),
+	}, nil
 }
 
 func validateDirectoryPageImage(page []byte) error {

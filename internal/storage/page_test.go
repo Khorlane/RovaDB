@@ -178,6 +178,7 @@ func TestFinalizePageImageStampsValidIndexFreeAndDirectoryPages(t *testing.T) {
 		Tables: []CatalogTable{
 			{
 				Name:       "users",
+				TableID:    1,
 				RootPageID: 1,
 				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
 			},

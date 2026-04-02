@@ -45,30 +45,21 @@ func TestOpenRejectsDuplicateRootPageIDs(t *testing.T) {
 	dbFile, pager := openRawStorage(t, path)
 	defer dbFile.Close()
 
-	err := storage.SaveCatalog(pager, &storage.CatalogData{
-		Tables: []storage.CatalogTable{
-			{
-				Name:       "users",
-				RootPageID: 1,
-				Columns: []storage.CatalogColumn{
-					{Name: "id", Type: storage.CatalogColumnTypeInt},
-				},
-			},
-			{
-				Name:       "teams",
-				RootPageID: 1,
-				Columns: []storage.CatalogColumn{
-					{Name: "id", Type: storage.CatalogColumnTypeInt},
-				},
-			},
+	writeMalformedCatalogPageWithIDMappings(t, pager, currentCatalogBytesForTest([]currentCatalogTableForTest{
+		{
+			name:    "users",
+			tableID: 1,
+			columns: []currentCatalogColumnForTest{{name: "id", typ: storage.CatalogColumnTypeInt}},
 		},
+		{
+			name:    "teams",
+			tableID: 2,
+			columns: []currentCatalogColumnForTest{{name: "id", typ: storage.CatalogColumnTypeInt}},
+		},
+	}), []storage.DirectoryRootIDMapping{
+		{ObjectType: storage.DirectoryRootMappingObjectTable, ObjectID: 1, RootPageID: 1},
+		{ObjectType: storage.DirectoryRootMappingObjectTable, ObjectID: 2, RootPageID: 1},
 	})
-	if err != nil {
-		t.Fatalf("SaveCatalog() error = %v", err)
-	}
-	if err := pager.Flush(); err != nil {
-		t.Fatalf("pager.Flush() error = %v", err)
-	}
 
 	db, err := Open(path)
 	if err == nil {
@@ -116,25 +107,19 @@ func TestOpenRejectsPersistedRowCountMismatch(t *testing.T) {
 	if err := storage.AppendRowToTablePage(rootPage, row); err != nil {
 		t.Fatalf("AppendRowToTablePage() error = %v", err)
 	}
-	err = storage.SaveCatalog(pager, &storage.CatalogData{
-		Tables: []storage.CatalogTable{
-			{
-				Name:       "users",
-				RootPageID: uint32(rootPage.ID()),
-				RowCount:   2,
-				Columns: []storage.CatalogColumn{
-					{Name: "id", Type: storage.CatalogColumnTypeInt},
-					{Name: "name", Type: storage.CatalogColumnTypeText},
-				},
+	writeMalformedCatalogPageWithIDMappings(t, pager, currentCatalogBytesForTest([]currentCatalogTableForTest{
+		{
+			name:     "users",
+			tableID:  1,
+			rowCount: 2,
+			columns: []currentCatalogColumnForTest{
+				{name: "id", typ: storage.CatalogColumnTypeInt},
+				{name: "name", typ: storage.CatalogColumnTypeText},
 			},
 		},
+	}), []storage.DirectoryRootIDMapping{
+		{ObjectType: storage.DirectoryRootMappingObjectTable, ObjectID: 1, RootPageID: uint32(rootPage.ID())},
 	})
-	if err != nil {
-		t.Fatalf("SaveCatalog() error = %v", err)
-	}
-	if err := pager.Flush(); err != nil {
-		t.Fatalf("pager.Flush() error = %v", err)
-	}
 
 	db, err := Open(path)
 	if err == nil {

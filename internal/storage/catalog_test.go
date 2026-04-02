@@ -350,6 +350,7 @@ func TestMutationPathsMarkPagesDirty(t *testing.T) {
 		Tables: []CatalogTable{
 			{
 				Name:       "users",
+				TableID:    1,
 				RootPageID: 1,
 				RowCount:   0,
 				Columns: []CatalogColumn{

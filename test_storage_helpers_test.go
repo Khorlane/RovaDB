@@ -7,6 +7,14 @@ import (
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
+const (
+	testDirectoryCATDIRModeOffset       = 40
+	testDirectoryCATDIROverflowHeadOff  = 44
+	testDirectoryCATDIROverflowCountOff = 48
+	testDirectoryCATDIRPayloadBytesOff  = 52
+	testDirectoryCatalogOffset          = 56
+)
+
 func openRawStorage(t testFataler, path string) (*storage.DBFile, *storage.Pager) {
 	t.Helper()
 
@@ -31,9 +39,13 @@ func writeMalformedCatalogPage(t testFataler, pager *storage.Pager, data []byte)
 	}
 	clear(page.Data())
 	copy(page.Data(), storage.InitDirectoryPage(uint32(storage.DirectoryControlPageID), storage.CurrentDBFormatVersion))
-	copy(page.Data()[48:], data)
-	if err := storage.FinalizePageImage(page.Data()); err != nil {
-		t.Fatalf("storage.FinalizePageImage() error = %v", err)
+	binary.LittleEndian.PutUint32(page.Data()[testDirectoryCATDIRModeOffset:testDirectoryCATDIRModeOffset+4], storage.DirectoryCATDIRStorageModeEmbedded)
+	binary.LittleEndian.PutUint32(page.Data()[testDirectoryCATDIROverflowHeadOff:testDirectoryCATDIROverflowHeadOff+4], 0)
+	binary.LittleEndian.PutUint32(page.Data()[testDirectoryCATDIROverflowCountOff:testDirectoryCATDIROverflowCountOff+4], 0)
+	binary.LittleEndian.PutUint32(page.Data()[testDirectoryCATDIRPayloadBytesOff:testDirectoryCATDIRPayloadBytesOff+4], uint32(len(data)))
+	copy(page.Data()[testDirectoryCatalogOffset:], data)
+	if err := storage.RecomputePageChecksum(page.Data()); err != nil {
+		t.Fatalf("storage.RecomputePageChecksum() error = %v", err)
 	}
 	page.MarkDirty()
 	if err := pager.Flush(); err != nil {
@@ -50,10 +62,14 @@ func writeMalformedCatalogPageWithIDMappings(t testFataler, pager *storage.Pager
 	}
 	clear(page.Data())
 	copy(page.Data(), storage.InitDirectoryPage(uint32(storage.DirectoryControlPageID), storage.CurrentDBFormatVersion))
-	copy(page.Data()[48:], data)
+	binary.LittleEndian.PutUint32(page.Data()[testDirectoryCATDIRModeOffset:testDirectoryCATDIRModeOffset+4], storage.DirectoryCATDIRStorageModeEmbedded)
+	binary.LittleEndian.PutUint32(page.Data()[testDirectoryCATDIROverflowHeadOff:testDirectoryCATDIROverflowHeadOff+4], 0)
+	binary.LittleEndian.PutUint32(page.Data()[testDirectoryCATDIROverflowCountOff:testDirectoryCATDIROverflowCountOff+4], 0)
+	binary.LittleEndian.PutUint32(page.Data()[testDirectoryCATDIRPayloadBytesOff:testDirectoryCATDIRPayloadBytesOff+4], uint32(len(data)))
+	copy(page.Data()[testDirectoryCatalogOffset:], data)
 
 	if len(mappings) > 0 {
-		offset := 48 + len(data) + 16
+		offset := testDirectoryCatalogOffset + len(data) + 16
 		payload := make([]byte, 0, len(mappings)*9)
 		for _, mapping := range mappings {
 			payload = append(payload, mapping.ObjectType)
@@ -67,8 +83,8 @@ func writeMalformedCatalogPageWithIDMappings(t testFataler, pager *storage.Pager
 		binary.LittleEndian.PutUint32(page.Data()[offset+4:offset+8], uint32(len(payload)))
 		copy(page.Data()[offset+8:], payload)
 	}
-	if err := storage.FinalizePageImage(page.Data()); err != nil {
-		t.Fatalf("storage.FinalizePageImage() error = %v", err)
+	if err := storage.RecomputePageChecksum(page.Data()); err != nil {
+		t.Fatalf("storage.RecomputePageChecksum() error = %v", err)
 	}
 	page.MarkDirty()
 	if err := pager.Flush(); err != nil {

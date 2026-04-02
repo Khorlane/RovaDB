@@ -163,48 +163,25 @@ func TestCreateMultipleTablesGetDistinctRootPages(t *testing.T) {
 func TestOpenFailsWhenCurrentCatalogIDsAreMissing(t *testing.T) {
 	path := testDBPath(t)
 
-	db, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
-		t.Fatalf("Exec(create table) error = %v", err)
-	}
-	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
-		t.Fatalf("Exec(create index) error = %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-
 	rawDB, pager := openRawStorage(t, path)
-	catalog, err := storage.LoadCatalog(pager)
-	if err != nil {
-		t.Fatalf("LoadCatalog() error = %v", err)
-	}
-	catalog = catalogWithDirectoryRootsForSave(t, rawDB.File(), catalog)
-	var users *storage.CatalogTable
-	for i := range catalog.Tables {
-		if catalog.Tables[i].Name == "users" {
-			users = &catalog.Tables[i]
-			break
-		}
-	}
-	if users == nil {
-		t.Fatal("catalog missing users table")
-	}
-	users.TableID = 0
-	if err := storage.SaveCatalog(pager, catalog); err != nil {
-		t.Fatalf("SaveCatalog() error = %v", err)
-	}
-	if err := pager.FlushDirty(); err != nil {
-		t.Fatalf("pager.FlushDirty() error = %v", err)
-	}
+	writeMalformedCatalogPage(t, pager, currentCatalogBytesForTest([]currentCatalogTableForTest{
+		{
+			name:    "users",
+			tableID: 0,
+			columns: []currentCatalogColumnForTest{
+				{name: "id", typ: storage.CatalogColumnTypeInt},
+				{name: "name", typ: storage.CatalogColumnTypeText},
+			},
+			indexes: []currentCatalogIndexForTest{
+				{name: "idx_users_name", indexID: 9, columns: []currentCatalogIndexColumnForTest{{name: "name"}}},
+			},
+		},
+	}))
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
 
-	db, err = Open(path)
+	db, err := Open(path)
 	if err == nil {
 		_ = db.Close()
 		t.Fatal("reopen Open() error = nil, want zero durable table ID rejection")
@@ -214,51 +191,25 @@ func TestOpenFailsWhenCurrentCatalogIDsAreMissing(t *testing.T) {
 func TestOpenRejectsZeroDurableIndexID(t *testing.T) {
 	path := testDBPath(t)
 
-	db, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
-		t.Fatalf("Exec(create table) error = %v", err)
-	}
-	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
-		t.Fatalf("Exec(create index) error = %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-
 	rawDB, pager := openRawStorage(t, path)
-	catalog, err := storage.LoadCatalog(pager)
-	if err != nil {
-		t.Fatalf("LoadCatalog() error = %v", err)
-	}
-	catalog = catalogWithDirectoryRootsForSave(t, rawDB.File(), catalog)
-	var users *storage.CatalogTable
-	for i := range catalog.Tables {
-		if catalog.Tables[i].Name == "users" {
-			users = &catalog.Tables[i]
-			break
-		}
-	}
-	if users == nil {
-		t.Fatal("catalog missing users table")
-	}
-	if len(users.Indexes) == 0 {
-		t.Fatal("users catalog entry missing indexes")
-	}
-	users.Indexes[0].IndexID = 0
-	if err := storage.SaveCatalog(pager, catalog); err != nil {
-		t.Fatalf("SaveCatalog() error = %v", err)
-	}
-	if err := pager.FlushDirty(); err != nil {
-		t.Fatalf("pager.FlushDirty() error = %v", err)
-	}
+	writeMalformedCatalogPage(t, pager, currentCatalogBytesForTest([]currentCatalogTableForTest{
+		{
+			name:    "users",
+			tableID: 7,
+			columns: []currentCatalogColumnForTest{
+				{name: "id", typ: storage.CatalogColumnTypeInt},
+				{name: "name", typ: storage.CatalogColumnTypeText},
+			},
+			indexes: []currentCatalogIndexForTest{
+				{name: "idx_users_name", indexID: 0, columns: []currentCatalogIndexColumnForTest{{name: "name"}}},
+			},
+		},
+	}))
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
 
-	db, err = Open(path)
+	db, err := Open(path)
 	if err == nil {
 		_ = db.Close()
 		t.Fatal("reopen Open() error = nil, want zero durable index ID rejection")
@@ -749,4 +700,65 @@ func catalogWithDirectoryRootsForSave(t *testing.T, file *os.File, catalog *stor
 		t.Fatalf("ApplyDirectoryRootIDMappings() error = %v", err)
 	}
 	return applied
+}
+
+type currentCatalogTableForTest struct {
+	name     string
+	tableID  uint32
+	rowCount uint32
+	columns  []currentCatalogColumnForTest
+	indexes  []currentCatalogIndexForTest
+}
+
+type currentCatalogColumnForTest struct {
+	name string
+	typ  uint8
+}
+
+type currentCatalogIndexForTest struct {
+	name    string
+	indexID uint32
+	unique  bool
+	columns []currentCatalogIndexColumnForTest
+}
+
+type currentCatalogIndexColumnForTest struct {
+	name string
+	desc bool
+}
+
+func currentCatalogBytesForTest(tables []currentCatalogTableForTest) []byte {
+	buf := make([]byte, 0, storage.PageSize)
+	buf = appendUint32LE(buf, 6)
+	buf = appendUint32LE(buf, uint32(len(tables)))
+	for _, table := range tables {
+		buf = appendStringLE(buf, table.name)
+		buf = appendUint32LE(buf, table.tableID)
+		buf = appendUint32LE(buf, table.rowCount)
+		buf = appendUint16LE(buf, uint16(len(table.columns)))
+		for _, column := range table.columns {
+			buf = appendStringLE(buf, column.name)
+			buf = append(buf, column.typ)
+		}
+		buf = appendUint16LE(buf, uint16(len(table.indexes)))
+		for _, index := range table.indexes {
+			buf = appendStringLE(buf, index.name)
+			if index.unique {
+				buf = append(buf, 1)
+			} else {
+				buf = append(buf, 0)
+			}
+			buf = appendUint32LE(buf, index.indexID)
+			buf = appendUint16LE(buf, uint16(len(index.columns)))
+			for _, column := range index.columns {
+				buf = appendStringLE(buf, column.name)
+				if column.desc {
+					buf = append(buf, 1)
+				} else {
+					buf = append(buf, 0)
+				}
+			}
+		}
+	}
+	return buf
 }

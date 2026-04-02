@@ -38,6 +38,27 @@ func TestOpenCreatesFile(t *testing.T) {
 	if err := storage.ValidateDirectoryPage(page.Data()); err != nil {
 		t.Fatalf("ValidateDirectoryPage() error = %v", err)
 	}
+	mode, err := storage.DirectoryCATDIRStorageMode(page.Data())
+	if err != nil {
+		t.Fatalf("DirectoryCATDIRStorageMode() error = %v", err)
+	}
+	if mode != storage.DirectoryCATDIRStorageModeEmbedded {
+		t.Fatalf("DirectoryCATDIRStorageMode() = %d, want %d", mode, storage.DirectoryCATDIRStorageModeEmbedded)
+	}
+	overflowHead, err := storage.DirectoryCATDIROverflowHeadPageID(page.Data())
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowHeadPageID() error = %v", err)
+	}
+	if overflowHead != 0 {
+		t.Fatalf("DirectoryCATDIROverflowHeadPageID() = %d, want 0", overflowHead)
+	}
+	overflowCount, err := storage.DirectoryCATDIROverflowPageCount(page.Data())
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowPageCount() error = %v", err)
+	}
+	if overflowCount != 0 {
+		t.Fatalf("DirectoryCATDIROverflowPageCount() = %d, want 0", overflowCount)
+	}
 }
 
 func TestOpenExistingValidFile(t *testing.T) {
@@ -95,6 +116,19 @@ func TestOpenRevalidatesDirectoryPageOnReopen(t *testing.T) {
 	if err := storage.ValidateDirectoryPage(page.Data()); err != nil {
 		t.Fatalf("ValidateDirectoryPage() error = %v", err)
 	}
+	payloadBytes, err := storage.DirectoryCATDIRPayloadByteLength(page.Data())
+	if err != nil {
+		t.Fatalf("DirectoryCATDIRPayloadByteLength() error = %v", err)
+	}
+	payload, err := storage.LoadCatalog(storage.PageReaderFunc(func(pageID storage.PageID) ([]byte, error) {
+		return page.Data(), nil
+	}))
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+	if payload.Version != 0 && payloadBytes == 0 {
+		t.Fatalf("DirectoryCATDIRPayloadByteLength() = %d, want nonzero for non-empty wrapped payload", payloadBytes)
+	}
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
@@ -104,6 +138,45 @@ func TestOpenRevalidatesDirectoryPageOnReopen(t *testing.T) {
 		t.Fatalf("second Open() error = %v", err)
 	}
 	defer db.Close()
+}
+
+func TestOpenFailsOnUnsupportedCATDIROverflowMode(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, _ := openRawStorage(t, path)
+	page, err := storage.ReadDirectoryPage(rawDB.File())
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("ReadDirectoryPage() error = %v", err)
+	}
+	binary.LittleEndian.PutUint32(page[40:44], storage.DirectoryCATDIRStorageModeOverflow)
+	binary.LittleEndian.PutUint32(page[44:48], 8)
+	binary.LittleEndian.PutUint32(page[48:52], 1)
+	if err := storage.RecomputePageChecksum(page); err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
+	if _, err := rawDB.File().WriteAt(page, int64(storage.HeaderSize)); err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("WriteAt() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want unsupported CAT/DIR overflow mode failure")
+	}
 }
 
 func TestOpenWithHeaderOnlyWALSucceeds(t *testing.T) {
@@ -716,9 +789,9 @@ func TestOpenRejectsLegacyCatalogPayloadWithoutDirectoryMappings(t *testing.T) {
 			},
 		},
 	})
-	if err := storage.WriteDirectoryPage(rawDB.File(), legacyPage); err != nil {
+	if _, err := rawDB.File().WriteAt(legacyPage, int64(storage.HeaderSize)); err != nil {
 		_ = rawDB.Close()
-		t.Fatalf("WriteDirectoryPage() error = %v", err)
+		t.Fatalf("WriteAt() error = %v", err)
 	}
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
@@ -1464,6 +1537,7 @@ func buildLegacyV5DirectoryPageForOpenTest(cat *storage.CatalogData) []byte {
 		}
 	}
 	copy(page[48:], payload)
+	_ = storage.RecomputePageChecksum(page)
 	return page
 }
 
