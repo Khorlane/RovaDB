@@ -851,3 +851,90 @@ func TestEngineSnapshotStringOrderingIsDeterministic(t *testing.T) {
 		t.Fatalf("EngineSnapshot().String() index order incorrect: %q", formatted)
 	}
 }
+
+func TestEngineReportMatchesSnapshotStringOnFreshDB(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	snapshot, err := db.EngineSnapshot()
+	if err != nil {
+		t.Fatalf("EngineSnapshot() error = %v", err)
+	}
+	report, err := db.EngineReport()
+	if err != nil {
+		t.Fatalf("EngineReport() error = %v", err)
+	}
+	if report != snapshot.String() {
+		t.Fatalf("EngineReport() = %q, want %q", report, snapshot.String())
+	}
+}
+
+func TestEngineReportReflectsUpdatedState(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"CREATE INDEX idx_users_name ON users (name)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	report, err := db.EngineReport()
+	if err != nil {
+		t.Fatalf("EngineReport() after create error = %v", err)
+	}
+	snapshot, err := db.EngineSnapshot()
+	if err != nil {
+		t.Fatalf("EngineSnapshot() after create error = %v", err)
+	}
+	if report != snapshot.String() {
+		t.Fatalf("EngineReport() after create = %q, want %q", report, snapshot.String())
+	}
+
+	if _, err := db.Exec("DROP INDEX idx_users_name"); err != nil {
+		t.Fatalf("Exec(drop index) error = %v", err)
+	}
+	if _, err := db.Exec("DROP TABLE users"); err != nil {
+		t.Fatalf("Exec(drop table) error = %v", err)
+	}
+	report, err = db.EngineReport()
+	if err != nil {
+		t.Fatalf("EngineReport() after drop error = %v", err)
+	}
+	snapshot, err = db.EngineSnapshot()
+	if err != nil {
+		t.Fatalf("EngineSnapshot() after drop error = %v", err)
+	}
+	if report != snapshot.String() {
+		t.Fatalf("EngineReport() after drop = %q, want %q", report, snapshot.String())
+	}
+}
+
+func TestEngineReportOnClosedDBReturnsErrClosed(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	_, err = db.EngineReport()
+	if !errors.Is(err, ErrClosed) {
+		t.Fatalf("EngineReport() error = %v, want ErrClosed", err)
+	}
+}

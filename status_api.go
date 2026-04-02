@@ -326,6 +326,15 @@ func (db *DB) EngineSnapshot() (EngineSnapshot, error) {
 	}, nil
 }
 
+// EngineReport returns the formatted aggregate engine snapshot.
+func (db *DB) EngineReport() (string, error) {
+	snapshot, err := db.EngineSnapshot()
+	if err != nil {
+		return "", err
+	}
+	return snapshot.String(), nil
+}
+
 func statusUserTableCount(tables map[string]*executor.Table) int {
 	count := 0
 	for _, table := range tables {
