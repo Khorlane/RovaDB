@@ -15,6 +15,8 @@ var (
 	errUnsupportedDirectoryPage = dberr.NewStorage("unsupported directory mapping format")
 	errCorruptedCatalogPage     = dberr.NewStorage("corrupted catalog page")
 	errCorruptedCatalogOverflow = dberr.NewStorage("corrupted catalog overflow page")
+	errInvalidCATDIRControl     = dberr.NewStorage("invalid CAT/DIR control metadata")
+	errMalformedCATDIROverflow  = dberr.NewStorage("malformed CAT/DIR overflow chain")
 	errUnsupportedCatalogPage   = dberr.NewStorage("unsupported catalog payload version")
 	errCorruptedTablePage       = dberr.NewStorage("corrupted table page")
 	errCorruptedIndexPage       = dberr.NewStorage("corrupted index page")

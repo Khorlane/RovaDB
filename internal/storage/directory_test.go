@@ -337,8 +337,8 @@ func TestValidateDirectoryPageRejectsEmbeddedModeWithOverflowHead(t *testing.T) 
 	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIROverflowHead:directoryBodyOffsetCATDIROverflowHead+4], 9)
 
 	err := ValidateDirectoryPage(page)
-	if !errors.Is(err, errCorruptedDirectoryPage) {
-		t.Fatalf("ValidateDirectoryPage() error = %v, want %v", err, errCorruptedDirectoryPage)
+	if !errors.Is(err, errInvalidCATDIRControl) {
+		t.Fatalf("ValidateDirectoryPage() error = %v, want %v", err, errInvalidCATDIRControl)
 	}
 }
 
@@ -446,6 +446,34 @@ func TestValidateDirectoryPageAcceptsOverflowModeWithPayloadLength(t *testing.T)
 	}
 	if err := ValidateDirectoryPage(page); err != nil {
 		t.Fatalf("ValidateDirectoryPage() error = %v, want nil", err)
+	}
+}
+
+func TestValidateDirectoryPageRejectsOverflowModeWithZeroPageCount(t *testing.T) {
+	page := InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIRStorageMode:directoryBodyOffsetCATDIRStorageMode+4], DirectoryCATDIRStorageModeOverflow)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIROverflowHead:directoryBodyOffsetCATDIROverflowHead+4], 8)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIROverflowCount:directoryBodyOffsetCATDIROverflowCount+4], 0)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIRPayloadByteSize:directoryBodyOffsetCATDIRPayloadByteSize+4], 9)
+	if err := RecomputePageChecksum(page); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
+	if err := ValidateDirectoryPage(page); !errors.Is(err, errInvalidCATDIRControl) {
+		t.Fatalf("ValidateDirectoryPage() error = %v, want %v", err, errInvalidCATDIRControl)
+	}
+}
+
+func TestValidateDirectoryPageRejectsOverflowModeWithZeroPayloadBytes(t *testing.T) {
+	page := InitDirectoryPage(uint32(DirectoryControlPageID), CurrentDBFormatVersion)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIRStorageMode:directoryBodyOffsetCATDIRStorageMode+4], DirectoryCATDIRStorageModeOverflow)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIROverflowHead:directoryBodyOffsetCATDIROverflowHead+4], 8)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIROverflowCount:directoryBodyOffsetCATDIROverflowCount+4], 1)
+	binary.LittleEndian.PutUint32(page[directoryBodyOffsetCATDIRPayloadByteSize:directoryBodyOffsetCATDIRPayloadByteSize+4], 0)
+	if err := RecomputePageChecksum(page); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
+	if err := ValidateDirectoryPage(page); !errors.Is(err, errInvalidCATDIRControl) {
+		t.Fatalf("ValidateDirectoryPage() error = %v, want %v", err, errInvalidCATDIRControl)
 	}
 }
 

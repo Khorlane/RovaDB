@@ -74,19 +74,22 @@ func WriteCatalogOverflowPayload(page []byte, payload []byte) error {
 
 func validateCatalogOverflowPage(page []byte) error {
 	if err := validateChecksumPageHeader(page); err != nil {
-		return errCorruptedCatalogOverflow
+		return errMalformedCATDIROverflow
 	}
 	if PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType:pageHeaderOffsetPageType+2])) != PageTypeCatalogOverflow {
-		return errCorruptedCatalogOverflow
+		return errMalformedCATDIROverflow
 	}
 	pageID := PageID(binary.LittleEndian.Uint32(page[pageHeaderOffsetPageID : pageHeaderOffsetPageID+4]))
+	if pageID == 0 {
+		return errMalformedCATDIROverflow
+	}
 	nextPageID := PageID(binary.LittleEndian.Uint32(page[catalogOverflowOffsetNextPageID : catalogOverflowOffsetNextPageID+4]))
 	if nextPageID == pageID {
-		return errCorruptedCatalogOverflow
+		return errMalformedCATDIROverflow
 	}
 	usedBytes := binary.LittleEndian.Uint32(page[catalogOverflowOffsetPayloadUsed : catalogOverflowOffsetPayloadUsed+4])
 	if usedBytes > CatalogOverflowPayloadCapacity {
-		return errCorruptedCatalogOverflow
+		return errMalformedCATDIROverflow
 	}
 	return nil
 }

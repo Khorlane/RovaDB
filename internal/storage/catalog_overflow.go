@@ -1,7 +1,5 @@
 package storage
 
-import "encoding/binary"
-
 type CatalogOverflowPageImage struct {
 	PageID PageID
 	Data   []byte
@@ -64,101 +62,35 @@ func BuildCatalogOverflowPageChain(payload []byte, pageIDs []PageID) ([]CatalogO
 
 // ReadCatalogOverflowPayload reconstructs one CAT/DIR payload from an overflow chain.
 func ReadCatalogOverflowPayload(reader PageReader, headPageID PageID, expectedPageCount uint32, expectedPayloadBytes uint32) ([]byte, error) {
+	if reader == nil {
+		return nil, errMalformedCATDIROverflow
+	}
 	if expectedPageCount == 0 || expectedPayloadBytes == 0 {
 		if headPageID != 0 || expectedPageCount != 0 || expectedPayloadBytes != 0 {
-			return nil, errCorruptedCatalogOverflow
+			return nil, errMalformedCATDIROverflow
 		}
 		return nil, nil
 	}
 	if headPageID == 0 {
-		return nil, errCorruptedCatalogOverflow
+		return nil, errMalformedCATDIROverflow
 	}
-
-	payload := make([]byte, 0, expectedPayloadBytes)
-	visited := make(map[PageID]struct{}, expectedPageCount)
-	currentPageID := headPageID
-	for i := uint32(0); i < expectedPageCount; i++ {
-		if currentPageID == 0 {
-			return nil, errCorruptedCatalogOverflow
-		}
-		if _, ok := visited[currentPageID]; ok {
-			return nil, errCorruptedCatalogOverflow
-		}
-		visited[currentPageID] = struct{}{}
-
-		page, err := reader.ReadPage(currentPageID)
-		if err != nil {
-			return nil, err
-		}
-		if err := ValidatePageImage(page); err != nil {
-			return nil, err
-		}
-		if PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType:pageHeaderOffsetPageType+2])) != PageTypeCatalogOverflow {
-			return nil, errCorruptedCatalogOverflow
-		}
-		pagePayload, err := CatalogOverflowPayload(page)
-		if err != nil {
-			return nil, err
-		}
-		payload = append(payload, pagePayload...)
-		if uint32(len(payload)) > expectedPayloadBytes {
-			return nil, errCorruptedCatalogOverflow
-		}
-		nextPageID, err := CatalogOverflowNextPageID(page)
-		if err != nil {
-			return nil, err
-		}
-		if i+1 < expectedPageCount {
-			if nextPageID == 0 {
-				return nil, errCorruptedCatalogOverflow
-			}
-		} else if nextPageID != 0 {
-			return nil, errCorruptedCatalogOverflow
-		}
-		currentPageID = nextPageID
+	pageIDs, payload, err := readCatalogOverflowChain(reader, headPageID, expectedPageCount, expectedPayloadBytes)
+	if err != nil {
+		return nil, err
 	}
-	if currentPageID != 0 {
-		return nil, errCorruptedCatalogOverflow
-	}
-	if uint32(len(payload)) != expectedPayloadBytes {
-		return nil, errCorruptedCatalogOverflow
+	if uint32(len(pageIDs)) != expectedPageCount {
+		return nil, errMalformedCATDIROverflow
 	}
 	return payload, nil
 }
 
 func ReadCatalogOverflowChainPageIDs(reader PageReader, headPageID PageID, expectedPageCount uint32) ([]PageID, error) {
 	if reader == nil || headPageID == 0 || expectedPageCount == 0 {
-		return nil, errCorruptedCatalogOverflow
+		return nil, errMalformedCATDIROverflow
 	}
-	visited := make(map[PageID]struct{}, expectedPageCount)
-	pageIDs := make([]PageID, 0, expectedPageCount)
-	currentPageID := headPageID
-
-	for i := uint32(0); i < expectedPageCount; i++ {
-		if currentPageID == 0 {
-			return nil, errCorruptedCatalogOverflow
-		}
-		if _, exists := visited[currentPageID]; exists {
-			return nil, errCorruptedCatalogOverflow
-		}
-		visited[currentPageID] = struct{}{}
-		pageIDs = append(pageIDs, currentPageID)
-
-		pageData, err := reader.ReadPage(currentPageID)
-		if err != nil {
-			return nil, err
-		}
-		nextPageID, err := CatalogOverflowNextPageID(pageData)
-		if err != nil {
-			return nil, err
-		}
-		if i+1 < expectedPageCount && nextPageID == 0 {
-			return nil, errCorruptedCatalogOverflow
-		}
-		currentPageID = nextPageID
-	}
-	if currentPageID != 0 {
-		return nil, errCorruptedCatalogOverflow
+	pageIDs, _, err := readCatalogOverflowChain(reader, headPageID, expectedPageCount, 0)
+	if err != nil {
+		return nil, err
 	}
 	return pageIDs, nil
 }
@@ -179,4 +111,59 @@ func BuildCatalogOverflowReclaimPages(reader PageReader, headPageID PageID, expe
 		currentFreeListHead = uint32(pageID)
 	}
 	return reclaimedPages, currentFreeListHead, nil
+}
+
+func readCatalogOverflowChain(reader PageReader, headPageID PageID, expectedPageCount uint32, expectedPayloadBytes uint32) ([]PageID, []byte, error) {
+	visited := make(map[PageID]struct{}, expectedPageCount)
+	pageIDs := make([]PageID, 0, expectedPageCount)
+	payload := make([]byte, 0, expectedPayloadBytes)
+	currentPageID := headPageID
+
+	for i := uint32(0); i < expectedPageCount; i++ {
+		if currentPageID == 0 {
+			return nil, nil, errMalformedCATDIROverflow
+		}
+		if _, ok := visited[currentPageID]; ok {
+			return nil, nil, errMalformedCATDIROverflow
+		}
+		visited[currentPageID] = struct{}{}
+		pageIDs = append(pageIDs, currentPageID)
+
+		page, err := reader.ReadPage(currentPageID)
+		if err != nil {
+			return nil, nil, err
+		}
+		pagePayload, err := CatalogOverflowPayload(page)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(pagePayload) == 0 {
+			return nil, nil, errMalformedCATDIROverflow
+		}
+		if expectedPayloadBytes != 0 {
+			payload = append(payload, pagePayload...)
+			if uint32(len(payload)) > expectedPayloadBytes {
+				return nil, nil, errMalformedCATDIROverflow
+			}
+		}
+		nextPageID, err := CatalogOverflowNextPageID(page)
+		if err != nil {
+			return nil, nil, err
+		}
+		if i+1 < expectedPageCount {
+			if nextPageID == 0 {
+				return nil, nil, errMalformedCATDIROverflow
+			}
+		} else if nextPageID != 0 {
+			return nil, nil, errMalformedCATDIROverflow
+		}
+		currentPageID = nextPageID
+	}
+	if currentPageID != 0 {
+		return nil, nil, errMalformedCATDIROverflow
+	}
+	if expectedPayloadBytes != 0 && uint32(len(payload)) != expectedPayloadBytes {
+		return nil, nil, errMalformedCATDIROverflow
+	}
+	return pageIDs, payload, nil
 }

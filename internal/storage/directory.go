@@ -273,21 +273,15 @@ func ValidateDirectoryControlState(file *os.File, state DirectoryControlState) e
 	if file == nil {
 		return errCorruptedDirectoryPage
 	}
-	if state.CATDIRStorageMode == DirectoryCATDIRStorageModeEmbedded {
-		if state.CATDIROverflowHead != 0 || state.CATDIROverflowCount != 0 {
-			return errCorruptedDirectoryPage
-		}
-	} else if state.CATDIRStorageMode == DirectoryCATDIRStorageModeOverflow {
-		if state.CATDIROverflowHead == 0 || state.CATDIROverflowCount == 0 || state.CATDIRPayloadBytes == 0 {
-			return errCorruptedDirectoryPage
-		}
+	if err := validateDirectoryControlCATDIRState(state); err != nil {
+		return err
+	}
+	if state.CATDIRStorageMode == DirectoryCATDIRStorageModeOverflow {
 		if _, err := ReadCatalogOverflowPayload(PageReaderFunc(func(pageID PageID) ([]byte, error) {
 			return readStoragePage(file, pageID)
 		}), PageID(state.CATDIROverflowHead), state.CATDIROverflowCount, state.CATDIRPayloadBytes); err != nil {
 			return err
 		}
-	} else if state.CATDIRStorageMode != 0 {
-		return errCorruptedDirectoryPage
 	}
 	if state.FreeListHead != 0 {
 		page, err := readStoragePage(file, PageID(state.FreeListHead))
@@ -833,7 +827,7 @@ func decodeCurrentCATDIRControl(page []byte) (directoryCATDIRControlState, bool,
 	case DirectoryCATDIRStorageModeEmbedded:
 		if overflowHead != 0 || overflowCount != 0 {
 			if overflowCount == 0 {
-				return directoryCATDIRControlState{}, true, errCorruptedDirectoryPage
+				return directoryCATDIRControlState{}, true, errInvalidCATDIRControl
 			}
 			return directoryCATDIRControlState{}, false, nil
 		}
@@ -845,10 +839,10 @@ func decodeCurrentCATDIRControl(page []byte) (directoryCATDIRControlState, bool,
 			return directoryCATDIRControlState{}, false, nil
 		}
 		if payloadBytes != uint32(length) {
-			return directoryCATDIRControlState{}, true, errCorruptedDirectoryPage
+			return directoryCATDIRControlState{}, true, errInvalidCATDIRControl
 		}
 		if directoryCatalogOffset+length+directoryCheckpointMetadataSize > PageSize {
-			return directoryCATDIRControlState{}, true, errCorruptedDirectoryPage
+			return directoryCATDIRControlState{}, true, errInvalidCATDIRControl
 		}
 		return directoryCATDIRControlState{
 			catalogOffset:      directoryCatalogOffset,
@@ -858,8 +852,8 @@ func decodeCurrentCATDIRControl(page []byte) (directoryCATDIRControlState, bool,
 			payloadByteLength:  payloadBytes,
 		}, true, nil
 	case DirectoryCATDIRStorageModeOverflow:
-		if overflowHead == 0 || overflowCount == 0 || payloadBytes == 0 {
-			return directoryCATDIRControlState{}, true, errCorruptedDirectoryPage
+		if err := validateCATDIROverflowControlFields(overflowHead, overflowCount, payloadBytes); err != nil {
+			return directoryCATDIRControlState{}, true, err
 		}
 		return directoryCATDIRControlState{
 			catalogOffset:      directoryCatalogOffset,
@@ -871,6 +865,27 @@ func decodeCurrentCATDIRControl(page []byte) (directoryCATDIRControlState, bool,
 	default:
 		return directoryCATDIRControlState{}, false, nil
 	}
+}
+
+func validateDirectoryControlCATDIRState(state DirectoryControlState) error {
+	switch state.CATDIRStorageMode {
+	case DirectoryCATDIRStorageModeEmbedded:
+		if state.CATDIROverflowHead != 0 || state.CATDIROverflowCount != 0 {
+			return errInvalidCATDIRControl
+		}
+		return nil
+	case DirectoryCATDIRStorageModeOverflow:
+		return validateCATDIROverflowControlFields(state.CATDIROverflowHead, state.CATDIROverflowCount, state.CATDIRPayloadBytes)
+	default:
+		return errInvalidCATDIRControl
+	}
+}
+
+func validateCATDIROverflowControlFields(overflowHead, overflowCount, payloadBytes uint32) error {
+	if overflowHead == 0 || overflowCount == 0 || payloadBytes == 0 {
+		return errInvalidCATDIRControl
+	}
+	return nil
 }
 
 func decodeLegacyEmbeddedCATDIRControl(page []byte) (directoryCATDIRControlState, error) {
