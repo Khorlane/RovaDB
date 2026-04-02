@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
-	"github.com/Khorlane/RovaDB/internal/planner"
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
@@ -70,7 +69,7 @@ func TestQueryRejectsIndexTableMismatch(t *testing.T) {
 		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 	}
 
-	db.tables["users"].Indexes["name"].Entries[planner.IndexKey("string:alice")] = []int{99}
+	db.tables["users"].Indexes["name"].RootPageID++
 
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
 	if err != nil {

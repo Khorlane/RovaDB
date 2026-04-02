@@ -707,6 +707,14 @@ func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
 		t.Fatal("directory index ID root mapping not found after root split")
 	}
 
+	db.tables["users"].Indexes["name"].Entries = nil
+	rows, err := db.Query("SELECT name FROM users WHERE name = ?", insertedValue)
+	if err != nil {
+		t.Fatalf("Query(index lookup after split) error = %v", err)
+	}
+	defer rows.Close()
+	assertRowsStringSequence(t, rows, insertedValue)
+
 	pageReader := func(pageID uint32) ([]byte, error) {
 		return readCommittedPageData(db.pool, storage.PageID(pageID))
 	}

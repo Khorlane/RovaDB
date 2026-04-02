@@ -3,6 +3,8 @@ package rovadb
 import (
 	"errors"
 	"testing"
+
+	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
 func TestQuerySelectFromTable(t *testing.T) {
@@ -403,6 +405,39 @@ func TestQuerySelectWhereIndexedEquality(t *testing.T) {
 	assertRowsIntSequence(t, rows, 1, 3)
 }
 
+func TestQuerySelectWhereIndexedEqualityUsesPageBackedLookup(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'alice')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	db.tables["users"].Indexes["name"].Entries = map[planner.IndexKey][]int{}
+
+	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsIntSequence(t, rows, 1, 3)
+}
+
 func TestQuerySelectWhereIndexedEqualityNoMatch(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
@@ -418,6 +453,40 @@ func TestQuerySelectWhereIndexedEqualityNoMatch(t *testing.T) {
 	}
 	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
 		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT * FROM users WHERE name = 'bob'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() != nil {
+		t.Fatalf("Err() = %v, want nil", rows.Err())
+	}
+}
+
+func TestQuerySelectWhereIndexedEqualityNoMatchUsesPageBackedLookup(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	db.tables["users"].Indexes["name"].Entries = map[planner.IndexKey][]int{
+		planner.IndexKey("string:bob"): {0},
 	}
 
 	rows, err := db.Query("SELECT * FROM users WHERE name = 'bob'")
@@ -456,6 +525,45 @@ func TestQuerySelectWhereIndexedEqualityWithProjectionAndOrderBy(t *testing.T) {
 	if err := db.defineLegacyBasicIndex("users", "name"); err != nil {
 		t.Fatalf("defineLegacyBasicIndex() error = %v", err)
 	}
+
+	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice' ORDER BY id DESC")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	assertRowsIntSequence(t, rows, 3, 2)
+}
+
+func TestQuerySelectWhereIndexedEqualityAfterReopenUsesPageBackedLookup(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (3, 'alice')",
+		"INSERT INTO users VALUES (1, 'bob')",
+		"INSERT INTO users VALUES (2, 'alice')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+	db.tables["users"].Indexes["name"].Entries = nil
 
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice' ORDER BY id DESC")
 	if err != nil {

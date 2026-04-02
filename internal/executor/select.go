@@ -63,6 +63,17 @@ func executeIndexSelect(plan *planner.SelectPlan, table *Table) ([][]parser.Valu
 	return executeSelectRows(plan.Stmt, table, candidateRows)
 }
 
+// SelectCandidateRows executes a planned single-table select against caller-supplied candidate rows.
+func SelectCandidateRows(plan *planner.SelectPlan, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
+	if plan == nil || plan.Stmt == nil || table == nil {
+		return nil, errInvalidSelectPlan
+	}
+	if plan.ScanType == planner.ScanTypeJoin {
+		return nil, errInvalidSelectPlan
+	}
+	return executeSelectRows(plan.Stmt, table, candidateRows)
+}
+
 func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
 	if err := validateSelectFilterColumns(sel, table); err != nil {
 		return nil, err

@@ -641,6 +641,30 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
+		if plan.ScanType == planner.ScanTypeIndex {
+			table := db.tables[plan.IndexScan.TableName]
+			if table == nil {
+				return &Rows{err: newExecError("table not found: " + plan.IndexScan.TableName), idx: -1}, nil
+			}
+			index := table.Indexes[plan.IndexScan.ColumnName]
+			if index == nil {
+				return &Rows{err: newExecError("invalid select plan"), idx: -1}, nil
+			}
+			candidateRows, err := db.lookupIndexedRows(table, index, plan.IndexScan.Value)
+			if err != nil {
+				return &Rows{err: err, idx: -1}, nil
+			}
+			execTable := cloneSelectTableMeta(table)
+			rows, err := executor.SelectCandidateRows(plan, execTable, candidateRows)
+			if err != nil {
+				return &Rows{err: err, idx: -1}, nil
+			}
+			columns, err := executor.ProjectedColumnNames(plan, execTable)
+			if err != nil {
+				return &Rows{err: err, idx: -1}, nil
+			}
+			return newRows(columns, materializeRows(rows)), nil
+		}
 		execTables, err := db.tablesForSelect(plan)
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
@@ -664,6 +688,22 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		return &Rows{err: err, idx: -1}, nil
 	}
 	return newRows(nil, [][]any{{apiValue(value)}}), nil
+}
+
+func cloneSelectTableMeta(table *executor.Table) *executor.Table {
+	if table == nil {
+		return nil
+	}
+	cloned := &executor.Table{
+		Name:      table.Name,
+		TableID:   table.TableID,
+		IsSystem:  table.IsSystem,
+		Columns:   append([]parser.ColumnDef(nil), table.Columns...),
+		Indexes:   table.Indexes,
+		IndexDefs: cloneIndexDefs(table.IndexDefs),
+	}
+	cloned.SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
+	return cloned
 }
 
 // QueryRow executes Query and wraps the resulting row set for deferred handling.
@@ -742,6 +782,111 @@ func (db *DB) scanTableRows(table *executor.Table) ([][]parser.Value, error) {
 		return nil, newStorageError("row count mismatch")
 	}
 	return cloneRows(rows), nil
+}
+
+func (db *DB) lookupIndexedRows(table *executor.Table, idx *planner.BasicIndex, searchValue parser.Value) ([][]parser.Value, error) {
+	if db == nil || table == nil || idx == nil {
+		return nil, ErrInvalidArgument
+	}
+	if err := validateIndexLookupMetadata(table, idx); err != nil {
+		return nil, err
+	}
+	if idx.RootPageID == 0 {
+		return nil, newStorageError("corrupted index page")
+	}
+
+	searchKey, err := storage.EncodeIndexKey([]parser.Value{searchValue})
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+	locators, err := storage.LookupIndexExact(db.pageReaderForLookup, idx.RootPageID, searchKey)
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+
+	rows := make([][]parser.Value, 0, len(locators))
+	for _, locator := range locators {
+		row, err := db.fetchRowByLocator(table, locator)
+		if err != nil {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+func validateIndexLookupMetadata(table *executor.Table, idx *planner.BasicIndex) error {
+	if table == nil || idx == nil {
+		return ErrInvalidArgument
+	}
+	if idx.TableName != table.Name || idx.ColumnName == "" {
+		return newExecError("index/table mismatch")
+	}
+	var indexDef *storage.CatalogIndex
+	for i := range table.IndexDefs {
+		columnName, ok := executor.LegacyBasicIndexColumn(table.IndexDefs[i])
+		if ok && columnName == idx.ColumnName {
+			if indexDef != nil {
+				return newExecError("index/table mismatch")
+			}
+			indexDef = &table.IndexDefs[i]
+		}
+	}
+	if indexDef == nil {
+		return newExecError("index/table mismatch")
+	}
+	if indexDef.RootPageID == 0 || idx.RootPageID != indexDef.RootPageID {
+		return newExecError("index/table mismatch")
+	}
+	if idx.IndexID != 0 && indexDef.IndexID != 0 && idx.IndexID != indexDef.IndexID {
+		return newExecError("index/table mismatch")
+	}
+	return nil
+}
+
+func (db *DB) pageReaderForLookup(pageID uint32) ([]byte, error) {
+	if db == nil || db.pool == nil {
+		return nil, ErrInvalidArgument
+	}
+	pageData, err := readCommittedPageData(db.pool, storage.PageID(pageID))
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+	if pageData == nil {
+		return nil, newStorageError("corrupted index page")
+	}
+	return pageData, nil
+}
+
+func (db *DB) committedTableLocators(table *executor.Table) ([]storage.RowLocator, error) {
+	if db == nil || table == nil {
+		return nil, ErrInvalidArgument
+	}
+	if table.RootPageID() == 0 {
+		return nil, newStorageError("corrupted table page")
+	}
+	if len(table.Rows) == 0 {
+		if table.PersistedRowCount() != 0 {
+			return nil, newStorageError("row locator mismatch")
+		}
+		return nil, nil
+	}
+
+	pageData, err := readCommittedPageData(db.pool, table.RootPageID())
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+	if pageData == nil {
+		return nil, newStorageError("corrupted table page")
+	}
+	locators, persistedRows, err := storage.ReadSlottedRowsWithLocators(pageData, uint32(table.RootPageID()), storageColumnTypes(table.Columns))
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+	if len(locators) != len(table.Rows) || len(persistedRows) != len(table.Rows) {
+		return nil, newStorageError("row locator mismatch")
+	}
+	return locators, nil
 }
 
 func tableNamesForSelect(plan *planner.SelectPlan) []string {
@@ -1244,6 +1389,18 @@ func (db *DB) applyStagedIndexCreate(stagedTables map[string]*executor.Table, ta
 			data:  storage.InitIndexLeafPage(uint32(rootPageID)),
 			isNew: isNew,
 		})
+	}
+
+	if len(table.Rows) > 0 {
+		locators, err := db.committedTableLocators(table)
+		if err != nil {
+			return err
+		}
+		indexPages, err := db.buildRebuiltIndexPagesForDefs(table, table.Rows, locators, []*storage.CatalogIndex{indexDef})
+		if err != nil {
+			return err
+		}
+		pages = append(pages, indexPages...)
 	}
 
 	return db.stageSchemaState(stagedTables, pages)
@@ -1887,6 +2044,17 @@ func (db *DB) buildRebuiltIndexPages(table *executor.Table, rows [][]parser.Valu
 	if db == nil || table == nil || len(table.IndexDefs) == 0 {
 		return nil, nil
 	}
+	indexDefs := make([]*storage.CatalogIndex, 0, len(table.IndexDefs))
+	for i := range table.IndexDefs {
+		indexDefs = append(indexDefs, &table.IndexDefs[i])
+	}
+	return db.buildRebuiltIndexPagesForDefs(table, rows, locators, indexDefs)
+}
+
+func (db *DB) buildRebuiltIndexPagesForDefs(table *executor.Table, rows [][]parser.Value, locators []storage.RowLocator, indexDefs []*storage.CatalogIndex) ([]stagedPage, error) {
+	if db == nil || table == nil || len(table.IndexDefs) == 0 {
+		return nil, nil
+	}
 	if len(rows) != len(locators) {
 		return nil, newStorageError("row locator mismatch")
 	}
@@ -1895,8 +2063,10 @@ func (db *DB) buildRebuiltIndexPages(table *executor.Table, rows [][]parser.Valu
 	stager := newIndexPageStager(nextFreshID, func() (storage.PageID, bool, error) {
 		return db.allocatePageIDFrom(&nextFreshID)
 	})
-	for i := range table.IndexDefs {
-		indexDef := &table.IndexDefs[i]
+	for _, indexDef := range indexDefs {
+		if indexDef == nil {
+			continue
+		}
 		if indexDef.RootPageID == 0 {
 			continue
 		}
