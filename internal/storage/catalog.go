@@ -469,7 +469,7 @@ func PrepareCatalogWritePlan(cat *CatalogData, currentMode uint32, formatVersion
 		return nil, err
 	}
 
-	if currentMode != DirectoryCATDIRStorageModeOverflow && canStoreCatalogPayloadEmbedded(payload, rootIDPayload) {
+	if canStoreCatalogPayloadEmbedded(payload, rootIDPayload) {
 		directoryPage, err := buildEmbeddedDirectoryCatalogPage(payload, formatVersion, *freeListHead, rootIDMappings, checkpointMeta)
 		if err != nil {
 			return nil, err

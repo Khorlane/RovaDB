@@ -304,6 +304,108 @@ func TestPersistCatalogStatePromotesCATDIRToOverflowWhenNeeded(t *testing.T) {
 	}
 }
 
+func TestPersistCatalogStateDemotesCATDIRBackToEmbeddedWhenPayloadFits(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	largeTables := cloneTables(db.tables)
+	largePages := make([]stagedPage, 0, 64)
+	nextTableID := uint32(1000)
+	nextRootPageID := db.pager.NextPageID()
+	for i := 0; i < 48; i++ {
+		rootPageID := nextRootPageID
+		nextRootPageID++
+		tableName := fmt.Sprintf("table_%03d_%s", i, strings.Repeat("x", 48))
+		table := &executor.Table{
+			Name:    tableName,
+			TableID: nextTableID,
+			Columns: []parser.ColumnDef{
+				{Name: fmt.Sprintf("id_%02d_%s", i, strings.Repeat("a", 20)), Type: parser.ColumnTypeInt},
+				{Name: fmt.Sprintf("name_%02d_%s", i, strings.Repeat("b", 20)), Type: parser.ColumnTypeText},
+				{Name: fmt.Sprintf("city_%02d_%s", i, strings.Repeat("c", 20)), Type: parser.ColumnTypeText},
+				{Name: fmt.Sprintf("state_%02d_%s", i, strings.Repeat("d", 20)), Type: parser.ColumnTypeText},
+				{Name: fmt.Sprintf("zip_%02d_%s", i, strings.Repeat("e", 20)), Type: parser.ColumnTypeText},
+			},
+		}
+		table.SetStorageMeta(rootPageID, 0)
+		largeTables[tableName] = table
+		largePages = append(largePages, stagedPage{
+			id:    rootPageID,
+			data:  storage.InitializeTablePage(uint32(rootPageID)),
+			isNew: true,
+		})
+		nextTableID++
+	}
+	if err := db.persistCatalogState(largeTables, largePages); err != nil {
+		t.Fatalf("persistCatalogState(large) error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	page, err := pager.Get(storage.DirectoryControlPageID)
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("pager.Get(directory large) error = %v", err)
+	}
+	mode, err := storage.DirectoryCATDIRStorageMode(page.Data())
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("DirectoryCATDIRStorageMode(large) error = %v", err)
+	}
+	if mode != storage.DirectoryCATDIRStorageModeOverflow {
+		_ = rawDB.Close()
+		t.Fatalf("DirectoryCATDIRStorageMode(large) = %d, want %d", mode, storage.DirectoryCATDIRStorageModeOverflow)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	smallTables := cloneTables(db.tables)
+	if err := db.persistCatalogState(smallTables, nil); err != nil {
+		t.Fatalf("persistCatalogState(small) error = %v", err)
+	}
+
+	rawDB, pager = openRawStorage(t, path)
+	defer rawDB.Close()
+	page, err = pager.Get(storage.DirectoryControlPageID)
+	if err != nil {
+		t.Fatalf("pager.Get(directory small) error = %v", err)
+	}
+	mode, err = storage.DirectoryCATDIRStorageMode(page.Data())
+	if err != nil {
+		t.Fatalf("DirectoryCATDIRStorageMode(small) error = %v", err)
+	}
+	if mode != storage.DirectoryCATDIRStorageModeEmbedded {
+		t.Fatalf("DirectoryCATDIRStorageMode(small) = %d, want %d", mode, storage.DirectoryCATDIRStorageModeEmbedded)
+	}
+	head, err := storage.DirectoryCATDIROverflowHeadPageID(page.Data())
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowHeadPageID(small) error = %v", err)
+	}
+	if head != 0 {
+		t.Fatalf("DirectoryCATDIROverflowHeadPageID(small) = %d, want 0", head)
+	}
+	count, err := storage.DirectoryCATDIROverflowPageCount(page.Data())
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowPageCount(small) error = %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("DirectoryCATDIROverflowPageCount(small) = %d, want 0", count)
+	}
+
+	got, err := storage.LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() after demotion error = %v", err)
+	}
+	if len(got.Tables) != len(smallTables) {
+		t.Fatalf("len(LoadCatalog().Tables) after demotion = %d, want %d", len(got.Tables), len(smallTables))
+	}
+}
+
 func TestOpenRejectsMalformedCATDIROverflowModeWithZeroHead(t *testing.T) {
 	path := testDBPath(t)
 

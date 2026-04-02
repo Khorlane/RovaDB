@@ -391,6 +391,126 @@ func TestSaveCatalogPromotesToOverflowWhenEmbeddedCapacityExceeded(t *testing.T)
 	}
 }
 
+func TestSaveCatalogDemotesOverflowBackToEmbeddedWhenPayloadFits(t *testing.T) {
+	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog-demote.db"))
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+
+	oversize := &CatalogData{}
+	for i := 0; i < 200; i++ {
+		oversize.Tables = append(oversize.Tables, CatalogTable{
+			Name:       fmt.Sprintf("table_%03d", i),
+			TableID:    uint32(i + 1),
+			RootPageID: uint32(i + 1),
+			Columns: []CatalogColumn{
+				{Name: "id", Type: CatalogColumnTypeInt},
+				{Name: "name", Type: CatalogColumnTypeText},
+			},
+		})
+	}
+	if err := SaveCatalog(pager, oversize); err != nil {
+		t.Fatalf("SaveCatalog(oversize) error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush(oversize) error = %v", err)
+	}
+
+	pageData, err := pager.ReadPage(DirectoryControlPageID)
+	if err != nil {
+		t.Fatalf("pager.ReadPage(directory oversize) error = %v", err)
+	}
+	mode, err := DirectoryCATDIRStorageMode(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIRStorageMode(oversize) error = %v", err)
+	}
+	if mode != DirectoryCATDIRStorageModeOverflow {
+		t.Fatalf("DirectoryCATDIRStorageMode(oversize) = %d, want %d", mode, DirectoryCATDIRStorageModeOverflow)
+	}
+	previousOverflowHead, err := DirectoryCATDIROverflowHeadPageID(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowHeadPageID(oversize) error = %v", err)
+	}
+	if previousOverflowHead == 0 {
+		t.Fatal("DirectoryCATDIROverflowHeadPageID(oversize) = 0, want nonzero")
+	}
+
+	smaller := &CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				TableID:    1,
+				RootPageID: 3,
+				Columns: []CatalogColumn{
+					{Name: "id", Type: CatalogColumnTypeInt},
+					{Name: "name", Type: CatalogColumnTypeText},
+				},
+			},
+		},
+	}
+	if err := SaveCatalog(pager, smaller); err != nil {
+		t.Fatalf("SaveCatalog(smaller) error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush(smaller) error = %v", err)
+	}
+
+	pageData, err = pager.ReadPage(DirectoryControlPageID)
+	if err != nil {
+		t.Fatalf("pager.ReadPage(directory smaller) error = %v", err)
+	}
+	mode, err = DirectoryCATDIRStorageMode(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIRStorageMode(smaller) error = %v", err)
+	}
+	if mode != DirectoryCATDIRStorageModeEmbedded {
+		t.Fatalf("DirectoryCATDIRStorageMode(smaller) = %d, want %d", mode, DirectoryCATDIRStorageModeEmbedded)
+	}
+	overflowHead, err := DirectoryCATDIROverflowHeadPageID(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowHeadPageID(smaller) error = %v", err)
+	}
+	if overflowHead != 0 {
+		t.Fatalf("DirectoryCATDIROverflowHeadPageID(smaller) = %d, want 0", overflowHead)
+	}
+	overflowCount, err := DirectoryCATDIROverflowPageCount(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIROverflowPageCount(smaller) error = %v", err)
+	}
+	if overflowCount != 0 {
+		t.Fatalf("DirectoryCATDIROverflowPageCount(smaller) = %d, want 0", overflowCount)
+	}
+	payloadLength, err := DirectoryCATDIRPayloadByteLength(pageData)
+	if err != nil {
+		t.Fatalf("DirectoryCATDIRPayloadByteLength(smaller) error = %v", err)
+	}
+	smallerPayload, err := encodeCatalogPayload(smaller)
+	if err != nil {
+		t.Fatalf("encodeCatalogPayload(smaller) error = %v", err)
+	}
+	if payloadLength != uint32(len(smallerPayload)) {
+		t.Fatalf("DirectoryCATDIRPayloadByteLength(smaller) = %d, want %d", payloadLength, len(smallerPayload))
+	}
+
+	reopenPager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() reopen error = %v", err)
+	}
+	got, err := LoadCatalog(reopenPager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() after demotion error = %v", err)
+	}
+	if len(got.Tables) != 1 || got.Tables[0].Name != "users" || got.Tables[0].TableID != 1 {
+		t.Fatalf("LoadCatalog() after demotion = %#v, want smaller embedded catalog", got)
+	}
+}
+
 func TestSaveCatalogOverflowAllocationFailureLeavesCommittedMetadataIntact(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalog-intact.db")
 	dbFile, err := OpenOrCreate(path)
