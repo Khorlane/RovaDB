@@ -26,6 +26,16 @@ type EngineCheckResult struct {
 	FreeListHead      uint32
 }
 
+// EnginePageUsage summarizes physical page usage by validated page type.
+type EnginePageUsage struct {
+	TotalPages         int
+	TablePages         int
+	IndexLeafPages     int
+	IndexInternalPages int
+	FreePages          int
+	DirectoryPages     int
+}
+
 // EngineStatus returns a stable in-memory status snapshot for diagnostics.
 func (db *DB) EngineStatus() (EngineStatus, error) {
 	if db == nil {
@@ -123,6 +133,50 @@ func (db *DB) CheckEngineConsistency() (EngineCheckResult, error) {
 
 	result.OK = true
 	return result, nil
+}
+
+// PageUsage returns a compact validated physical page breakdown.
+func (db *DB) PageUsage() (EnginePageUsage, error) {
+	if db == nil {
+		return EnginePageUsage{}, ErrInvalidArgument
+	}
+	if db.closed {
+		return EnginePageUsage{}, ErrClosed
+	}
+	if err := db.validateTxnState(); err != nil {
+		return EnginePageUsage{}, err
+	}
+	if db.pager == nil || db.pool == nil {
+		return EnginePageUsage{}, ErrInvalidArgument
+	}
+
+	totalPages := int(db.pager.NextPageID())
+	usage := EnginePageUsage{TotalPages: totalPages}
+	for pageID := storage.PageID(0); int(pageID) < totalPages; pageID++ {
+		pageData, err := readCommittedPageData(db.pool, pageID)
+		if err != nil {
+			return usage, wrapStorageError(err)
+		}
+		if err := storage.ValidatePageImage(pageData); err != nil {
+			return usage, wrapStorageError(err)
+		}
+		switch pageTypeOf(pageData) {
+		case storage.PageTypeTable:
+			usage.TablePages++
+		case storage.PageTypeIndexLeaf:
+			usage.IndexLeafPages++
+		case storage.PageTypeIndexInternal:
+			usage.IndexInternalPages++
+		case storage.PageTypeFreePage:
+			usage.FreePages++
+		case storage.PageTypeDirectory:
+			usage.DirectoryPages++
+		default:
+			return usage, wrapStorageError(newStorageError("corrupted page header"))
+		}
+	}
+
+	return usage, nil
 }
 
 func statusUserTableCount(tables map[string]*executor.Table) int {

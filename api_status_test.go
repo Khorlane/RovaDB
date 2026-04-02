@@ -304,3 +304,147 @@ func TestCheckEngineConsistencyOnClosedDBReturnsErrClosed(t *testing.T) {
 		t.Fatalf("CheckEngineConsistency() error = %v, want ErrClosed", err)
 	}
 }
+
+func TestPageUsageOnFreshDB(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	usage, err := db.PageUsage()
+	if err != nil {
+		t.Fatalf("PageUsage() error = %v", err)
+	}
+	if usage.TotalPages != 5 {
+		t.Fatalf("PageUsage().TotalPages = %d, want 5", usage.TotalPages)
+	}
+	if usage.DirectoryPages != 1 {
+		t.Fatalf("PageUsage().DirectoryPages = %d, want 1", usage.DirectoryPages)
+	}
+	if usage.TablePages != 4 {
+		t.Fatalf("PageUsage().TablePages = %d, want 4 system table pages", usage.TablePages)
+	}
+	if usage.IndexLeafPages != 0 || usage.IndexInternalPages != 0 || usage.FreePages != 0 {
+		t.Fatalf("PageUsage() = %#v, want only directory + system table pages", usage)
+	}
+}
+
+func TestPageUsageTracksTableIndexAndFreePages(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	before, err := db.PageUsage()
+	if err != nil {
+		t.Fatalf("PageUsage(before) error = %v", err)
+	}
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	afterTable, err := db.PageUsage()
+	if err != nil {
+		t.Fatalf("PageUsage(after table) error = %v", err)
+	}
+	if afterTable.TablePages != before.TablePages+1 {
+		t.Fatalf("PageUsage().TablePages after table = %d, want %d", afterTable.TablePages, before.TablePages+1)
+	}
+	if afterTable.DirectoryPages != 1 {
+		t.Fatalf("PageUsage().DirectoryPages after table = %d, want 1", afterTable.DirectoryPages)
+	}
+
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	afterIndex, err := db.PageUsage()
+	if err != nil {
+		t.Fatalf("PageUsage(after index) error = %v", err)
+	}
+	if afterIndex.IndexLeafPages < afterTable.IndexLeafPages+1 {
+		t.Fatalf("PageUsage().IndexLeafPages after index = %d, want at least %d", afterIndex.IndexLeafPages, afterTable.IndexLeafPages+1)
+	}
+
+	if _, err := db.Exec("DROP INDEX idx_users_name"); err != nil {
+		t.Fatalf("Exec(drop index) error = %v", err)
+	}
+	afterDrop, err := db.PageUsage()
+	if err != nil {
+		t.Fatalf("PageUsage(after drop) error = %v", err)
+	}
+	if afterDrop.FreePages < afterIndex.FreePages+1 {
+		t.Fatalf("PageUsage().FreePages after drop = %d, want at least %d", afterDrop.FreePages, afterIndex.FreePages+1)
+	}
+}
+
+func TestPageUsageFailsOnMalformedPage(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"CREATE INDEX idx_users_name ON users (name)",
+		"CREATE UNIQUE INDEX idx_users_id ON users (id)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	tailFreePageID := storage.PageID(db.tables["users"].IndexDefinition("idx_users_id").RootPageID)
+	if _, err := db.Exec("DROP TABLE users"); err != nil {
+		t.Fatalf("Exec(drop table) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	page, err := pager.Get(tailFreePageID)
+	if err != nil {
+		t.Fatalf("pager.Get(%d) error = %v", tailFreePageID, err)
+	}
+	clear(page.Data())
+	copy(page.Data(), []byte("not-a-valid-page"))
+	pager.MarkDirty(page)
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+	if _, err := db.PageUsage(); err == nil {
+		t.Fatal("PageUsage() error = nil, want malformed page failure")
+	}
+}
+
+func TestPageUsageOnClosedDBReturnsErrClosed(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	_, err = db.PageUsage()
+	if !errors.Is(err, ErrClosed) {
+		t.Fatalf("PageUsage() error = %v, want ErrClosed", err)
+	}
+}
