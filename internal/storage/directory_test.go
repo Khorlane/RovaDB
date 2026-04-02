@@ -479,6 +479,65 @@ func TestDirectoryRootIDMappingsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestBuildDirectoryRootStateFromCatalogOrdersMappingsDeterministically(t *testing.T) {
+	catalog := &CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				TableID:    7,
+				RootPageID: 11,
+				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
+				Indexes: []CatalogIndex{
+					{Name: "idx_users_z", IndexID: 22, RootPageID: 33, Columns: []CatalogIndexColumn{{Name: "id"}}},
+					{Name: "idx_users_a", IndexID: 20, RootPageID: 31, Columns: []CatalogIndexColumn{{Name: "id"}}},
+				},
+			},
+			{
+				Name:       "accounts",
+				TableID:    3,
+				RootPageID: 9,
+				Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
+				Indexes: []CatalogIndex{
+					{Name: "idx_accounts_b", IndexID: 21, RootPageID: 32, Columns: []CatalogIndexColumn{{Name: "id"}}},
+				},
+			},
+		},
+	}
+
+	state := BuildDirectoryRootStateFromCatalog(catalog)
+	wantNameMappings := []DirectoryRootMapping{
+		{ObjectType: DirectoryRootMappingObjectTable, TableName: "accounts", RootPageID: 9},
+		{ObjectType: DirectoryRootMappingObjectTable, TableName: "users", RootPageID: 11},
+		{ObjectType: DirectoryRootMappingObjectIndex, TableName: "accounts", IndexName: "idx_accounts_b", RootPageID: 32},
+		{ObjectType: DirectoryRootMappingObjectIndex, TableName: "users", IndexName: "idx_users_a", RootPageID: 31},
+		{ObjectType: DirectoryRootMappingObjectIndex, TableName: "users", IndexName: "idx_users_z", RootPageID: 33},
+	}
+	wantIDMappings := []DirectoryRootIDMapping{
+		{ObjectType: DirectoryRootMappingObjectTable, ObjectID: 3, RootPageID: 9},
+		{ObjectType: DirectoryRootMappingObjectTable, ObjectID: 7, RootPageID: 11},
+		{ObjectType: DirectoryRootMappingObjectIndex, ObjectID: 20, RootPageID: 31},
+		{ObjectType: DirectoryRootMappingObjectIndex, ObjectID: 21, RootPageID: 32},
+		{ObjectType: DirectoryRootMappingObjectIndex, ObjectID: 22, RootPageID: 33},
+	}
+
+	if len(state.RootMappings) != len(wantNameMappings) {
+		t.Fatalf("len(state.RootMappings) = %d, want %d", len(state.RootMappings), len(wantNameMappings))
+	}
+	for i := range wantNameMappings {
+		if state.RootMappings[i] != wantNameMappings[i] {
+			t.Fatalf("state.RootMappings[%d] = %#v, want %#v", i, state.RootMappings[i], wantNameMappings[i])
+		}
+	}
+	if len(state.RootIDMappings) != len(wantIDMappings) {
+		t.Fatalf("len(state.RootIDMappings) = %d, want %d", len(state.RootIDMappings), len(wantIDMappings))
+	}
+	for i := range wantIDMappings {
+		if state.RootIDMappings[i] != wantIDMappings[i] {
+			t.Fatalf("state.RootIDMappings[%d] = %#v, want %#v", i, state.RootIDMappings[i], wantIDMappings[i])
+		}
+	}
+}
+
 func TestWriteDirectoryRootIDMappingsPersistsDurably(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "directory-root-id-map.db")
 

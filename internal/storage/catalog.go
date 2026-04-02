@@ -231,12 +231,13 @@ func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint3
 	if cat == nil {
 		cat = &CatalogData{}
 	}
-	rootMappings := BuildDirectoryRootMappings(cat)
+	rootState := BuildDirectoryRootStateFromCatalog(cat)
+	rootMappings := rootState.RootMappings
 	rootMapPayload, err := encodeDirectoryRootMappings(rootMappings)
 	if err != nil {
 		return nil, err
 	}
-	rootIDMappings := BuildDirectoryRootIDMappings(cat)
+	rootIDMappings := rootState.RootIDMappings
 	rootIDPayload, err := encodeDirectoryRootIDMappings(rootIDMappings)
 	if err != nil {
 		return nil, err

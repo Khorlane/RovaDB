@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"sort"
 )
 
 const (
@@ -55,6 +56,12 @@ type DirectoryControlState struct {
 	RootMappings   []DirectoryRootMapping
 	RootIDMappings []DirectoryRootIDMapping
 	CheckpointMeta DirectoryCheckpointMetadata
+}
+
+// DirectoryRootState is the authoritative durable root-mapping state for page 0.
+type DirectoryRootState struct {
+	RootMappings   []DirectoryRootMapping
+	RootIDMappings []DirectoryRootIDMapping
 }
 
 // InitDirectoryPage initializes the durable directory/control page.
@@ -422,63 +429,115 @@ func WriteDirectoryRootIDMappings(file *os.File, mappings []DirectoryRootIDMappi
 	return WriteDirectoryPage(file, rebuilt)
 }
 
-// BuildDirectoryRootMappings derives the durable physical root mappings from catalog metadata.
-func BuildDirectoryRootMappings(cat *CatalogData) []DirectoryRootMapping {
+// BuildDirectoryRootStateFromCatalog derives both durable root-mapping sections from one schema snapshot.
+func BuildDirectoryRootStateFromCatalog(cat *CatalogData) DirectoryRootState {
 	if cat == nil || len(cat.Tables) == 0 {
-		return nil
+		return DirectoryRootState{}
 	}
 
-	mappings := make([]DirectoryRootMapping, 0, len(cat.Tables))
+	type tableRoot struct {
+		tableID    uint32
+		tableName  string
+		rootPageID uint32
+	}
+	type indexRoot struct {
+		indexID    uint32
+		tableName  string
+		indexName  string
+		rootPageID uint32
+	}
+
+	tableRoots := make([]tableRoot, 0, len(cat.Tables))
+	indexRoots := make([]indexRoot, 0, len(cat.Tables))
 	for _, table := range cat.Tables {
 		if table.RootPageID != 0 {
-			mappings = append(mappings, DirectoryRootMapping{
-				ObjectType: DirectoryRootMappingObjectTable,
-				TableName:  table.Name,
-				RootPageID: table.RootPageID,
+			tableRoots = append(tableRoots, tableRoot{
+				tableID:    table.TableID,
+				tableName:  table.Name,
+				rootPageID: table.RootPageID,
 			})
 		}
 		for _, index := range table.Indexes {
 			if index.RootPageID == 0 {
 				continue
 			}
-			mappings = append(mappings, DirectoryRootMapping{
-				ObjectType: DirectoryRootMappingObjectIndex,
-				TableName:  table.Name,
-				IndexName:  index.Name,
-				RootPageID: index.RootPageID,
+			indexRoots = append(indexRoots, indexRoot{
+				indexID:    index.IndexID,
+				tableName:  table.Name,
+				indexName:  index.Name,
+				rootPageID: index.RootPageID,
 			})
 		}
 	}
-	return mappings
+
+	nameMappings := make([]DirectoryRootMapping, 0, len(tableRoots)+len(indexRoots))
+	sort.Slice(tableRoots, func(i, j int) bool {
+		return tableRoots[i].tableName < tableRoots[j].tableName
+	})
+	for _, table := range tableRoots {
+		nameMappings = append(nameMappings, DirectoryRootMapping{
+			ObjectType: DirectoryRootMappingObjectTable,
+			TableName:  table.tableName,
+			RootPageID: table.rootPageID,
+		})
+	}
+	sort.Slice(indexRoots, func(i, j int) bool {
+		if indexRoots[i].tableName != indexRoots[j].tableName {
+			return indexRoots[i].tableName < indexRoots[j].tableName
+		}
+		return indexRoots[i].indexName < indexRoots[j].indexName
+	})
+	for _, index := range indexRoots {
+		nameMappings = append(nameMappings, DirectoryRootMapping{
+			ObjectType: DirectoryRootMappingObjectIndex,
+			TableName:  index.tableName,
+			IndexName:  index.indexName,
+			RootPageID: index.rootPageID,
+		})
+	}
+
+	idMappings := make([]DirectoryRootIDMapping, 0, len(tableRoots)+len(indexRoots))
+	sort.Slice(tableRoots, func(i, j int) bool {
+		return tableRoots[i].tableID < tableRoots[j].tableID
+	})
+	for _, table := range tableRoots {
+		if table.tableID == 0 {
+			continue
+		}
+		idMappings = append(idMappings, DirectoryRootIDMapping{
+			ObjectType: DirectoryRootMappingObjectTable,
+			ObjectID:   table.tableID,
+			RootPageID: table.rootPageID,
+		})
+	}
+	sort.Slice(indexRoots, func(i, j int) bool {
+		return indexRoots[i].indexID < indexRoots[j].indexID
+	})
+	for _, index := range indexRoots {
+		if index.indexID == 0 {
+			continue
+		}
+		idMappings = append(idMappings, DirectoryRootIDMapping{
+			ObjectType: DirectoryRootMappingObjectIndex,
+			ObjectID:   index.indexID,
+			RootPageID: index.rootPageID,
+		})
+	}
+
+	return DirectoryRootState{
+		RootMappings:   nameMappings,
+		RootIDMappings: idMappings,
+	}
+}
+
+// BuildDirectoryRootMappings derives the durable physical root mappings from catalog metadata.
+func BuildDirectoryRootMappings(cat *CatalogData) []DirectoryRootMapping {
+	return BuildDirectoryRootStateFromCatalog(cat).RootMappings
 }
 
 // BuildDirectoryRootIDMappings derives the durable physical root mappings keyed by stable logical IDs.
 func BuildDirectoryRootIDMappings(cat *CatalogData) []DirectoryRootIDMapping {
-	if cat == nil || len(cat.Tables) == 0 {
-		return nil
-	}
-
-	mappings := make([]DirectoryRootIDMapping, 0, len(cat.Tables))
-	for _, table := range cat.Tables {
-		if table.TableID != 0 && table.RootPageID != 0 {
-			mappings = append(mappings, DirectoryRootIDMapping{
-				ObjectType: DirectoryRootMappingObjectTable,
-				ObjectID:   table.TableID,
-				RootPageID: table.RootPageID,
-			})
-		}
-		for _, index := range table.Indexes {
-			if index.IndexID == 0 || index.RootPageID == 0 {
-				continue
-			}
-			mappings = append(mappings, DirectoryRootIDMapping{
-				ObjectType: DirectoryRootMappingObjectIndex,
-				ObjectID:   index.IndexID,
-				RootPageID: index.RootPageID,
-			})
-		}
-	}
-	return mappings
+	return BuildDirectoryRootStateFromCatalog(cat).RootIDMappings
 }
 
 // ApplyDirectoryRootMappings overlays directory-owned physical roots onto catalog metadata.

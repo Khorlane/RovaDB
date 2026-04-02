@@ -683,6 +683,11 @@ func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
 		_ = rawDB.Close()
 		t.Fatalf("ReadDirectoryRootMappings() error = %v", err)
 	}
+	idMappings, err := storage.ReadDirectoryRootIDMappings(rawDB.File())
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("ReadDirectoryRootIDMappings() error = %v", err)
+	}
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
@@ -697,6 +702,18 @@ func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
 	}
 	if !foundRootMapping {
 		t.Fatal("directory index root mapping not found after root split")
+	}
+	foundIDRootMapping := false
+	for _, mapping := range idMappings {
+		if mapping.ObjectType == storage.DirectoryRootMappingObjectIndex && mapping.ObjectID == indexDef.IndexID {
+			foundIDRootMapping = true
+			if mapping.RootPageID != indexDef.RootPageID {
+				t.Fatalf("directory index ID root mapping = %d, want %d", mapping.RootPageID, indexDef.RootPageID)
+			}
+		}
+	}
+	if !foundIDRootMapping {
+		t.Fatal("directory index ID root mapping not found after root split")
 	}
 
 	pageReader := func(pageID uint32) ([]byte, error) {

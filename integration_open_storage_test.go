@@ -548,6 +548,65 @@ func TestDirectoryRootIDMappingsPersistAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestDirectoryWritePathKeepsNameAndIDMappingsConsistent(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE teams (id INT)"); err != nil {
+		t.Fatalf("Exec(create teams) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (name TEXT)"); err != nil {
+		t.Fatalf("Exec(create users) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	catalog, err := storage.LoadCatalog(pager)
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+	nameMappings, err := storage.ReadDirectoryRootMappings(rawDB.File())
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("ReadDirectoryRootMappings() error = %v", err)
+	}
+	idMappings, err := storage.ReadDirectoryRootIDMappings(rawDB.File())
+	if err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("ReadDirectoryRootIDMappings() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	wantState := storage.BuildDirectoryRootStateFromCatalog(catalog)
+	if len(nameMappings) != len(wantState.RootMappings) {
+		t.Fatalf("len(nameMappings) = %d, want %d", len(nameMappings), len(wantState.RootMappings))
+	}
+	for i := range wantState.RootMappings {
+		if nameMappings[i] != wantState.RootMappings[i] {
+			t.Fatalf("nameMappings[%d] = %#v, want %#v", i, nameMappings[i], wantState.RootMappings[i])
+		}
+	}
+	if len(idMappings) != len(wantState.RootIDMappings) {
+		t.Fatalf("len(idMappings) = %d, want %d", len(idMappings), len(wantState.RootIDMappings))
+	}
+	for i := range wantState.RootIDMappings {
+		if idMappings[i] != wantState.RootIDMappings[i] {
+			t.Fatalf("idMappings[%d] = %#v, want %#v", i, idMappings[i], wantState.RootIDMappings[i])
+		}
+	}
+}
+
 func TestOpenFailsWhenNameAndIDRootMappingsDisagree(t *testing.T) {
 	path := testDBPath(t)
 
