@@ -61,8 +61,8 @@ type ConditionChainItem struct {
 	Condition Condition
 }
 
-// WhereClause is the legacy flattened WHERE form used when a predicate tree is
-// not available. More expressive boolean precedence and grouping live in
+// WhereClause is the flattened WHERE form used when a predicate tree is not
+// available. More expressive boolean precedence and grouping live in
 // PredicateExpr.
 type WhereClause struct {
 	Items []ConditionChainItem
@@ -119,7 +119,7 @@ func ParseSelectExpr(sql string) (*SelectExpr, bool) {
 }
 
 // PrimaryTableRef returns the effective primary FROM reference for SELECT
-// resolution, falling back to the legacy TableName field when needed.
+// resolution, using the single-table TableName field when no FROM list exists.
 func (s *SelectExpr) PrimaryTableRef() *TableRef {
 	if s == nil {
 		return nil

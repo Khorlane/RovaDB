@@ -15,8 +15,7 @@ const (
 	rowTypeReal   = 4
 )
 
-// EncodeRow encodes one row payload using the current legacy storage row
-// format.
+// EncodeRow encodes one row payload using the current row storage format.
 
 func EncodeRow(values []parser.Value) ([]byte, error) {
 	buf := make([]byte, 2)
@@ -60,8 +59,7 @@ func EncodeRow(values []parser.Value) ([]byte, error) {
 	return buf, nil
 }
 
-// DecodeRow decodes one row payload using the current legacy storage row
-// format.
+// DecodeRow decodes one row payload using the current row storage format.
 func DecodeRow(data []byte) ([]parser.Value, error) {
 	if len(data) < 2 {
 		return nil, errCorruptedRowData
