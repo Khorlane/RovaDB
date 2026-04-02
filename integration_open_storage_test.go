@@ -554,6 +554,16 @@ func TestDirectoryWritePathWritesIDMappingsOnly(t *testing.T) {
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
+	teamsTableID := db.tables["teams"].TableID
+	teamsRoot := uint32(db.tables["teams"].RootPageID())
+	usersTableID := db.tables["users"].TableID
+	usersRoot := uint32(db.tables["users"].RootPageID())
+	indexDef := db.tables["users"].IndexDefinition("idx_users_name")
+	if indexDef == nil {
+		t.Fatal("IndexDefinition(idx_users_name) = nil")
+	}
+	indexID := indexDef.IndexID
+	indexRoot := indexDef.RootPageID
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
@@ -578,16 +588,37 @@ func TestDirectoryWritePathWritesIDMappingsOnly(t *testing.T) {
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
 
-	wantState := storage.BuildDirectoryRootStateFromCatalog(catalog)
 	if len(nameMappings) != 0 {
 		t.Fatalf("len(nameMappings) = %d, want 0 on new writes", len(nameMappings))
 	}
-	if len(idMappings) != len(wantState.RootIDMappings) {
-		t.Fatalf("len(idMappings) = %d, want %d", len(idMappings), len(wantState.RootIDMappings))
+	if catalog.Version != 6 {
+		t.Fatalf("catalog.Version = %d, want 6", catalog.Version)
 	}
-	for i := range wantState.RootIDMappings {
-		if idMappings[i] != wantState.RootIDMappings[i] {
-			t.Fatalf("idMappings[%d] = %#v, want %#v", i, idMappings[i], wantState.RootIDMappings[i])
+	for _, table := range catalog.Tables {
+		if table.RootPageID != 0 {
+			t.Fatalf("catalog table %q RootPageID = %d, want 0 on new writes", table.Name, table.RootPageID)
+		}
+		for _, index := range table.Indexes {
+			if index.RootPageID != 0 {
+				t.Fatalf("catalog index %q RootPageID = %d, want 0 on new writes", index.Name, index.RootPageID)
+			}
+		}
+	}
+	wantIDMappings := map[storage.DirectoryRootIDMapping]struct{}{
+		{ObjectType: storage.DirectoryRootMappingObjectTable, ObjectID: teamsTableID, RootPageID: teamsRoot}: {},
+		{ObjectType: storage.DirectoryRootMappingObjectTable, ObjectID: usersTableID, RootPageID: usersRoot}: {},
+		{ObjectType: storage.DirectoryRootMappingObjectIndex, ObjectID: indexID, RootPageID: indexRoot}:      {},
+	}
+	for want := range wantIDMappings {
+		found := false
+		for _, got := range idMappings {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("directory ID mapping %#v not found in %#v", want, idMappings)
 		}
 	}
 }
@@ -660,6 +691,50 @@ func TestOpenFailsOnDirectoryRootMappingMismatch(t *testing.T) {
 	if err == nil {
 		_ = db.Close()
 		t.Fatal("Open() error = nil, want directory root mapping mismatch failure")
+	}
+}
+
+func TestOpenFailsWhenNewCatalogPayloadHasNoDirectoryRoots(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	catalog, err := storage.LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+	if catalog.Version != 6 {
+		t.Fatalf("catalog.Version = %d, want 6", catalog.Version)
+	}
+	if err := storage.WriteDirectoryRootIDMappings(rawDB.File(), nil); err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("WriteDirectoryRootIDMappings() error = %v", err)
+	}
+	if err := storage.WriteDirectoryRootMappings(rawDB.File(), nil); err != nil {
+		_ = rawDB.Close()
+		t.Fatalf("WriteDirectoryRootMappings() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("rawDB.Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want missing directory roots failure")
 	}
 }
 

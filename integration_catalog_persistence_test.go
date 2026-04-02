@@ -2,6 +2,7 @@ package rovadb
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"testing"
 
@@ -181,6 +182,7 @@ func TestOpenBackfillsMissingTableAndIndexIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCatalog() error = %v", err)
 	}
+	catalog = catalogWithDirectoryRootsForSave(t, rawDB.File(), catalog)
 	var users *storage.CatalogTable
 	for i := range catalog.Tables {
 		if catalog.Tables[i].Name == "users" {
@@ -364,6 +366,7 @@ func TestOpenBootstrapsMissingInternalSystemCatalogTablesForOlderCatalog(t *test
 	if err != nil {
 		t.Fatalf("LoadCatalog() error = %v", err)
 	}
+	catalog = catalogWithDirectoryRootsForSave(t, rawDB.File(), catalog)
 	filtered := make([]storage.CatalogTable, 0, len(catalog.Tables))
 	for _, table := range catalog.Tables {
 		if isSystemCatalogTableName(table.Name) {
@@ -582,6 +585,7 @@ func TestOpenUpgradePopulatesSystemCatalogRowsForOlderDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCatalog() error = %v", err)
 	}
+	catalog = catalogWithDirectoryRootsForSave(t, rawDB.File(), catalog)
 	filtered := make([]storage.CatalogTable, 0, len(catalog.Tables))
 	for _, table := range catalog.Tables {
 		if isSystemCatalogTableName(table.Name) {
@@ -712,4 +716,34 @@ func systemCatalogCellKey(value any) string {
 	default:
 		return "4:"
 	}
+}
+
+func catalogWithDirectoryRootsForSave(t *testing.T, file *os.File, catalog *storage.CatalogData) *storage.CatalogData {
+	t.Helper()
+	if catalog == nil {
+		return nil
+	}
+	idMappings, err := storage.ReadDirectoryRootIDMappings(file)
+	if err != nil {
+		t.Fatalf("ReadDirectoryRootIDMappings() error = %v", err)
+	}
+	if len(idMappings) != 0 {
+		applied, err := storage.ApplyDirectoryRootIDMappings(catalog, idMappings)
+		if err != nil {
+			t.Fatalf("ApplyDirectoryRootIDMappings() error = %v", err)
+		}
+		return applied
+	}
+	nameMappings, err := storage.ReadDirectoryRootMappings(file)
+	if err != nil {
+		t.Fatalf("ReadDirectoryRootMappings() error = %v", err)
+	}
+	if len(nameMappings) != 0 {
+		applied, err := storage.ApplyDirectoryRootMappings(catalog, nameMappings)
+		if err != nil {
+			t.Fatalf("ApplyDirectoryRootMappings() error = %v", err)
+		}
+		return applied
+	}
+	return catalog
 }

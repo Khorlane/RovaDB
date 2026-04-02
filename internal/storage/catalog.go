@@ -9,7 +9,8 @@ const (
 	catalogVersionV2 = 2
 	catalogVersionV3 = 3
 	catalogVersionV4 = 4
-	catalogVersion   = 5
+	catalogVersionV5 = 5
+	catalogVersion   = 6
 	catalogPageID    = 0
 
 	CatalogColumnTypeInt  = 1
@@ -20,7 +21,8 @@ const (
 
 // CatalogData is the tiny storage-side catalog DTO persisted in page 0.
 type CatalogData struct {
-	Tables []CatalogTable
+	Version uint32
+	Tables  []CatalogTable
 }
 
 // CatalogTable is a persisted table schema entry.
@@ -99,7 +101,7 @@ func decodeCatalogPayload(pageData []byte) (int, *CatalogData, error) {
 
 	offset := 0
 	version, ok := readUint32(pageData, &offset)
-	if !ok || (version != catalogVersionV1 && version != catalogVersionV2 && version != catalogVersionV3 && version != catalogVersionV4 && version != catalogVersion) {
+	if !ok || (version != catalogVersionV1 && version != catalogVersionV2 && version != catalogVersionV3 && version != catalogVersionV4 && version != catalogVersionV5 && version != catalogVersion) {
 		return 0, nil, errCorruptedCatalogPage
 	}
 	tableCount, ok := readUint32(pageData, &offset)
@@ -107,22 +109,25 @@ func decodeCatalogPayload(pageData []byte) (int, *CatalogData, error) {
 		return 0, nil, errCorruptedCatalogPage
 	}
 
-	cat := &CatalogData{Tables: make([]CatalogTable, 0, tableCount)}
+	cat := &CatalogData{Version: version, Tables: make([]CatalogTable, 0, tableCount)}
 	for i := uint32(0); i < tableCount; i++ {
 		name, ok := readString(pageData, &offset)
 		if !ok || name == "" {
 			return 0, nil, errCorruptedCatalogPage
 		}
 		tableID := uint32(0)
-		if version >= catalogVersion {
+		if version >= catalogVersionV5 {
 			tableID, ok = readUint32(pageData, &offset)
 			if !ok {
 				return 0, nil, errCorruptedCatalogPage
 			}
 		}
-		rootPageID, ok := readUint32(pageData, &offset)
-		if !ok || rootPageID < 1 {
-			return 0, nil, errCorruptedCatalogPage
+		rootPageID := uint32(0)
+		if version < catalogVersion {
+			rootPageID, ok = readUint32(pageData, &offset)
+			if !ok || rootPageID < 1 {
+				return 0, nil, errCorruptedCatalogPage
+			}
 		}
 		rowCount, ok := readUint32(pageData, &offset)
 		if !ok {
@@ -232,6 +237,7 @@ func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint3
 		cat = &CatalogData{}
 	}
 	rootState := BuildDirectoryRootStateFromCatalog(cat)
+	legacyRootMappings := rootState.RootMappings
 	rootIDMappings := rootState.RootIDMappings
 	rootIDPayload, err := encodeDirectoryRootIDMappings(rootIDMappings)
 	if err != nil {
@@ -248,12 +254,11 @@ func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint3
 	buf = appendUint32(buf, uint32(len(cat.Tables)))
 
 	for _, table := range cat.Tables {
-		if table.Name == "" || table.RootPageID < 1 || len(table.Columns) == 0 {
+		if table.Name == "" || len(table.Columns) == 0 {
 			return nil, errCorruptedCatalogPage
 		}
 		buf = appendString(buf, table.Name)
 		buf = appendUint32(buf, table.TableID)
-		buf = appendUint32(buf, table.RootPageID)
 		buf = appendUint32(buf, table.RowCount)
 		buf = appendUint16(buf, uint16(len(table.Columns)))
 
@@ -283,6 +288,9 @@ func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint3
 		}
 	}
 
+	if catalogNeedsLegacyNameRootMappings(cat) {
+		return buildLegacyDirectoryCatalogPage(buf, CurrentDBFormatVersion, freeListHead, legacyRootMappings, rootIDMappings, checkpointMeta)
+	}
 	return buildDirectoryCatalogPage(buf, CurrentDBFormatVersion, freeListHead, rootIDMappings, checkpointMeta)
 }
 
@@ -382,15 +390,17 @@ func readCatalogIndex(data []byte, offset *int, version uint32, columnNames map[
 	rootPageID := uint32(0)
 	if version >= catalogVersionV4 {
 		var ok bool
-		if version >= catalogVersion {
+		if version >= catalogVersionV5 {
 			indexID, ok = readUint32(data, offset)
 			if !ok {
 				return CatalogIndex{}, errCorruptedCatalogPage
 			}
 		}
-		rootPageID, ok = readUint32(data, offset)
-		if !ok {
-			return CatalogIndex{}, errCorruptedCatalogPage
+		if version < catalogVersion {
+			rootPageID, ok = readUint32(data, offset)
+			if !ok {
+				return CatalogIndex{}, errCorruptedCatalogPage
+			}
 		}
 	}
 	columnCount, ok := readUint16(data, offset)
@@ -440,7 +450,6 @@ func appendCatalogIndex(buf []byte, index CatalogIndex, columns []CatalogColumn)
 		buf = append(buf, 0)
 	}
 	buf = appendUint32(buf, index.IndexID)
-	buf = appendUint32(buf, index.RootPageID)
 	buf = appendUint16(buf, uint16(len(index.Columns)))
 	for _, column := range index.Columns {
 		if column.Name == "" {
@@ -464,4 +473,21 @@ func appendCatalogIndex(buf []byte, index CatalogIndex, columns []CatalogColumn)
 		}
 	}
 	return buf, nil
+}
+
+func catalogNeedsLegacyNameRootMappings(cat *CatalogData) bool {
+	if cat == nil {
+		return false
+	}
+	for _, table := range cat.Tables {
+		if table.RootPageID != 0 && table.TableID == 0 {
+			return true
+		}
+		for _, index := range table.Indexes {
+			if index.RootPageID != 0 && index.IndexID == 0 {
+				return true
+			}
+		}
+	}
+	return false
 }

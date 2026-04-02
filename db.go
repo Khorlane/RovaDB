@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"os"
-	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -300,15 +299,7 @@ func applyDirectoryRootMappingsForOpen(cat *storage.CatalogData, rootMappings []
 	if len(rootMappings) == 0 {
 		return idApplied, nil
 	}
-
-	nameApplied, err := storage.ApplyDirectoryRootMappings(cat, rootMappings)
-	if err != nil {
-		return nil, err
-	}
-	if !reflect.DeepEqual(idApplied, nameApplied) {
-		return nil, newStorageError("corrupted directory page")
-	}
-	return idApplied, nil
+	return storage.ApplyDirectoryRootMappings(idApplied, rootMappings)
 }
 
 // Exec executes a non-SELECT statement and returns a write result.
@@ -2610,16 +2601,22 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 		return tables, nil
 	}
 	seenRootPageIDs := make(map[storage.PageID]struct{}, len(catalog.Tables))
+	strictDirectoryRoots := catalog.Version >= 6
 
 	for _, table := range catalog.Tables {
-		if table.Name == "" || table.RootPageID < 1 || len(table.Columns) == 0 {
+		if table.Name == "" || len(table.Columns) == 0 {
+			return nil, errInvalidStoredTableMeta
+		}
+		if strictDirectoryRoots && table.RootPageID < 1 {
 			return nil, errInvalidStoredTableMeta
 		}
 		rootPageID := storage.PageID(table.RootPageID)
-		if _, ok := seenRootPageIDs[rootPageID]; ok {
-			return nil, errDuplicateRootPageID
+		if rootPageID != 0 {
+			if _, ok := seenRootPageIDs[rootPageID]; ok {
+				return nil, errDuplicateRootPageID
+			}
+			seenRootPageIDs[rootPageID] = struct{}{}
 		}
-		seenRootPageIDs[rootPageID] = struct{}{}
 
 		columns := make([]parser.ColumnDef, 0, len(table.Columns))
 		for _, column := range table.Columns {
@@ -2642,6 +2639,9 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 		}
 		tables[table.Name].SetStorageMeta(rootPageID, table.RowCount)
 		for _, index := range table.Indexes {
+			if strictDirectoryRoots && index.RootPageID == 0 {
+				return nil, errInvalidStoredTableMeta
+			}
 			columnName, ok := executor.LegacyBasicIndexColumn(index)
 			if !ok {
 				continue

@@ -541,6 +541,7 @@ func ApplyDirectoryRootMappings(cat *CatalogData, mappings []DirectoryRootMappin
 	if cat == nil || len(mappings) == 0 {
 		return cat, nil
 	}
+	strictRoots := cat.Version >= catalogVersion
 
 	tableMappings := make(map[string]uint32)
 	indexMappings := make(map[string]uint32)
@@ -580,11 +581,13 @@ func ApplyDirectoryRootMappings(cat *CatalogData, mappings []DirectoryRootMappin
 		}
 		mappedRootPageID, hasTableMapping := tableMappings[table.Name]
 		if hasTableMapping {
-			if cloned.RootPageID != mappedRootPageID {
+			if cloned.RootPageID != 0 && cloned.RootPageID != mappedRootPageID {
 				return nil, errCorruptedDirectoryPage
 			}
 			cloned.RootPageID = mappedRootPageID
 			delete(tableMappings, table.Name)
+		} else if strictRoots {
+			return nil, errCorruptedDirectoryPage
 		}
 
 		for _, index := range table.Indexes {
@@ -598,11 +601,13 @@ func ApplyDirectoryRootMappings(cat *CatalogData, mappings []DirectoryRootMappin
 			key := table.Name + "\x00" + index.Name
 			mappedRootPageID, hasIndexMapping := indexMappings[key]
 			if hasIndexMapping {
-				if clonedIndex.RootPageID != mappedRootPageID {
+				if clonedIndex.RootPageID != 0 && clonedIndex.RootPageID != mappedRootPageID {
 					return nil, errCorruptedDirectoryPage
 				}
 				clonedIndex.RootPageID = mappedRootPageID
 				delete(indexMappings, key)
+			} else if strictRoots {
+				return nil, errCorruptedDirectoryPage
 			}
 			cloned.Indexes = append(cloned.Indexes, clonedIndex)
 		}
@@ -620,6 +625,7 @@ func ApplyDirectoryRootIDMappings(cat *CatalogData, mappings []DirectoryRootIDMa
 	if cat == nil || len(mappings) == 0 {
 		return cat, nil
 	}
+	strictRoots := cat.Version >= catalogVersion
 
 	tableMappings := make(map[uint32]uint32)
 	indexMappings := make(map[uint32]uint32)
@@ -655,11 +661,13 @@ func ApplyDirectoryRootIDMappings(cat *CatalogData, mappings []DirectoryRootIDMa
 		}
 		if table.TableID != 0 {
 			if mappedRootPageID, ok := tableMappings[table.TableID]; ok {
-				if cloned.RootPageID != mappedRootPageID {
+				if cloned.RootPageID != 0 && cloned.RootPageID != mappedRootPageID {
 					return nil, errCorruptedDirectoryPage
 				}
 				cloned.RootPageID = mappedRootPageID
 				delete(tableMappings, table.TableID)
+			} else if strictRoots {
+				return nil, errCorruptedDirectoryPage
 			}
 		}
 
@@ -673,11 +681,13 @@ func ApplyDirectoryRootIDMappings(cat *CatalogData, mappings []DirectoryRootIDMa
 			}
 			if index.IndexID != 0 {
 				if mappedRootPageID, ok := indexMappings[index.IndexID]; ok {
-					if clonedIndex.RootPageID != mappedRootPageID {
+					if clonedIndex.RootPageID != 0 && clonedIndex.RootPageID != mappedRootPageID {
 						return nil, errCorruptedDirectoryPage
 					}
 					clonedIndex.RootPageID = mappedRootPageID
 					delete(indexMappings, index.IndexID)
+				} else if strictRoots {
+					return nil, errCorruptedDirectoryPage
 				}
 			}
 			cloned.Indexes = append(cloned.Indexes, clonedIndex)

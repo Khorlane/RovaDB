@@ -90,10 +90,30 @@ func TestCatalogRoundTripPreservesIndexMetadataForOpen(t *testing.T) {
 	if index.Name != "id" || index.Unique || len(index.Columns) != 1 || index.Columns[0].Name != "id" || index.Columns[0].Desc {
 		t.Fatalf("catalog.Tables[0].Indexes[0] = %#v, want named single-column ASC non-unique id index", index)
 	}
-	if index.RootPageID == 0 {
-		t.Fatalf("catalog.Tables[0].Indexes[0].RootPageID = 0, want nonzero")
+	if catalog.Version != 6 {
+		t.Fatalf("catalog.Version = %d, want 6", catalog.Version)
 	}
-	rootPage, err := pager.Get(storage.PageID(index.RootPageID))
+	if usersTable.RootPageID != 0 {
+		t.Fatalf("catalog.Tables[0].RootPageID = %d, want 0 on new writes", usersTable.RootPageID)
+	}
+	if index.RootPageID != 0 {
+		t.Fatalf("catalog.Tables[0].Indexes[0].RootPageID = %d, want 0 on new writes", index.RootPageID)
+	}
+	idMappings, err := storage.ReadDirectoryRootIDMappings(dbFile.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryRootIDMappings() error = %v", err)
+	}
+	var indexRoot uint32
+	for _, mapping := range idMappings {
+		if mapping.ObjectType == storage.DirectoryRootMappingObjectIndex && mapping.ObjectID == index.IndexID {
+			indexRoot = mapping.RootPageID
+			break
+		}
+	}
+	if indexRoot == 0 {
+		t.Fatal("directory index ID root mapping not found")
+	}
+	rootPage, err := pager.Get(storage.PageID(indexRoot))
 	if err != nil {
 		t.Fatalf("pager.Get(index root) error = %v", err)
 	}
@@ -112,13 +132,13 @@ func TestCatalogRoundTripPreservesIndexMetadataForOpen(t *testing.T) {
 	if indexDef == nil {
 		t.Fatalf("IndexDefinition(id) = nil, defs=%#v", table.IndexDefs)
 	}
-	if indexDef.RootPageID != index.RootPageID {
-		t.Fatalf("IndexDefinition(id).RootPageID = %d, want %d", indexDef.RootPageID, index.RootPageID)
+	if indexDef.RootPageID != indexRoot {
+		t.Fatalf("IndexDefinition(id).RootPageID = %d, want %d", indexDef.RootPageID, indexRoot)
 	}
 	if basic := table.Indexes["id"]; basic == nil {
 		t.Fatal("table.Indexes[id] = nil")
-	} else if basic.RootPageID != index.RootPageID {
-		t.Fatalf("table.Indexes[id].RootPageID = %d, want %d", basic.RootPageID, index.RootPageID)
+	} else if basic.RootPageID != indexRoot {
+		t.Fatalf("table.Indexes[id].RootPageID = %d, want %d", basic.RootPageID, indexRoot)
 	}
 }
 
@@ -128,10 +148,14 @@ func TestOpenRetainsUnsupportedIndexDefinitionsWithoutActivatingBasicIndex(t *te
 	dbFile, pager := openRawStorage(t, path)
 	rootPage := pager.NewPage()
 	storage.InitTableRootPage(rootPage)
+	indexRoot := pager.NewPage()
+	clear(indexRoot.Data())
+	copy(indexRoot.Data(), storage.InitIndexLeafPage(uint32(indexRoot.ID())))
 	if err := storage.SaveCatalog(pager, &storage.CatalogData{
 		Tables: []storage.CatalogTable{
 			{
 				Name:       "users",
+				TableID:    1,
 				RootPageID: uint32(rootPage.ID()),
 				RowCount:   0,
 				Columns: []storage.CatalogColumn{
@@ -140,8 +164,10 @@ func TestOpenRetainsUnsupportedIndexDefinitionsWithoutActivatingBasicIndex(t *te
 				},
 				Indexes: []storage.CatalogIndex{
 					{
-						Name:   "idx_users_id_name",
-						Unique: true,
+						Name:       "idx_users_id_name",
+						Unique:     true,
+						IndexID:    2,
+						RootPageID: uint32(indexRoot.ID()),
 						Columns: []storage.CatalogIndexColumn{
 							{Name: "id"},
 							{Name: "name", Desc: true},
@@ -1102,7 +1128,20 @@ func TestOpenFailsWhenPersistedIndexRootHasWrongPageType(t *testing.T) {
 	if usersTable == nil || len(usersTable.Indexes) == 0 {
 		t.Fatalf("catalog = %#v, want users table with persisted index", catalog)
 	}
-	rootPageID := storage.PageID(usersTable.Indexes[0].RootPageID)
+	idMappings, err := storage.ReadDirectoryRootIDMappings(dbFile.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryRootIDMappings() error = %v", err)
+	}
+	rootPageID := storage.PageID(0)
+	for _, mapping := range idMappings {
+		if mapping.ObjectType == storage.DirectoryRootMappingObjectIndex && mapping.ObjectID == usersTable.Indexes[0].IndexID {
+			rootPageID = storage.PageID(mapping.RootPageID)
+			break
+		}
+	}
+	if rootPageID == 0 {
+		t.Fatal("directory index ID root mapping not found")
+	}
 	rootPage, err := pager.Get(rootPageID)
 	if err != nil {
 		t.Fatalf("pager.Get(index root) error = %v", err)
