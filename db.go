@@ -357,6 +357,9 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 	if err := parser.BindPlaceholders(stmt, args); err != nil {
 		return Result{}, err
 	}
+	if err := db.rejectSystemTableMutation(stmt); err != nil {
+		return Result{}, err
+	}
 	switch stmt := stmt.(type) {
 	case *parser.SelectExpr:
 		return Result{}, ErrExecDisallowsSelect
@@ -609,6 +612,52 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 	default:
 		return Result{}, newExecError("unsupported query form")
 	}
+}
+
+func (db *DB) rejectSystemTableMutation(stmt any) error {
+	if db == nil || stmt == nil {
+		return nil
+	}
+	switch typed := stmt.(type) {
+	case *parser.CreateTableStmt:
+		if isSystemCatalogTableName(typed.Name) {
+			return newExecError("system tables are read-only")
+		}
+	case *parser.InsertStmt:
+		if isSystemCatalogTableName(typed.TableName) {
+			return newExecError("system tables are read-only")
+		}
+	case *parser.UpdateStmt:
+		if isSystemCatalogTableName(typed.TableName) {
+			return newExecError("system tables are read-only")
+		}
+	case *parser.DeleteStmt:
+		if isSystemCatalogTableName(typed.TableName) {
+			return newExecError("system tables are read-only")
+		}
+	case *parser.AlterTableAddColumnStmt:
+		if isSystemCatalogTableName(typed.TableName) {
+			return newExecError("system tables are read-only")
+		}
+	case *parser.DropTableStmt:
+		if isSystemCatalogTableName(typed.Name) {
+			return newExecError("system tables are read-only")
+		}
+	case *parser.CreateIndexStmt:
+		if table := db.tables[typed.TableName]; table != nil && table.IsSystem {
+			return newExecError("system tables are read-only")
+		}
+	case *parser.DropIndexStmt:
+		for _, table := range db.tables {
+			if table == nil || !table.IsSystem {
+				continue
+			}
+			if table.IndexDefinition(typed.Name) != nil {
+				return newExecError("system tables are read-only")
+			}
+		}
+	}
+	return nil
 }
 
 // Query executes a SELECT statement and returns a fully materialized row set.
