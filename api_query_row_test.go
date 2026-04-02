@@ -425,6 +425,45 @@ func TestQueryRowIndexedEqualityNoMatchRemainsNoRows(t *testing.T) {
 	}
 }
 
+func TestQueryRowIndexedEqualityUsesLogicalIndexMetadataWhenRuntimeShellIsAbsent(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+	delete(db.tables["users"].Indexes, "name")
+
+	row := db.QueryRow("SELECT id FROM users WHERE name = 'bob'")
+	var id int
+	if err := row.Scan(&id); err != nil {
+		t.Fatalf("QueryRow(indexed logical metadata).Scan() error = %v", err)
+	}
+	if id != 2 {
+		t.Fatalf("QueryRow(indexed logical metadata).Scan() got %d, want 2", id)
+	}
+}
+
 func TestQueryRowNonIndexPathRemainsUnchanged(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

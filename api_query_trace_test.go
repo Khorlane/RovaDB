@@ -3,6 +3,8 @@ package rovadb
 import (
 	"errors"
 	"testing"
+
+	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
 func TestExplainQueryPathReportsTableScan(t *testing.T) {
@@ -96,6 +98,70 @@ func TestExplainQueryPathSurvivesReopen(t *testing.T) {
 	}
 	if trace.ScanType != "index" || trace.TableName != "users" || trace.IndexName != "idx_users_name" || !trace.UsesBTree {
 		t.Fatalf("ExplainQueryPath() after reopen = %#v, want index/users/idx_users_name/true", trace)
+	}
+}
+
+func TestExplainQueryPathUsesLogicalIndexMetadataWhenLegacyEntriesAreCleared(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"CREATE INDEX idx_users_name ON users (name)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+	db.tables["users"].Indexes["name"].Entries = map[planner.IndexKey][]int{}
+
+	trace, err := db.ExplainQueryPath("SELECT id FROM users WHERE name = 'alice'")
+	if err != nil {
+		t.Fatalf("ExplainQueryPath() error = %v", err)
+	}
+	if trace.ScanType != "index" || !trace.UsesBTree {
+		t.Fatalf("ExplainQueryPath() = %#v, want index/B+Tree trace", trace)
+	}
+}
+
+func TestExplainQueryPathUsesLogicalIndexMetadataWhenRuntimeShellIsAbsent(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"CREATE INDEX idx_users_name ON users (name)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+	delete(db.tables["users"].Indexes, "name")
+
+	trace, err := db.ExplainQueryPath("SELECT id FROM users WHERE name = 'alice'")
+	if err != nil {
+		t.Fatalf("ExplainQueryPath() error = %v", err)
+	}
+	if trace.ScanType != "index" || trace.IndexName != "idx_users_name" || !trace.UsesBTree {
+		t.Fatalf("ExplainQueryPath() = %#v, want index/users/idx_users_name/true", trace)
 	}
 }
 

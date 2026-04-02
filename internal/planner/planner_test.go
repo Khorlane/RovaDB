@@ -7,12 +7,38 @@ import (
 )
 
 func testPlannerTables(indexedColumns ...string) map[string]*TableMetadata {
-	indexes := make(map[string]*BasicIndex, len(indexedColumns))
-	for _, columnName := range indexedColumns {
-		indexes[columnName] = NewBasicIndex("users", columnName)
+	indexes := make(map[string]SimpleIndex, len(indexedColumns))
+	for i, columnName := range indexedColumns {
+		indexes[columnName] = SimpleIndex{
+			TableName:  "users",
+			ColumnName: columnName,
+			IndexID:    uint32(i + 1),
+			RootPageID: uint32(i + 10),
+		}
 	}
 	return map[string]*TableMetadata{
-		"users": {Indexes: indexes},
+		"users": {SimpleIndexes: indexes},
+	}
+}
+
+func TestPlanSelectIgnoresLegacyPostingContentForSimpleIndexEligibility(t *testing.T) {
+	stmt, ok := parser.ParseSelectExpr("SELECT id FROM users WHERE id = 1")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+
+	plan, err := PlanSelect(stmt, map[string]*TableMetadata{
+		"users": {
+			SimpleIndexes: map[string]SimpleIndex{
+				"id": {TableName: "users", ColumnName: "id", IndexID: 1, RootPageID: 9},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanSelect() error = %v", err)
+	}
+	if plan.ScanType != ScanTypeIndex || plan.IndexScan == nil {
+		t.Fatalf("PlanSelect() = %#v, want simple index scan", plan)
 	}
 }
 

@@ -646,7 +646,7 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 			if table == nil {
 				return &Rows{err: newExecError("table not found: " + plan.IndexScan.TableName), idx: -1}, nil
 			}
-			index := table.Indexes[plan.IndexScan.ColumnName]
+			index := runtimeSimpleIndexMetadata(table, plan.IndexScan.ColumnName)
 			if index == nil {
 				return &Rows{err: newExecError("invalid select plan"), idx: -1}, nil
 			}
@@ -735,6 +735,23 @@ func materializeRows(rows [][]parser.Value) [][]any {
 		materialized = append(materialized, values)
 	}
 	return materialized
+}
+
+func runtimeSimpleIndexMetadata(table *executor.Table, columnName string) *planner.BasicIndex {
+	if table == nil || columnName == "" {
+		return nil
+	}
+	for _, indexDef := range table.IndexDefs {
+		legacyColumnName, ok := executor.LegacyBasicIndexColumn(indexDef)
+		if !ok || legacyColumnName != columnName || indexDef.IndexID == 0 || indexDef.RootPageID == 0 {
+			continue
+		}
+		index := planner.NewBasicIndex(table.Name, columnName)
+		index.IndexID = indexDef.IndexID
+		index.RootPageID = indexDef.RootPageID
+		return index
+	}
+	return nil
 }
 
 func (db *DB) tablesForSelect(plan *planner.SelectPlan) (map[string]*executor.Table, error) {
@@ -994,8 +1011,21 @@ func plannerTableMetadata(tables map[string]*executor.Table) map[string]*planner
 		if table == nil {
 			continue
 		}
+		simpleIndexes := make(map[string]planner.SimpleIndex)
+		for _, indexDef := range table.IndexDefs {
+			columnName, ok := executor.LegacyBasicIndexColumn(indexDef)
+			if !ok || indexDef.IndexID == 0 || indexDef.RootPageID == 0 {
+				continue
+			}
+			simpleIndexes[columnName] = planner.SimpleIndex{
+				TableName:  table.Name,
+				ColumnName: columnName,
+				IndexID:    indexDef.IndexID,
+				RootPageID: indexDef.RootPageID,
+			}
+		}
 		metadata[tableName] = &planner.TableMetadata{
-			Indexes: table.Indexes,
+			SimpleIndexes: simpleIndexes,
 		}
 	}
 	return metadata

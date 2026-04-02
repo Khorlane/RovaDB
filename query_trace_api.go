@@ -67,7 +67,7 @@ func (db *DB) ExplainQueryPath(sql string, args ...any) (QueryExecutionTrace, er
 		if table == nil {
 			return QueryExecutionTrace{}, newExecError("table not found: " + plan.IndexScan.TableName)
 		}
-		index := table.Indexes[plan.IndexScan.ColumnName]
+		index := runtimeSimpleIndexMetadata(table, plan.IndexScan.ColumnName)
 		if index == nil {
 			return QueryExecutionTrace{}, newExecError("invalid select plan")
 		}

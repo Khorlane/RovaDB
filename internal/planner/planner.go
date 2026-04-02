@@ -8,7 +8,15 @@ import (
 
 // TableMetadata is the minimal planner-side table info used for scan choice.
 type TableMetadata struct {
-	Indexes map[string]*BasicIndex
+	SimpleIndexes map[string]SimpleIndex
+}
+
+// SimpleIndex is the minimal logical metadata needed for simple equality planning.
+type SimpleIndex struct {
+	TableName  string
+	ColumnName string
+	IndexID    uint32
+	RootPageID uint32
 }
 
 // PlanSelect creates a basic execution plan for SELECT.
@@ -124,15 +132,33 @@ func chooseIndexScan(stmt *parser.SelectExpr, tables map[string]*TableMetadata) 
 	}
 
 	table := tables[stmt.TableName]
-	if table == nil || table.Indexes == nil || table.Indexes[columnName] == nil {
+	if table == nil {
+		return nil
+	}
+	index, ok := eligibleSimpleIndexForColumn(table, stmt.TableName, columnName)
+	if !ok {
 		return nil
 	}
 
 	return &IndexScan{
-		TableName:  stmt.TableName,
-		ColumnName: columnName,
+		TableName:  index.TableName,
+		ColumnName: index.ColumnName,
 		Value:      value,
 	}
+}
+
+func eligibleSimpleIndexForColumn(table *TableMetadata, tableName, columnName string) (SimpleIndex, bool) {
+	if table == nil || table.SimpleIndexes == nil || tableName == "" || columnName == "" {
+		return SimpleIndex{}, false
+	}
+	index, ok := table.SimpleIndexes[columnName]
+	if !ok {
+		return SimpleIndex{}, false
+	}
+	if index.TableName != tableName || index.ColumnName != columnName || index.IndexID == 0 || index.RootPageID == 0 {
+		return SimpleIndex{}, false
+	}
+	return index, true
 }
 
 func indexedEquality(stmt *parser.SelectExpr) (string, parser.Value, bool) {
