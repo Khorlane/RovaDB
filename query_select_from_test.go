@@ -3,8 +3,6 @@ package rovadb
 import (
 	"errors"
 	"testing"
-
-	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
 func TestQuerySelectFromTable(t *testing.T) {
@@ -427,7 +425,7 @@ func TestQuerySelectWhereIndexedEqualityUsesPageBackedLookup(t *testing.T) {
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	db.tables["users"].Indexes["name"].Entries = map[planner.IndexKey][]int{}
+	delete(db.tables["users"].Indexes, "name")
 
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice'")
 	if err != nil {
@@ -485,9 +483,7 @@ func TestQuerySelectWhereIndexedEqualityNoMatchUsesPageBackedLookup(t *testing.T
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	db.tables["users"].Indexes["name"].Entries = map[planner.IndexKey][]int{
-		planner.IndexKey("string:bob"): {0},
-	}
+	delete(db.tables["users"].Indexes, "name")
 
 	rows, err := db.Query("SELECT * FROM users WHERE name = 'bob'")
 	if err != nil {
@@ -563,7 +559,7 @@ func TestQuerySelectWhereIndexedEqualityAfterReopenUsesPageBackedLookup(t *testi
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	db.tables["users"].Indexes["name"].Entries = nil
+	delete(db.tables["users"].Indexes, "name")
 
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice' ORDER BY id DESC")
 	if err != nil {
@@ -628,7 +624,7 @@ func TestQuerySelectCountStarWithIndexedEqualitySingleMatch(t *testing.T) {
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	db.tables["users"].Indexes["name"].Entries = nil
+	delete(db.tables["users"].Indexes, "name")
 
 	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE name = 'bob'")
 	if err != nil {
@@ -661,7 +657,7 @@ func TestQuerySelectCountStarWithIndexedEqualityDuplicateMatchesThroughBTree(t *
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	db.tables["users"].Indexes["name"].Entries = nil
+	delete(db.tables["users"].Indexes, "name")
 
 	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE name = 'alice'")
 	if err != nil {
@@ -693,7 +689,7 @@ func TestQuerySelectCountStarWithIndexedEqualityNoMatchesThroughBTree(t *testing
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	db.tables["users"].Indexes["name"].Entries = nil
+	delete(db.tables["users"].Indexes, "name")
 
 	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE name = 'zoe'")
 	if err != nil {

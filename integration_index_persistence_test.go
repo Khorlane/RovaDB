@@ -47,9 +47,15 @@ func TestIndexMetadataPersistsAcrossReopen(t *testing.T) {
 	if index == nil {
 		t.Fatal("table.Indexes[\"name\"] = nil")
 	}
-	got := index.LookupEqual(parser.StringValue("alice"))
-	if len(got) != 2 || got[0] != 0 || got[1] != 2 {
-		t.Fatalf("LookupEqual(alice) = %#v, want []int{0, 2}", got)
+	if index.TableName != "users" || index.ColumnName != "name" {
+		t.Fatalf("index metadata = (%q, %q), want (%q, %q)", index.TableName, index.ColumnName, "users", "name")
+	}
+	indexDef := table.IndexDefinition("name")
+	if indexDef == nil {
+		t.Fatalf("IndexDefinition(name) = nil, defs=%#v", table.IndexDefs)
+	}
+	if index.IndexID != indexDef.IndexID || index.RootPageID != indexDef.RootPageID {
+		t.Fatalf("index metadata ids = (%d, %d), want (%d, %d)", index.IndexID, index.RootPageID, indexDef.IndexID, indexDef.RootPageID)
 	}
 }
 
@@ -410,7 +416,7 @@ func TestIndexedCountStarLookupSurvivesReopen(t *testing.T) {
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	db.tables["users"].Indexes["name"].Entries = nil
+	delete(db.tables["users"].Indexes, "name")
 
 	rows, err := db.Query("SELECT COUNT(*) FROM users WHERE name = 'alice'")
 	if err != nil {
@@ -448,7 +454,7 @@ func TestIndexedQueryRowLookupSurvivesReopen(t *testing.T) {
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	db.tables["users"].Indexes["name"].Entries = nil
+	delete(db.tables["users"].Indexes, "name")
 
 	row := db.QueryRow("SELECT id FROM users WHERE name = 'bob'")
 	var id int
@@ -488,7 +494,7 @@ func TestIndexedQueryLookupSurvivesReopenWithoutLegacyEntries(t *testing.T) {
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	db.tables["users"].Indexes["name"].Entries = nil
+	delete(db.tables["users"].Indexes, "name")
 
 	rows, err := db.Query("SELECT id FROM users WHERE name = 'alice' ORDER BY id")
 	if err != nil {
@@ -902,7 +908,7 @@ func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
 		t.Fatal("directory index ID root mapping not found after root split")
 	}
 
-	db.tables["users"].Indexes["name"].Entries = nil
+	delete(db.tables["users"].Indexes, "name")
 	rows, err := db.Query("SELECT name FROM users WHERE name = ?", insertedValue)
 	if err != nil {
 		t.Fatalf("Query(index lookup after split) error = %v", err)

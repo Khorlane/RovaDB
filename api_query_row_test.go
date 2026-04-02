@@ -352,7 +352,7 @@ func TestQueryRowIndexedEqualityUsesDurableLookupPath(t *testing.T) {
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	db.tables["users"].Indexes["name"].Entries = nil
+	delete(db.tables["users"].Indexes, "name")
 
 	row := db.QueryRow("SELECT id FROM users WHERE name = 'bob'")
 	var id int
@@ -386,7 +386,7 @@ func TestQueryRowIndexedEqualityDuplicateMatchesRemainMultipleRows(t *testing.T)
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	db.tables["users"].Indexes["name"].Entries = nil
+	delete(db.tables["users"].Indexes, "name")
 
 	row := db.QueryRow("SELECT id FROM users WHERE name = 'alice'")
 	var id int
@@ -416,7 +416,7 @@ func TestQueryRowIndexedEqualityNoMatchRemainsNoRows(t *testing.T) {
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	db.tables["users"].Indexes["name"].Entries = nil
+	delete(db.tables["users"].Indexes, "name")
 
 	row := db.QueryRow("SELECT id FROM users WHERE name = 'zoe'")
 	var id int

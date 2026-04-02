@@ -7,7 +7,6 @@ import (
 
 	"github.com/Khorlane/RovaDB/internal/executor"
 	"github.com/Khorlane/RovaDB/internal/parser"
-	"github.com/Khorlane/RovaDB/internal/planner"
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
@@ -253,24 +252,12 @@ func assertIndexConsistency(t *testing.T, db *DB, table *executor.Table) {
 		return
 	}
 
-	columnNames := make([]string, 0, len(table.Columns))
-	for _, column := range table.Columns {
-		columnNames = append(columnNames, column.Name)
-	}
 	for columnName, index := range table.Indexes {
 		if index == nil {
 			t.Fatalf("table.Indexes[%q] = nil", columnName)
 		}
-		rows, err := db.scanTableRows(table)
-		if err != nil {
-			t.Fatalf("db.scanTableRows(%q) error = %v", table.Name, err)
-		}
-		tmp := planner.NewBasicIndex(table.Name, columnName)
-		if err := tmp.Rebuild(columnNames, rows); err != nil {
-			t.Fatalf("tmp.Rebuild(%q) error = %v", columnName, err)
-		}
-		if !reflect.DeepEqual(tmp.Entries, index.Entries) {
-			t.Fatalf("index %q entries = %#v, want %#v", columnName, index.Entries, tmp.Entries)
+		if index.TableName != table.Name || index.ColumnName != columnName {
+			t.Fatalf("index %q metadata = (%q, %q), want (%q, %q)", columnName, index.TableName, index.ColumnName, table.Name, columnName)
 		}
 	}
 }

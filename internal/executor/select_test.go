@@ -1269,8 +1269,8 @@ func TestSelectWithIndexScan(t *testing.T) {
 			"name": planner.NewBasicIndex("users", "name"),
 		},
 	}
-	if err := rebuildIndexesForTable(table); err != nil {
-		t.Fatalf("rebuildIndexesForTable() error = %v", err)
+	if err := table.Indexes["name"].Rebuild([]string{"id", "name"}, table.Rows); err != nil {
+		t.Fatalf("BasicIndex.Rebuild() error = %v", err)
 	}
 
 	rows, err := Select(&planner.SelectPlan{

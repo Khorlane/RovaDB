@@ -3,8 +3,6 @@ package rovadb
 import (
 	"errors"
 	"testing"
-
-	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
 func TestExplainQueryPathReportsTableScan(t *testing.T) {
@@ -122,7 +120,7 @@ func TestExplainQueryPathUsesLogicalIndexMetadataWhenLegacyEntriesAreCleared(t *
 
 	db = reopenDB(t, path)
 	defer db.Close()
-	db.tables["users"].Indexes["name"].Entries = map[planner.IndexKey][]int{}
+	delete(db.tables["users"].Indexes, "name")
 
 	trace, err := db.ExplainQueryPath("SELECT id FROM users WHERE name = 'alice'")
 	if err != nil {

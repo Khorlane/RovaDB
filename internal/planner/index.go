@@ -13,6 +13,7 @@ var errIndexColumnDoesNotExist = newPlanError("column not found")
 type IndexKey string
 
 // BasicIndex is a minimal single-column equality index.
+// Entries remains only for legacy/internal tests and isolated helper usage.
 type BasicIndex struct {
 	TableName  string
 	ColumnName string

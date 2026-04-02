@@ -241,11 +241,6 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
-	if err := rebuildPersistedIndexes(tables); err != nil {
-		_ = pager.Close()
-		_ = file.Close()
-		return nil, err
-	}
 	if err := validateTables(tables, true); err != nil {
 		_ = pager.Close()
 		_ = file.Close()
@@ -2026,13 +2021,6 @@ func cloneTable(table *executor.Table) *executor.Table {
 		Indexes:   cloneIndexes(table.Indexes),
 		IndexDefs: cloneIndexDefs(table.IndexDefs),
 	}
-	colNames := columnNamesForTable(cloned)
-	for _, index := range cloned.Indexes {
-		if index == nil {
-			continue
-		}
-		_ = index.Rebuild(colNames, cloned.Rows)
-	}
 	cloned.SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
 	return cloned
 }
@@ -2564,16 +2552,6 @@ func (db *DB) loadRowsIntoTables(tables map[string]*executor.Table, tableNames .
 			return err
 		}
 		table.Rows = rows
-		colNames := columnNamesForTable(table)
-		for columnName, index := range table.Indexes {
-			if index == nil {
-				table.Indexes[columnName] = planner.NewBasicIndex(table.Name, columnName)
-				index = table.Indexes[columnName]
-			}
-			if err := index.Rebuild(colNames, table.Rows); err != nil {
-				return err
-			}
-		}
 	}
 	return nil
 }
@@ -2678,25 +2656,6 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 	return tables, nil
 }
 
-func rebuildPersistedIndexes(tables map[string]*executor.Table) error {
-	for _, table := range tables {
-		if table == nil || len(table.Indexes) == 0 {
-			continue
-		}
-		colNames := columnNamesForTable(table)
-		for columnName, index := range table.Indexes {
-			if index == nil {
-				table.Indexes[columnName] = planner.NewBasicIndex(table.Name, columnName)
-				index = table.Indexes[columnName]
-			}
-			if err := index.Rebuild(colNames, table.Rows); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 func columnNamesForTable(table *executor.Table) []string {
 	if table == nil {
 		return nil
@@ -2743,9 +2702,6 @@ func executeCreateIndex(stmt *parser.CreateIndexStmt, tables map[string]*executo
 			table.Indexes = make(map[string]*planner.BasicIndex)
 		}
 		index := planner.NewBasicIndex(table.Name, columnName)
-		if err := index.Rebuild(columnNamesForTable(table), table.Rows); err != nil {
-			return 0, nil, err
-		}
 		table.Indexes[columnName] = index
 	}
 
@@ -2885,7 +2841,6 @@ func (db *DB) defineLegacyBasicIndex(tableName, columnName string) error {
 		if table == nil {
 			return newExecError("table not found")
 		}
-		colNames := columnNamesForTable(table)
 		found := false
 		for _, column := range table.Columns {
 			if column.Name == columnName {
@@ -2914,9 +2869,6 @@ func (db *DB) defineLegacyBasicIndex(tableName, columnName string) error {
 		table.IndexDefs = append(table.IndexDefs, indexDef)
 		index := planner.NewBasicIndex(tableName, columnName)
 		index.RootPageID = indexDef.RootPageID
-		if err := index.Rebuild(colNames, table.Rows); err != nil {
-			return err
-		}
 		table.Indexes[columnName] = index
 
 		if err := db.applyStagedIndexCreate(stagedTables, tableName, indexDef.Name); err != nil {
@@ -3169,7 +3121,6 @@ func validateIndexConsistency(table *executor.Table) error {
 		return nil
 	}
 
-	colNames := columnNamesForTable(table)
 	for columnName, index := range table.Indexes {
 		if index == nil {
 			return newExecError("index/table mismatch")
@@ -3181,17 +3132,6 @@ func validateIndexConsistency(table *executor.Table) error {
 			return newExecError("index/table mismatch")
 		}
 		if index.TableName != table.Name || index.ColumnName != columnName {
-			return newExecError("index/table mismatch")
-		}
-		if len(table.Rows) == 0 && table.PersistedRowCount() != 0 {
-			continue
-		}
-
-		expected := planner.NewBasicIndex(table.Name, columnName)
-		if err := expected.Rebuild(colNames, table.Rows); err != nil {
-			return newExecError("index/table mismatch")
-		}
-		if !reflect.DeepEqual(expected.Entries, index.Entries) {
 			return newExecError("index/table mismatch")
 		}
 	}

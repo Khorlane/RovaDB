@@ -10,19 +10,13 @@ func rebuildIndexesForTable(table *Table) error {
 		return nil
 	}
 
-	columnNames := make([]string, 0, len(table.Columns))
-	for _, column := range table.Columns {
-		columnNames = append(columnNames, column.Name)
-	}
-
 	for columnName, index := range table.Indexes {
 		if index == nil {
 			table.Indexes[columnName] = planner.NewBasicIndex(table.Name, columnName)
 			index = table.Indexes[columnName]
 		}
-		if err := index.Rebuild(columnNames, table.Rows); err != nil {
-			return err
-		}
+		index.TableName = table.Name
+		index.ColumnName = columnName
 	}
 
 	return nil
