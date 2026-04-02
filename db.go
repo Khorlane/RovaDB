@@ -144,11 +144,6 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
-	rootMappings, err := storage.ReadDirectoryRootMappings(file.File())
-	if err != nil {
-		_ = file.Close()
-		return nil, wrapStorageError(err)
-	}
 	rootIDMappings, err := storage.ReadDirectoryRootIDMappings(file.File())
 	if err != nil {
 		_ = file.Close()
@@ -156,15 +151,6 @@ func Open(path string) (*DB, error) {
 	}
 	checkpointMeta, err := storage.ReadDirectoryCheckpointMetadata(file.File())
 	if err != nil {
-		_ = file.Close()
-		return nil, wrapStorageError(err)
-	}
-	if err := storage.ValidateDirectoryControlState(file.File(), storage.DirectoryControlState{
-		FreeListHead:   freeListHead,
-		RootMappings:   rootMappings,
-		RootIDMappings: rootIDMappings,
-		CheckpointMeta: checkpointMeta,
-	}); err != nil {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
@@ -183,7 +169,27 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
-	catalog, err = applyDirectoryRootMappingsForOpen(catalog, rootMappings, rootIDMappings)
+	modernRootPath := useIDOnlyDirectoryMappingsForOpen(catalog, rootIDMappings)
+	rootMappings := []storage.DirectoryRootMapping(nil)
+	if !modernRootPath {
+		rootMappings, err = storage.ReadDirectoryRootMappings(file.File())
+		if err != nil {
+			_ = pager.Close()
+			_ = file.Close()
+			return nil, wrapStorageError(err)
+		}
+	}
+	if err := storage.ValidateDirectoryControlState(file.File(), storage.DirectoryControlState{
+		FreeListHead:   freeListHead,
+		RootMappings:   rootMappings,
+		RootIDMappings: rootIDMappings,
+		CheckpointMeta: checkpointMeta,
+	}); err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, wrapStorageError(err)
+	}
+	catalog, err = applyDirectoryRootMappingsForOpen(catalog, rootMappings, rootIDMappings, modernRootPath)
 	if err != nil {
 		_ = pager.Close()
 		_ = file.Close()
@@ -287,7 +293,10 @@ func replayCommittedWAL(path string) error {
 	return storage.ApplyWALFramesToDB(path, frames)
 }
 
-func applyDirectoryRootMappingsForOpen(cat *storage.CatalogData, rootMappings []storage.DirectoryRootMapping, rootIDMappings []storage.DirectoryRootIDMapping) (*storage.CatalogData, error) {
+func applyDirectoryRootMappingsForOpen(cat *storage.CatalogData, rootMappings []storage.DirectoryRootMapping, rootIDMappings []storage.DirectoryRootIDMapping, modernRootPath bool) (*storage.CatalogData, error) {
+	if modernRootPath {
+		return storage.ApplyDirectoryRootIDMappings(cat, rootIDMappings)
+	}
 	if len(rootIDMappings) == 0 {
 		return storage.ApplyDirectoryRootMappings(cat, rootMappings)
 	}
@@ -300,6 +309,23 @@ func applyDirectoryRootMappingsForOpen(cat *storage.CatalogData, rootMappings []
 		return idApplied, nil
 	}
 	return storage.ApplyDirectoryRootMappings(idApplied, rootMappings)
+}
+
+func useIDOnlyDirectoryMappingsForOpen(cat *storage.CatalogData, rootIDMappings []storage.DirectoryRootIDMapping) bool {
+	if cat == nil || len(rootIDMappings) == 0 {
+		return false
+	}
+	for _, table := range cat.Tables {
+		if table.TableID == 0 {
+			return false
+		}
+		for _, index := range table.Indexes {
+			if index.IndexID == 0 {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // Exec executes a non-SELECT statement and returns a write result.
