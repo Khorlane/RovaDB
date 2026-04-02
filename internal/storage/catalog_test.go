@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -388,4 +390,189 @@ func TestMutationPathsMarkPagesDirty(t *testing.T) {
 	if pager.IsDirty(tablePage) {
 		t.Fatal("table page still dirty after FlushDirty()")
 	}
+}
+
+func TestBuildCatalogOverflowPageChainSinglePage(t *testing.T) {
+	payload := []byte("catalog-overflow")
+
+	pages, err := BuildCatalogOverflowPageChain(payload, []PageID{7})
+	if err != nil {
+		t.Fatalf("BuildCatalogOverflowPageChain() error = %v", err)
+	}
+	if len(pages) != 1 {
+		t.Fatalf("len(BuildCatalogOverflowPageChain()) = %d, want 1", len(pages))
+	}
+	nextPageID, err := CatalogOverflowNextPageID(pages[0].Data)
+	if err != nil {
+		t.Fatalf("CatalogOverflowNextPageID() error = %v", err)
+	}
+	if nextPageID != 0 {
+		t.Fatalf("CatalogOverflowNextPageID() = %d, want 0", nextPageID)
+	}
+	gotPayload, err := CatalogOverflowPayload(pages[0].Data)
+	if err != nil {
+		t.Fatalf("CatalogOverflowPayload() error = %v", err)
+	}
+	if !bytes.Equal(gotPayload, payload) {
+		t.Fatalf("CatalogOverflowPayload() = %q, want %q", string(gotPayload), string(payload))
+	}
+}
+
+func TestBuildCatalogOverflowPageChainMultiPage(t *testing.T) {
+	payload := bytes.Repeat([]byte("x"), CatalogOverflowPayloadCapacity+37)
+
+	pages, err := BuildCatalogOverflowPageChain(payload, []PageID{7, 8})
+	if err != nil {
+		t.Fatalf("BuildCatalogOverflowPageChain() error = %v", err)
+	}
+	if len(pages) != 2 {
+		t.Fatalf("len(BuildCatalogOverflowPageChain()) = %d, want 2", len(pages))
+	}
+	nextPageID, err := CatalogOverflowNextPageID(pages[0].Data)
+	if err != nil {
+		t.Fatalf("CatalogOverflowNextPageID(first) error = %v", err)
+	}
+	if nextPageID != 8 {
+		t.Fatalf("CatalogOverflowNextPageID(first) = %d, want 8", nextPageID)
+	}
+	lastNextPageID, err := CatalogOverflowNextPageID(pages[1].Data)
+	if err != nil {
+		t.Fatalf("CatalogOverflowNextPageID(last) error = %v", err)
+	}
+	if lastNextPageID != 0 {
+		t.Fatalf("CatalogOverflowNextPageID(last) = %d, want 0", lastNextPageID)
+	}
+}
+
+func TestBuildCatalogOverflowPageChainRejectsInsufficientPageIDs(t *testing.T) {
+	payload := bytes.Repeat([]byte("x"), CatalogOverflowPayloadCapacity+1)
+
+	_, err := BuildCatalogOverflowPageChain(payload, []PageID{7})
+	if !errors.Is(err, errCatalogTooLarge) {
+		t.Fatalf("BuildCatalogOverflowPageChain() error = %v, want %v", err, errCatalogTooLarge)
+	}
+}
+
+func TestBuildCatalogOverflowPageChainRejectsZeroAndDuplicatePageIDs(t *testing.T) {
+	payload := []byte("payload")
+
+	if _, err := BuildCatalogOverflowPageChain(payload, []PageID{0}); !errors.Is(err, errCorruptedCatalogOverflow) {
+		t.Fatalf("BuildCatalogOverflowPageChain(zero id) error = %v, want %v", err, errCorruptedCatalogOverflow)
+	}
+	if _, err := BuildCatalogOverflowPageChain(payload, []PageID{7, 7}); !errors.Is(err, errCorruptedCatalogOverflow) {
+		t.Fatalf("BuildCatalogOverflowPageChain(duplicate id) error = %v, want %v", err, errCorruptedCatalogOverflow)
+	}
+}
+
+func TestReadCatalogOverflowPayloadSinglePage(t *testing.T) {
+	payload := []byte("catalog")
+	pages, err := BuildCatalogOverflowPageChain(payload, []PageID{7})
+	if err != nil {
+		t.Fatalf("BuildCatalogOverflowPageChain() error = %v", err)
+	}
+
+	got, err := ReadCatalogOverflowPayload(testPageReaderForOverflow(pages), 7, 1, uint32(len(payload)))
+	if err != nil {
+		t.Fatalf("ReadCatalogOverflowPayload() error = %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("ReadCatalogOverflowPayload() = %q, want %q", string(got), string(payload))
+	}
+}
+
+func TestReadCatalogOverflowPayloadMultiPage(t *testing.T) {
+	payload := bytes.Repeat([]byte("a"), CatalogOverflowPayloadCapacity+19)
+	pages, err := BuildCatalogOverflowPageChain(payload, []PageID{7, 8})
+	if err != nil {
+		t.Fatalf("BuildCatalogOverflowPageChain() error = %v", err)
+	}
+
+	got, err := ReadCatalogOverflowPayload(testPageReaderForOverflow(pages), 7, 2, uint32(len(payload)))
+	if err != nil {
+		t.Fatalf("ReadCatalogOverflowPayload() error = %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("ReadCatalogOverflowPayload() mismatch")
+	}
+}
+
+func TestReadCatalogOverflowPayloadRejectsWrongPageType(t *testing.T) {
+	tablePage := NewPage(7)
+	InitTableRootPage(tablePage)
+	page := tablePage.Data()
+	reader := PageReaderFunc(func(pageID PageID) ([]byte, error) { return page, nil })
+
+	_, err := ReadCatalogOverflowPayload(reader, 7, 1, 1)
+	if !errors.Is(err, errCorruptedPageHeader) {
+		t.Fatalf("ReadCatalogOverflowPayload() error = %v, want %v", err, errCorruptedPageHeader)
+	}
+}
+
+func TestReadCatalogOverflowPayloadRejectsShortAndLongChains(t *testing.T) {
+	payload := bytes.Repeat([]byte("b"), CatalogOverflowPayloadCapacity+3)
+	pages, err := BuildCatalogOverflowPageChain(payload, []PageID{7, 8})
+	if err != nil {
+		t.Fatalf("BuildCatalogOverflowPageChain() error = %v", err)
+	}
+
+	if _, err := ReadCatalogOverflowPayload(testPageReaderForOverflow(pages), 7, 3, uint32(len(payload))); !errors.Is(err, errCorruptedCatalogOverflow) {
+		t.Fatalf("ReadCatalogOverflowPayload(short chain) error = %v, want %v", err, errCorruptedCatalogOverflow)
+	}
+	if _, err := ReadCatalogOverflowPayload(testPageReaderForOverflow(pages), 7, 2, uint32(len(payload)-1)); !errors.Is(err, errCorruptedCatalogOverflow) {
+		t.Fatalf("ReadCatalogOverflowPayload(length mismatch) error = %v, want %v", err, errCorruptedCatalogOverflow)
+	}
+}
+
+func TestReadCatalogOverflowPayloadRejectsRepeatedPageIDsAndMalformedTermination(t *testing.T) {
+	payload := bytes.Repeat([]byte("c"), CatalogOverflowPayloadCapacity+5)
+	pages, err := BuildCatalogOverflowPageChain(payload, []PageID{7, 8})
+	if err != nil {
+		t.Fatalf("BuildCatalogOverflowPageChain() error = %v", err)
+	}
+
+	binary.LittleEndian.PutUint32(pages[0].Data[catalogOverflowOffsetNextPageID:catalogOverflowOffsetNextPageID+4], 7)
+	if err := RecomputePageChecksum(pages[0].Data); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
+	if _, err := ReadCatalogOverflowPayload(testPageReaderForOverflow(pages), 7, 2, uint32(len(payload))); !errors.Is(err, errCorruptedCatalogOverflow) {
+		t.Fatalf("ReadCatalogOverflowPayload(self-loop) error = %v, want %v", err, errCorruptedCatalogOverflow)
+	}
+
+	pages, err = BuildCatalogOverflowPageChain(payload, []PageID{7, 8})
+	if err != nil {
+		t.Fatalf("BuildCatalogOverflowPageChain() error = %v", err)
+	}
+	binary.LittleEndian.PutUint32(pages[1].Data[catalogOverflowOffsetNextPageID:catalogOverflowOffsetNextPageID+4], 9)
+	if err := RecomputePageChecksum(pages[1].Data); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
+	if _, err := ReadCatalogOverflowPayload(testPageReaderForOverflow(pages), 7, 2, uint32(len(payload))); !errors.Is(err, errCorruptedCatalogOverflow) {
+		t.Fatalf("ReadCatalogOverflowPayload(last next) error = %v, want %v", err, errCorruptedCatalogOverflow)
+	}
+
+	pages, err = BuildCatalogOverflowPageChain(payload, []PageID{7, 8})
+	if err != nil {
+		t.Fatalf("BuildCatalogOverflowPageChain() error = %v", err)
+	}
+	binary.LittleEndian.PutUint32(pages[0].Data[catalogOverflowOffsetNextPageID:catalogOverflowOffsetNextPageID+4], 0)
+	if err := RecomputePageChecksum(pages[0].Data); err != nil {
+		t.Fatalf("RecomputePageChecksum() error = %v", err)
+	}
+	if _, err := ReadCatalogOverflowPayload(testPageReaderForOverflow(pages), 7, 2, uint32(len(payload))); !errors.Is(err, errCorruptedCatalogOverflow) {
+		t.Fatalf("ReadCatalogOverflowPayload(intermediate termination) error = %v, want %v", err, errCorruptedCatalogOverflow)
+	}
+}
+
+func testPageReaderForOverflow(pages []CatalogOverflowPageImage) PageReader {
+	pageMap := make(map[PageID][]byte, len(pages))
+	for _, page := range pages {
+		pageMap[page.PageID] = page.Data
+	}
+	return PageReaderFunc(func(pageID PageID) ([]byte, error) {
+		page, ok := pageMap[pageID]
+		if !ok {
+			return nil, errCorruptedCatalogOverflow
+		}
+		return page, nil
+	})
 }

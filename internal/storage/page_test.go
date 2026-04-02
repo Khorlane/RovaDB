@@ -47,7 +47,7 @@ func TestPageOffset(t *testing.T) {
 }
 
 func TestIsValidPageType(t *testing.T) {
-	valid := []PageType{PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal, PageTypeFreePage, PageTypeDirectory}
+	valid := []PageType{PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal, PageTypeFreePage, PageTypeDirectory, PageTypeCatalogOverflow}
 	for _, pageType := range valid {
 		if !IsValidPageType(pageType) {
 			t.Fatalf("IsValidPageType(%d) = false, want true", pageType)
@@ -64,6 +64,45 @@ func TestFreePageIsNotIndexPageType(t *testing.T) {
 	}
 	if IsIndexPageType(PageTypeDirectory) {
 		t.Fatal("IsIndexPageType(PageTypeDirectory) = true, want false")
+	}
+}
+
+func TestCatalogOverflowPageHeaderRoundTrip(t *testing.T) {
+	page := InitCatalogOverflowPage(9)
+
+	if got := PageType(binary.LittleEndian.Uint16(page[pageHeaderOffsetPageType : pageHeaderOffsetPageType+2])); got != PageTypeCatalogOverflow {
+		t.Fatalf("pageType = %d, want %d", got, PageTypeCatalogOverflow)
+	}
+	if err := SetCatalogOverflowNextPageID(page, 11); err != nil {
+		t.Fatalf("SetCatalogOverflowNextPageID() error = %v", err)
+	}
+	if err := WriteCatalogOverflowPayload(page, []byte("catdir")); err != nil {
+		t.Fatalf("WriteCatalogOverflowPayload() error = %v", err)
+	}
+	if err := FinalizePageImage(page); err != nil {
+		t.Fatalf("FinalizePageImage() error = %v", err)
+	}
+
+	nextPageID, err := CatalogOverflowNextPageID(page)
+	if err != nil {
+		t.Fatalf("CatalogOverflowNextPageID() error = %v", err)
+	}
+	if nextPageID != 11 {
+		t.Fatalf("CatalogOverflowNextPageID() = %d, want 11", nextPageID)
+	}
+	usedBytes, err := CatalogOverflowPayloadUsedBytes(page)
+	if err != nil {
+		t.Fatalf("CatalogOverflowPayloadUsedBytes() error = %v", err)
+	}
+	if usedBytes != 6 {
+		t.Fatalf("CatalogOverflowPayloadUsedBytes() = %d, want 6", usedBytes)
+	}
+	payload, err := CatalogOverflowPayload(page)
+	if err != nil {
+		t.Fatalf("CatalogOverflowPayload() error = %v", err)
+	}
+	if string(payload) != "catdir" {
+		t.Fatalf("CatalogOverflowPayload() = %q, want %q", string(payload), "catdir")
 	}
 }
 
@@ -189,6 +228,17 @@ func TestFinalizePageImageStampsValidIndexFreeAndDirectoryPages(t *testing.T) {
 	}
 	if err := ValidatePageImage(directoryPage); err != nil {
 		t.Fatalf("ValidatePageImage(directory) error = %v", err)
+	}
+
+	overflowPage := InitCatalogOverflowPage(5)
+	if err := WriteCatalogOverflowPayload(overflowPage, []byte("payload")); err != nil {
+		t.Fatalf("WriteCatalogOverflowPayload() error = %v", err)
+	}
+	if err := FinalizePageImage(overflowPage); err != nil {
+		t.Fatalf("FinalizePageImage(overflow) error = %v", err)
+	}
+	if err := ValidatePageImage(overflowPage); err != nil {
+		t.Fatalf("ValidatePageImage(overflow) error = %v", err)
 	}
 }
 

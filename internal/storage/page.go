@@ -27,6 +27,7 @@ const (
 	PageTypeIndexInternal
 	PageTypeFreePage
 	PageTypeDirectory
+	PageTypeCatalogOverflow
 )
 
 // Page is a fixed-size in-memory page buffer. Dirty/original tracking is used
@@ -98,7 +99,7 @@ func pageOffset(id PageID) int64 {
 
 func IsValidPageType(pageType PageType) bool {
 	switch pageType {
-	case PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal, PageTypeFreePage, PageTypeDirectory:
+	case PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal, PageTypeFreePage, PageTypeDirectory, PageTypeCatalogOverflow:
 		return true
 	default:
 		return false
@@ -184,6 +185,11 @@ func ValidatePageImage(page []byte) error {
 		return validateFreePage(page)
 	case PageTypeDirectory:
 		return validateDirectoryPageImage(page)
+	case PageTypeCatalogOverflow:
+		if err := validateStoredPageChecksum(page); err != nil {
+			return errCorruptedCatalogOverflow
+		}
+		return validateCatalogOverflowPage(page)
 	default:
 		return errCorruptedPageHeader
 	}
