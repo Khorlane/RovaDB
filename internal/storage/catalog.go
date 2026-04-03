@@ -14,7 +14,7 @@ const (
 	CatalogColumnTypeReal = 4
 )
 
-// CatalogData is the tiny storage-side catalog DTO persisted in page 0.
+// CatalogData is the tiny storage-side catalog DTO persisted through CAT/DIR storage.
 type CatalogData struct {
 	Version uint32
 	Tables  []CatalogTable
@@ -79,7 +79,7 @@ func (f PageReaderFunc) ReadPage(pageID PageID) ([]byte, error) {
 	return f(pageID)
 }
 
-// LoadCatalog decodes the catalog stored in page 0.
+// LoadCatalog decodes the committed catalog from embedded or overflow CAT/DIR storage.
 func LoadCatalog(reader PageReader) (*CatalogData, error) {
 	payload, err := readCommittedCatalogPayload(reader)
 	if err != nil {
@@ -259,7 +259,7 @@ func decodeCatalogPayload(pageData []byte) (int, *CatalogData, error) {
 	return offset, cat, nil
 }
 
-// SaveCatalog encodes the catalog into page 0.
+// SaveCatalog encodes the catalog into the smallest valid CAT/DIR representation.
 func SaveCatalog(pager *Pager, cat *CatalogData) error {
 	page, err := pager.Get(catalogPageID)
 	if err != nil {
@@ -308,7 +308,7 @@ func SaveCatalog(pager *Pager, cat *CatalogData) error {
 	return nil
 }
 
-// BuildCatalogPageData encodes the catalog into a full catalog page image.
+// BuildCatalogPageData encodes the catalog into a full embedded directory page image.
 func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
 	return BuildCatalogPageDataWithDirectoryState(cat, 0, DirectoryCheckpointMetadata{})
 }

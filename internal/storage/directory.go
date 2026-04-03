@@ -268,7 +268,7 @@ func ReadDirectoryRootIDMappings(file *os.File) ([]DirectoryRootIDMapping, error
 	return directoryRootIDMappings(page)
 }
 
-// ValidateDirectoryControlState validates the currently loaded directory/control metadata against disk pages.
+// ValidateDirectoryControlState validates embedded or overflow CAT/DIR control state against disk pages.
 func ValidateDirectoryControlState(file *os.File, state DirectoryControlState) error {
 	if file == nil {
 		return errCorruptedDirectoryPage

@@ -60,7 +60,7 @@ func BuildCatalogOverflowPageChain(payload []byte, pageIDs []PageID) ([]CatalogO
 	return pages, nil
 }
 
-// ReadCatalogOverflowPayload reconstructs one CAT/DIR payload from an overflow chain.
+// ReadCatalogOverflowPayload reconstructs one CAT/DIR payload from a validated overflow chain.
 func ReadCatalogOverflowPayload(reader PageReader, headPageID PageID, expectedPageCount uint32, expectedPayloadBytes uint32) ([]byte, error) {
 	if reader == nil {
 		return nil, errMalformedCATDIROverflow
