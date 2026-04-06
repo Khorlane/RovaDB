@@ -255,6 +255,185 @@ func TestQueryAPIEligibleCountStarTracksInsertAndDeleteChanges(t *testing.T) {
 	}
 }
 
+func TestQueryAPIEligibleIndexedProjectionUsesIndexOnlyWithoutBaseRowFetch(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX users_ix1 ON users (id)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'cara')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil, want value")
+	}
+	table.SetStorageMeta(0, table.PersistedRowCount())
+
+	rows, err := db.Query("SELECT id FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if got := rows.Columns(); len(got) != 1 || got[0] != "id" {
+		t.Fatalf("Columns() = %#v, want [id]", got)
+	}
+	if len(rows.data) != 3 || rows.data[0][0] != 1 || rows.data[1][0] != 2 || rows.data[2][0] != 3 {
+		t.Fatalf("rows.data = %#v, want [[1] [2] [3]]", rows.data)
+	}
+}
+
+func TestQueryAPIEligibleIndexedProjectionEmptyTableReturnsNoRows(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX users_ix1 ON users (id)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT id FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if got := rows.Columns(); len(got) != 1 || got[0] != "id" {
+		t.Fatalf("Columns() = %#v, want [id]", got)
+	}
+	if len(rows.data) != 0 {
+		t.Fatalf("rows.data = %#v, want empty rowset", rows.data)
+	}
+}
+
+func TestQueryAPIEligibleQualifiedIndexedProjectionWorks(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX users_ix1 ON users (id)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT users.id FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if got := rows.Columns(); len(got) != 1 || got[0] != "users.id" {
+		t.Fatalf("Columns() = %#v, want [users.id]", got)
+	}
+	if len(rows.data) != 2 || rows.data[0][0] != 1 || rows.data[1][0] != 2 {
+		t.Fatalf("rows.data = %#v, want [[1] [2]]", rows.data)
+	}
+}
+
+func TestQueryAPINonIndexedProjectionStillUsesExistingPath(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX users_ix1 ON users (id)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil, want value")
+	}
+	table.SetStorageMeta(0, table.PersistedRowCount())
+
+	rows, err := db.Query("SELECT name FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() == nil {
+		t.Fatal("Err() = nil, want base-row path failure after table root removal")
+	}
+}
+
+func TestQueryAPIEligibleIndexedProjectionTracksInsertAndDeleteChanges(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX users_ix1 ON users (id)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'cara')",
+		"DELETE FROM users WHERE id = 2",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT id FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if len(rows.data) != 2 || rows.data[0][0] != 1 || rows.data[1][0] != 3 {
+		t.Fatalf("rows.data = %#v, want [[1] [3]]", rows.data)
+	}
+}
+
 func TestQueryAPINonSelectRejected(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

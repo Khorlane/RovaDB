@@ -39,6 +39,38 @@ func CountAllIndexEntries(pageReader IndexPageReader, rootPageID uint32) (int, e
 	}
 }
 
+func ReadAllIndexLeafRecordsInOrder(pageReader IndexPageReader, rootPageID uint32) ([]IndexLeafRecord, error) {
+	_, leafPage, err := findLeftmostIndexLeafPage(pageReader, rootPageID)
+	if err != nil {
+		return nil, err
+	}
+
+	records := make([]IndexLeafRecord, 0)
+	currentPage := leafPage
+	for {
+		pageRecords, err := ReadAllIndexLeafRecords(currentPage)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, pageRecords...)
+
+		rightSibling, err := IndexLeafRightSibling(currentPage)
+		if err != nil {
+			return nil, err
+		}
+		if rightSibling == 0 {
+			return records, nil
+		}
+		currentPage, err = pageReader(rightSibling)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateLeafIndexPage(currentPage); err != nil {
+			return nil, err
+		}
+	}
+}
+
 func FindIndexLeafPage(pageReader IndexPageReader, rootPageID uint32, searchKey []byte) (leafPageID uint32, leafPage []byte, err error) {
 	if pageReader == nil || rootPageID == 0 {
 		return 0, nil, errCorruptedIndexPage

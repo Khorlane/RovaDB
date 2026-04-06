@@ -708,7 +708,7 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
-		if rows, ok, err := db.queryIndexOnlyCount(plan); ok {
+		if rows, ok, err := db.queryIndexOnly(plan); ok {
 			if err != nil {
 				return &Rows{err: err, idx: -1}, nil
 			}
@@ -777,13 +777,33 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 	return newRows(nil, [][]any{{apiValue(value)}}), nil
 }
 
-func (db *DB) queryIndexOnlyCount(plan *planner.SelectPlan) (*Rows, bool, error) {
+func (db *DB) queryIndexOnly(plan *planner.SelectPlan) (*Rows, bool, error) {
 	if db == nil || plan == nil || plan.Stmt == nil {
 		return nil, false, nil
 	}
-	if plan.ScanType != planner.ScanTypeIndexOnly || plan.IndexOnlyScan == nil || !plan.IndexOnlyScan.CountStar {
+	if plan.ScanType != planner.ScanTypeIndexOnly || plan.IndexOnlyScan == nil {
 		return nil, false, nil
 	}
+	if plan.IndexOnlyScan.CountStar {
+		if len(plan.IndexOnlyScan.ColumnNames) != 1 || plan.IndexOnlyScan.ColumnNames[0] == "" {
+			return nil, false, nil
+		}
+
+		table := db.tables[plan.IndexOnlyScan.TableName]
+		if table == nil {
+			return nil, true, newExecError("table not found: " + plan.IndexOnlyScan.TableName)
+		}
+		indexDef, err := db.resolveSimpleLogicalIndex(table, plan.IndexOnlyScan.ColumnNames[0])
+		if err != nil {
+			return nil, true, err
+		}
+		count, err := db.countAllRowsFromIndexOnly(table, indexDef)
+		if err != nil {
+			return nil, true, err
+		}
+		return newRows([]string{"count"}, [][]any{{count}}), true, nil
+	}
+
 	if len(plan.IndexOnlyScan.ColumnNames) != 1 || plan.IndexOnlyScan.ColumnNames[0] == "" {
 		return nil, false, nil
 	}
@@ -796,11 +816,11 @@ func (db *DB) queryIndexOnlyCount(plan *planner.SelectPlan) (*Rows, bool, error)
 	if err != nil {
 		return nil, true, err
 	}
-	count, err := db.countAllRowsFromIndexOnly(table, indexDef)
+	rows, err := db.projectAllRowsFromIndexOnly(plan, table, indexDef)
 	if err != nil {
 		return nil, true, err
 	}
-	return newRows([]string{"count"}, [][]any{{count}}), true, nil
+	return rows, true, nil
 }
 
 func downgradeIndexOnlyPlanForExecution(plan *planner.SelectPlan) *planner.SelectPlan {
@@ -975,6 +995,42 @@ func (db *DB) countAllRowsFromIndexOnly(table *executor.Table, indexDef *storage
 		return 0, wrapStorageError(err)
 	}
 	return count, nil
+}
+
+func (db *DB) projectAllRowsFromIndexOnly(plan *planner.SelectPlan, table *executor.Table, indexDef *storage.CatalogIndex) (*Rows, error) {
+	if db == nil || plan == nil || plan.Stmt == nil || table == nil || indexDef == nil {
+		return nil, ErrInvalidArgument
+	}
+	if len(plan.IndexOnlyScan.ColumnNames) != 1 || plan.IndexOnlyScan.ColumnNames[0] == "" {
+		return nil, newExecError("invalid select plan")
+	}
+	indexDef, err := db.validateIndexLookupMetadata(table, indexDef)
+	if err != nil {
+		return nil, err
+	}
+
+	records, err := storage.ReadAllIndexLeafRecordsInOrder(db.pageReaderForLookup, indexDef.RootPageID)
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+
+	projected := make([][]any, 0, len(records))
+	for _, record := range records {
+		values, err := storage.DecodeIndexKey(record.Key)
+		if err != nil {
+			return nil, wrapStorageError(err)
+		}
+		if len(values) != 1 {
+			return nil, newStorageError("corrupted index page")
+		}
+		projected = append(projected, []any{apiValue(values[0])})
+	}
+
+	columns, err := executor.ProjectedColumnNames(plan, cloneSelectTableMeta(table))
+	if err != nil {
+		return nil, err
+	}
+	return newRows(columns, projected), nil
 }
 
 func (db *DB) resolveSimpleLogicalIndex(table *executor.Table, columnName string) (*storage.CatalogIndex, error) {
