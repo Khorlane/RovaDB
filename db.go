@@ -616,7 +616,11 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 }
 
 func (db *DB) rejectSystemTableMutation(stmt any) error {
-	if db == nil || stmt == nil {
+	return rejectSystemTableMutationTables(db.tables, stmt)
+}
+
+func rejectSystemTableMutationTables(tables map[string]*executor.Table, stmt any) error {
+	if stmt == nil {
 		return nil
 	}
 	switch typed := stmt.(type) {
@@ -645,11 +649,11 @@ func (db *DB) rejectSystemTableMutation(stmt any) error {
 			return newExecError("system tables are read-only")
 		}
 	case *parser.CreateIndexStmt:
-		if table := db.tables[typed.TableName]; table != nil && table.IsSystem {
+		if table := tables[typed.TableName]; table != nil && table.IsSystem {
 			return newExecError("system tables are read-only")
 		}
 	case *parser.DropIndexStmt:
-		for _, table := range db.tables {
+		for _, table := range tables {
 			if table == nil || !table.IsSystem {
 				continue
 			}

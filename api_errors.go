@@ -52,4 +52,6 @@ var (
 	ErrNoRows = errors.New("rovadb: no rows")
 	// ErrMultipleRows reports that QueryRow.Scan found more than one row.
 	ErrMultipleRows = errors.New("rovadb: multiple rows")
+	// ErrTxNotActive reports use of a finished explicit transaction handle.
+	ErrTxNotActive = errors.New("rovadb: transaction is not active")
 )
