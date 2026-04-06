@@ -3,6 +3,7 @@ package rovadb
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -91,6 +92,9 @@ func Open(path string) (*DB, error) {
 	// restores last-committed page images before catalog or row metadata loads.
 	if err := storage.RecoverFromRollbackJournal(path, storage.PageSize); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, wrapStorageError(err)
+	}
+	if err := rejectOrphanWALOnCreate(path); err != nil {
+		return nil, err
 	}
 
 	file, err := storage.OpenOrCreate(path)
@@ -255,6 +259,25 @@ func Open(path string) (*DB, error) {
 
 	db.nextWALLSN = nextWALLSN
 	return db, nil
+}
+
+func rejectOrphanWALOnCreate(path string) error {
+	if path == "" {
+		return nil
+	}
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	walPath := storage.WALPath(path)
+	if _, err := os.Stat(walPath); err == nil {
+		return fmt.Errorf("open: database file does not exist but WAL sidecar exists: %s", walPath)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func (db *DB) reconcileSystemCatalogOnOpen(tables map[string]*executor.Table) error {

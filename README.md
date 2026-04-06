@@ -60,11 +60,11 @@ You should see:
 
 ```text
 rovadb> SELECT a.cust_nbr AS customer_number, a.name, a.city, b.order_nbr, b.item, b.total_amt FROM customers a INNER JOIN orders b ON a.cust_nbr = b.cust_nbr WHERE b.total_amt > 7 ORDER BY a.name DESC, b.total_amt;
-  customer_number | a.name      | a.city  | b.order_nbr | b.item  | b.total_amt
-  ----------------|-------------|---------|-------------|---------|------------
-  2               | Bravo Shop  | Chicago | 3           | Stapler | 15
-  1               | Alice Co    | Boston  | 2           | Pens    | 8.25
-  1               | Alice Co    | Boston  | 1           | Paper   | 12.5
+  customer_number | a.name       | a.city   | b.order_nbr | b.item   | b.total_amt
+  ----------------|--------------|----------|-------------|----------|------------
+  2               | Brian Lewis  | Chicago  | 3           | Stapler  | 15
+  1               | Alice Carter | Boston   | 2           | Pens     | 8.25
+  1               | Alice Carter | Boston   | 1           | Paper    | 12.5
 ```
 
 If you want to embed RovaDB in a Go program instead, see `examples/basic_usage/main.go`.

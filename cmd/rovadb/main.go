@@ -46,49 +46,49 @@ var helpTopics = map[string]helpTopic{
 	"sql": {
 		title: "SQL examples:",
 		lines: []string{
-			"SELECT * FROM users",
-			"INSERT INTO users VALUES (1, 'alice')",
-			"CREATE INDEX idx_users_name ON users (name)",
-			"DROP INDEX idx_users_name",
-			"UPDATE users SET name = 'alice' WHERE id = 1",
-			"DELETE FROM users WHERE id = 1",
-			"DROP TABLE users",
-			"ALTER TABLE users ADD COLUMN age INT",
+			"SELECT * FROM customers",
+			"INSERT INTO customers VALUES (4, 'Diana Prince', 'New York')",
+			"CREATE INDEX customers_ix2 ON customers (name)",
+			"DROP INDEX customers_ix2",
+			"UPDATE customers SET city = 'Cambridge' WHERE cust_nbr = 2",
+			"DELETE FROM customers WHERE cust_nbr = 1",
+			"DROP TABLE customers",
+			"ALTER TABLE customers ADD COLUMN status TEXT",
 		},
 	},
 	"select": {
 		title: "SELECT example:",
 		lines: []string{
-			"SELECT * FROM users",
-			"SELECT id, name FROM users WHERE active = TRUE ORDER BY id",
+			"SELECT * FROM customers",
+			"SELECT cust_nbr, name FROM customers WHERE city = 'Boston' ORDER BY cust_nbr",
 		},
 	},
 	"insert": {
 		title: "INSERT example:",
 		lines: []string{
-			"INSERT INTO users VALUES (1, 'alice')",
-			"INSERT INTO users (id, name) VALUES (1, 'alice')",
+			"INSERT INTO customers VALUES (4, 'Diana Prince', 'New York')",
+			"INSERT INTO customers (cust_nbr, name, city) VALUES (4, 'Diana Prince', 'New York')",
 		},
 	},
 	"update": {
 		title: "UPDATE example:",
 		lines: []string{
-			"UPDATE users SET name = 'alice' WHERE id = 1",
-			"UPDATE users SET name = 'alice', active = TRUE WHERE id = 1",
+			"UPDATE customers SET name = 'Alice Smith' WHERE cust_nbr = 1",
+			"UPDATE customers SET name = 'Brian Carter', city = 'Cambridge' WHERE cust_nbr = 2",
 		},
 	},
 	"delete": {
 		title: "DELETE example:",
 		lines: []string{
-			"DELETE FROM users WHERE id = 1",
-			"DELETE FROM users WHERE active = FALSE",
+			"DELETE FROM customers WHERE cust_nbr = 1",
+			"DELETE FROM customers WHERE city = 'Boston'",
 		},
 	},
 	"alter": {
 		title: "ALTER example:",
 		lines: []string{
-			"ALTER TABLE users ADD COLUMN age INT",
-			"ALTER TABLE users ADD COLUMN active BOOL",
+			"ALTER TABLE customers ADD COLUMN status TEXT",
+			"ALTER TABLE customers ADD COLUMN credit_limit REAL",
 		},
 	},
 	"open": {
@@ -127,7 +127,14 @@ var helpTopics = map[string]helpTopic{
 	"schema": {
 		title: "SCHEMA example:",
 		lines: []string{
-			"schema users",
+			"schema customers",
+		},
+	},
+	"version": {
+		title: "VERSION example:",
+		lines: []string{
+			"version",
+			"Shows the current RovaDB version",
 		},
 	},
 }
@@ -220,6 +227,8 @@ func handleBuiltInCommand(out io.Writer, errOut io.Writer, session *cliSession, 
 		return commandResult{handled: true}, printHelpTopic(out, topic)
 	case strings.EqualFold(input, "db"):
 		return commandResult{handled: true}, printCurrentDB(out, session)
+	case strings.EqualFold(input, "version"):
+		return commandResult{handled: true}, writeResponse(out, "%s", rovadb.Version())
 	case strings.EqualFold(input, "close"):
 		return commandResult{handled: true}, handleCloseCommand(out, errOut, session)
 	case isExitCommand(input):
@@ -294,6 +303,9 @@ func printHelp(out io.Writer) error {
 		return err
 	}
 	if err := writeHelpLine(out, "db", "Show the current database path"); err != nil {
+		return err
+	}
+	if err := writeHelpLine(out, "version", "Show the current RovaDB version"); err != nil {
 		return err
 	}
 	if err := writeHelpLine(out, "tables", "List tables in the open database"); err != nil {
@@ -576,12 +588,12 @@ func createSampleDatabase(session *cliSession, path string) error {
 func sampleDatabaseSQL() []string {
 	return []string{
 		"CREATE TABLE customers (cust_nbr INT, name TEXT, city TEXT)",
-		"CREATE UNIQUE INDEX uq_customers_cust_nbr ON customers (cust_nbr)",
+		"CREATE UNIQUE INDEX customers_ix1 ON customers (cust_nbr)",
 		"CREATE TABLE orders (cust_nbr INT, order_nbr INT, item TEXT, total_amt REAL)",
-		"CREATE UNIQUE INDEX uq_orders_cust_order ON orders (cust_nbr, order_nbr)",
-		"INSERT INTO customers VALUES (1, 'Alice Co', 'Boston')",
-		"INSERT INTO customers VALUES (2, 'Bravo Shop', 'Chicago')",
-		"INSERT INTO customers VALUES (3, 'Charlie Market', 'Denver')",
+		"CREATE UNIQUE INDEX orders_ix1 ON orders (cust_nbr, order_nbr)",
+		"INSERT INTO customers VALUES (1, 'Alice Carter', 'Boston')",
+		"INSERT INTO customers VALUES (2, 'Brian Lewis', 'Chicago')",
+		"INSERT INTO customers VALUES (3, 'Carla Gomez', 'Denver')",
 		"INSERT INTO orders VALUES (1, 1, 'Paper', 12.50)",
 		"INSERT INTO orders VALUES (1, 2, 'Pens', 8.25)",
 		"INSERT INTO orders VALUES (2, 3, 'Stapler', 15.00)",

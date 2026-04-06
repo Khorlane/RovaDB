@@ -190,13 +190,13 @@ func TestQueryAPICommaJoinReturnsRows(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE customers (cust_nbr INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create customers) error = %v", err)
 	}
-	if _, err := db.Exec("CREATE UNIQUE INDEX uq_customers_cust_nbr ON customers (cust_nbr)"); err != nil {
+	if _, err := db.Exec("CREATE UNIQUE INDEX customers_ix1 ON customers (cust_nbr)"); err != nil {
 		t.Fatalf("Exec(create customers index) error = %v", err)
 	}
 	if _, err := db.Exec("CREATE TABLE orders (cust_nbr INT, order_nbr INT, total_amt INT)"); err != nil {
 		t.Fatalf("Exec(create orders) error = %v", err)
 	}
-	if _, err := db.Exec("CREATE UNIQUE INDEX uq_orders_cust_order ON orders (cust_nbr, order_nbr)"); err != nil {
+	if _, err := db.Exec("CREATE UNIQUE INDEX orders_ix1 ON orders (cust_nbr, order_nbr)"); err != nil {
 		t.Fatalf("Exec(create orders index) error = %v", err)
 	}
 	for _, sql := range []string{
@@ -280,9 +280,9 @@ func TestQueryAPICommaJoinAndExplicitJoinMatch(t *testing.T) {
 
 	for _, sql := range []string{
 		"CREATE TABLE customers (cust_nbr INT, name TEXT)",
-		"CREATE UNIQUE INDEX uq_customers_cust_nbr ON customers (cust_nbr)",
+		"CREATE UNIQUE INDEX customers_ix1 ON customers (cust_nbr)",
 		"CREATE TABLE orders (cust_nbr INT, order_nbr INT, total_amt INT)",
-		"CREATE UNIQUE INDEX uq_orders_cust_order ON orders (cust_nbr, order_nbr)",
+		"CREATE UNIQUE INDEX orders_ix1 ON orders (cust_nbr, order_nbr)",
 		"INSERT INTO customers VALUES (1, 'alice')",
 		"INSERT INTO customers VALUES (2, 'bob')",
 		"INSERT INTO orders VALUES (1, 101, 75)",

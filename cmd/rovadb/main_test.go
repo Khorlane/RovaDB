@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	rovadb "github.com/Khorlane/RovaDB"
 )
 
 func TestRunHelp(t *testing.T) {
@@ -34,6 +36,9 @@ func TestRunHelp(t *testing.T) {
 	}
 	if !strings.Contains(output, "sample <path>") {
 		t.Fatalf("output missing sample command:\n%s", output)
+	}
+	if !strings.Contains(output, "version") {
+		t.Fatalf("output missing version command:\n%s", output)
 	}
 	if !strings.Contains(output, "close") {
 		t.Fatalf("output missing close command:\n%s", output)
@@ -72,10 +77,10 @@ func TestRunHelpInsert(t *testing.T) {
 	if !strings.Contains(output, "INSERT example:") {
 		t.Fatalf("output missing insert help header:\n%s", output)
 	}
-	if !strings.Contains(output, "INSERT INTO users VALUES (1, 'alice')") {
+	if !strings.Contains(output, "INSERT INTO customers VALUES (4, 'Diana Prince', 'New York')") {
 		t.Fatalf("output missing simple insert example:\n%s", output)
 	}
-	if !strings.Contains(output, "INSERT INTO users (id, name) VALUES (1, 'alice')") {
+	if !strings.Contains(output, "INSERT INTO customers (cust_nbr, name, city) VALUES (4, 'Diana Prince', 'New York')") {
 		t.Fatalf("output missing column-list insert example:\n%s", output)
 	}
 	if errOut.Len() != 0 {
@@ -117,10 +122,10 @@ func TestRunHelpUpdate(t *testing.T) {
 	if !strings.Contains(output, "UPDATE example:") {
 		t.Fatalf("output missing update help header:\n%s", output)
 	}
-	if !strings.Contains(output, "UPDATE users SET name = 'alice' WHERE id = 1") {
+	if !strings.Contains(output, "UPDATE customers SET name = 'Alice Smith' WHERE cust_nbr = 1") {
 		t.Fatalf("output missing simple update example:\n%s", output)
 	}
-	if !strings.Contains(output, "UPDATE users SET name = 'alice', active = TRUE WHERE id = 1") {
+	if !strings.Contains(output, "UPDATE customers SET name = 'Brian Carter', city = 'Cambridge' WHERE cust_nbr = 2") {
 		t.Fatalf("output missing multi-column update example:\n%s", output)
 	}
 	if errOut.Len() != 0 {
@@ -141,13 +146,13 @@ func TestRunHelpDelete(t *testing.T) {
 	if !strings.Contains(output, "DELETE example:") {
 		t.Fatalf("output missing delete help header:\n%s", output)
 	}
-	if !strings.Contains(output, "DELETE FROM users WHERE id = 1") {
+	if !strings.Contains(output, "DELETE FROM customers WHERE cust_nbr = 1") {
 		t.Fatalf("output missing simple delete example:\n%s", output)
 	}
-	if !strings.Contains(output, "DELETE FROM users WHERE active = FALSE") {
+	if !strings.Contains(output, "DELETE FROM customers WHERE city = 'Boston'") {
 		t.Fatalf("output missing second delete example:\n%s", output)
 	}
-	if strings.Contains(output, "DELETE FROM users") && !strings.Contains(output, "WHERE") {
+	if strings.Contains(output, "DELETE FROM customers") && !strings.Contains(output, "WHERE") {
 		t.Fatalf("delete help should not encourage full-table wipes:\n%s", output)
 	}
 	if errOut.Len() != 0 {
@@ -168,10 +173,10 @@ func TestRunHelpSelect(t *testing.T) {
 	if !strings.Contains(output, "SELECT example:") {
 		t.Fatalf("output missing select help header:\n%s", output)
 	}
-	if !strings.Contains(output, "SELECT * FROM users") {
+	if !strings.Contains(output, "SELECT * FROM customers") {
 		t.Fatalf("output missing simple select example:\n%s", output)
 	}
-	if !strings.Contains(output, "SELECT id, name FROM users WHERE active = TRUE ORDER BY id") {
+	if !strings.Contains(output, "SELECT cust_nbr, name FROM customers WHERE city = 'Boston' ORDER BY cust_nbr") {
 		t.Fatalf("output missing filtered select example:\n%s", output)
 	}
 	if errOut.Len() != 0 {
@@ -191,14 +196,14 @@ func TestRunHelpSQL(t *testing.T) {
 	output := out.String()
 	for _, want := range []string{
 		"SQL examples:",
-		"SELECT * FROM users",
-		"INSERT INTO users VALUES (1, 'alice')",
-		"CREATE INDEX idx_users_name ON users (name)",
-		"DROP INDEX idx_users_name",
-		"UPDATE users SET name = 'alice' WHERE id = 1",
-		"DELETE FROM users WHERE id = 1",
-		"DROP TABLE users",
-		"ALTER TABLE users ADD COLUMN age INT",
+		"SELECT * FROM customers",
+		"INSERT INTO customers VALUES (4, 'Diana Prince', 'New York')",
+		"CREATE INDEX customers_ix2 ON customers (name)",
+		"DROP INDEX customers_ix2",
+		"UPDATE customers SET city = 'Cambridge' WHERE cust_nbr = 2",
+		"DELETE FROM customers WHERE cust_nbr = 1",
+		"DROP TABLE customers",
+		"ALTER TABLE customers ADD COLUMN status TEXT",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
@@ -222,11 +227,11 @@ func TestRunHelpAlter(t *testing.T) {
 	if !strings.Contains(output, "ALTER example:") {
 		t.Fatalf("output missing alter help header:\n%s", output)
 	}
-	if !strings.Contains(output, "ALTER TABLE users ADD COLUMN age INT") {
-		t.Fatalf("output missing int add-column example:\n%s", output)
+	if !strings.Contains(output, "ALTER TABLE customers ADD COLUMN status TEXT") {
+		t.Fatalf("output missing text add-column example:\n%s", output)
 	}
-	if !strings.Contains(output, "ALTER TABLE users ADD COLUMN active BOOL") {
-		t.Fatalf("output missing bool add-column example:\n%s", output)
+	if !strings.Contains(output, "ALTER TABLE customers ADD COLUMN credit_limit REAL") {
+		t.Fatalf("output missing real add-column example:\n%s", output)
 	}
 	if errOut.Len() != 0 {
 		t.Fatalf("errOut = %q, want empty", errOut.String())
@@ -285,6 +290,19 @@ func TestRunHelpDB(t *testing.T) {
 	}
 }
 
+func TestRunHelpVersion(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	code := runWithArgs(strings.NewReader("help version\nquit\n"), &out, &errOut, nil)
+	if code != 0 {
+		t.Fatalf("run() code = %d, want 0", code)
+	}
+	if !strings.Contains(out.String(), "VERSION example:") || !strings.Contains(out.String(), "Shows the current RovaDB version") {
+		t.Fatalf("output missing version help:\n%s", out.String())
+	}
+}
+
 func TestRunHelpTables(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
@@ -306,8 +324,28 @@ func TestRunHelpSchema(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("run() code = %d, want 0", code)
 	}
-	if !strings.Contains(out.String(), "SCHEMA example:") || !strings.Contains(out.String(), "schema users") {
+	if !strings.Contains(out.String(), "SCHEMA example:") || !strings.Contains(out.String(), "schema customers") {
 		t.Fatalf("output missing schema help:\n%s", out.String())
+	}
+}
+
+func TestRunVersion(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	code := runWithArgs(strings.NewReader("version\nquit\n"), &out, &errOut, nil)
+	if code != 0 {
+		t.Fatalf("run() code = %d, want 0", code)
+	}
+	want := rovadb.Version()
+	if !strings.Contains(out.String(), want) {
+		t.Fatalf("output missing version line %q:\n%s", want, out.String())
+	}
+	if strings.Contains(out.String(), "RovaDB CLI "+rovadb.Version()) {
+		t.Fatalf("version command should print only the shared version string:\n%s", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("errOut = %q, want empty", errOut.String())
 	}
 }
 
@@ -522,11 +560,11 @@ func TestRunSampleDatabase(t *testing.T) {
 		"cust_nbr INT",
 		"name TEXT",
 		"city TEXT",
-		"customer_number | name          ",
-		"----------------|---------------",
-		"1               | Alice Co      ",
-		"2               | Bravo Shop    ",
-		"3               | Charlie Market",
+		"customer_number | name        ",
+		"----------------|-------------",
+		"1               | Alice Carter",
+		"2               | Brian Lewis ",
+		"3               | Carla Gomez ",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
