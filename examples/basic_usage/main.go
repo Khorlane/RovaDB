@@ -19,6 +19,11 @@ func main() {
 	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL)"); err != nil {
 		log.Fatal(err)
 	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		log.Fatal(err)
+	}
 	for _, user := range []struct {
 		id     int
 		name   string
@@ -27,9 +32,21 @@ func main() {
 		{id: 1, name: "Alice", active: true},
 		{id: 2, name: "Bob", active: false},
 	} {
-		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", user.id, user.name, user.active); err != nil {
+		if _, err := tx.Exec("INSERT INTO users VALUES (?, ?, ?)", user.id, user.name, user.active); err != nil {
+			_ = tx.Rollback()
 			log.Fatal(err)
 		}
+	}
+
+	var activeCount int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM users WHERE active = ?", true).Scan(&activeCount); err != nil {
+		_ = tx.Rollback()
+		log.Fatal(err)
+	}
+	fmt.Printf("active users in tx: %d\n", activeCount)
+
+	if err := tx.Commit(); err != nil {
+		log.Fatal(err)
 	}
 
 	printActiveUsers(db, "before reopen")

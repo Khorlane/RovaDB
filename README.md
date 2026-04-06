@@ -4,7 +4,7 @@ A small, idiomatic embedded SQL database for Go.
 
 RovaDB is a Go-first embedded relational database engine designed for clarity, portability, and long-term extensibility. It is intended to feel natural to Go developers, remain understandable to contributors, and grow without boxing itself into a dead-end architecture.
 
-> **Status:** Pre-release. The current `v0.34.x` line reflects a practical, durable baseline with a small public API and focused SQL support.
+> **Status:** Pre-release. The current `v0.35.x` line reflects a practical, durable baseline with a small public API, focused SQL support, and explicit public transaction control through the Go API.
 
 ## In Progress
 
@@ -104,6 +104,7 @@ If you want to embed RovaDB in a Go program instead, see `examples/basic_usage/m
 - `DELETE`
 - `ALTER TABLE ... ADD COLUMN`
 - positional args via `?` in `Exec`, `Query`, and `QueryRow`
+- explicit public transactions via `Begin`, `Tx.Exec`, `Tx.Query`, `Tx.QueryRow`, `Commit`, and `Rollback`
 - public catalog introspection via `ListTables` and `GetTableSchema`
 - shared product version via `Version()`
 - strict value support for `INT`, `TEXT`, `BOOL`, `REAL`, and `NULL`
@@ -130,10 +131,11 @@ Only the following SQL forms are supported today.
 
 Parser-recognized but not executable today:
 
+- `BEGIN`
 - `COMMIT`
 - `ROLLBACK`
 
-Transaction control remains internal-only in the current public product surface.
+Explicit transactions are supported through the Go API only. SQL `BEGIN` / `COMMIT` / `ROLLBACK` statements are not part of the current public product surface.
 
 ### SELECT support
 
@@ -159,6 +161,7 @@ Transaction control remains internal-only in the current public product surface.
 - qualified star projection such as `a.*` or `b.*`
 - mixed aggregate and non-aggregate projections
 - alias resolution in `WHERE`
+- SQL `BEGIN`
 - public `COMMIT` / `ROLLBACK` SQL
 - schema changes other than `ALTER TABLE ... ADD COLUMN`
 
@@ -169,8 +172,14 @@ Transaction control remains internal-only in the current public product surface.
 - `(*DB).Exec(query string, args ...any) (Result, error)`
 - `(*DB).Query(query string, args ...any) (*Rows, error)`
 - `(*DB).QueryRow(query string, args ...any) *Row`
+- `(*DB).Begin() (*Tx, error)`
 - `(*DB).ListTables() ([]TableInfo, error)`
 - `(*DB).GetTableSchema(table string) (TableInfo, error)`
+- `(*Tx).Exec(query string, args ...any) (Result, error)`
+- `(*Tx).Query(query string, args ...any) (*Rows, error)`
+- `(*Tx).QueryRow(query string, args ...any) *Row`
+- `(*Tx).Commit() error`
+- `(*Tx).Rollback() error`
 - `Version() string`
 
 ### Supported data types
@@ -258,17 +267,29 @@ defer db.Close()
 if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL)"); err != nil {
 	log.Fatal(err)
 }
-for _, user := range []struct {
-	id     int
-	name   string
-	active bool
-}{
-	{id: 1, name: "Alice", active: true},
-	{id: 2, name: "Bob", active: false},
-} {
-	if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", user.id, user.name, user.active); err != nil {
-		log.Fatal(err)
-	}
+
+tx, err := db.Begin()
+if err != nil {
+	log.Fatal(err)
+}
+if _, err := tx.Exec("INSERT INTO users VALUES (?, ?, ?)", 1, "Alice", true); err != nil {
+	_ = tx.Rollback()
+	log.Fatal(err)
+}
+if _, err := tx.Exec("INSERT INTO users VALUES (?, ?, ?)", 2, "Bob", false); err != nil {
+	_ = tx.Rollback()
+	log.Fatal(err)
+}
+
+var activeCount int
+if err := tx.QueryRow("SELECT COUNT(*) FROM users WHERE active = ?", true).Scan(&activeCount); err != nil {
+	_ = tx.Rollback()
+	log.Fatal(err)
+}
+fmt.Println("active users in tx:", activeCount)
+
+if err := tx.Commit(); err != nil {
+	log.Fatal(err)
 }
 
 rows, err := db.Query("SELECT id, name FROM users WHERE active = ? ORDER BY id", true)
@@ -289,16 +310,11 @@ for rows.Next() {
 if err := rows.Err(); err != nil {
 	log.Fatal(err)
 }
-
-var name string
-var active bool
-if err := db.QueryRow("SELECT name, active FROM users WHERE id = ?", 2).Scan(&name, &active); err != nil {
-	log.Fatal(err)
-}
-fmt.Println(name, active)
 ```
 
-See `examples/basic_usage/main.go` for a complete open -> write -> close -> reopen -> query flow.
+Explicit transactions are opt-in through the Go API. Plain `DB.Exec`, `DB.Query`, and `DB.QueryRow` keep their existing autocommit behavior when you do not call `Begin()`.
+
+See `examples/basic_usage/main.go` for a complete open -> begin -> commit -> close -> reopen -> query flow.
 
 ## Development Note
 
