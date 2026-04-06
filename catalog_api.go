@@ -236,7 +236,7 @@ func (b *schemaDigestBuilder) Bytes() []byte {
 func (db *DB) schemaDigestPayloadFromSystemCatalog() ([]byte, error) {
 	var b schemaDigestBuilder
 
-	rows, err := db.Query("SELECT table_id, table_name FROM __sys_tables ORDER BY table_id")
+	rows, err := db.Query("SELECT table_id, table_name FROM sys_tables ORDER BY table_id")
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +256,7 @@ func (db *DB) schemaDigestPayloadFromSystemCatalog() ([]byte, error) {
 		return nil, err
 	}
 
-	rows, err = db.Query("SELECT table_id, column_name, column_type, ordinal_position FROM __sys_columns ORDER BY table_id, ordinal_position, column_name")
+	rows, err = db.Query("SELECT table_id, column_name, column_type, ordinal_position FROM sys_tb_columns ORDER BY table_id, ordinal_position, column_name")
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +275,7 @@ func (db *DB) schemaDigestPayloadFromSystemCatalog() ([]byte, error) {
 		return nil, err
 	}
 
-	rows, err = db.Query("SELECT index_id, index_name, table_id, is_unique FROM __sys_indexes ORDER BY index_id")
+	rows, err = db.Query("SELECT index_id, index_name, table_id, is_unique FROM sys_indexes ORDER BY index_id")
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +294,7 @@ func (db *DB) schemaDigestPayloadFromSystemCatalog() ([]byte, error) {
 		return nil, err
 	}
 
-	rows, err = db.Query("SELECT index_id, column_name, ordinal_position FROM __sys_index_columns ORDER BY index_id, ordinal_position, column_name")
+	rows, err = db.Query("SELECT index_id, column_name, ordinal_position FROM sys_ix_columns ORDER BY index_id, ordinal_position, column_name")
 	if err != nil {
 		return nil, err
 	}

@@ -10,10 +10,10 @@ import (
 )
 
 const (
-	systemTableTables       = "__sys_tables"
-	systemTableColumns      = "__sys_columns"
-	systemTableIndexes      = "__sys_indexes"
-	systemTableIndexColumns = "__sys_index_columns"
+	systemTableTables       = "sys_tables"
+	systemTableColumns      = "sys_tb_columns"
+	systemTableIndexes      = "sys_indexes"
+	systemTableIndexColumns = "sys_ix_columns"
 )
 
 type systemCatalogTableSpec struct {
