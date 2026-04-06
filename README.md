@@ -4,11 +4,11 @@ A small, idiomatic embedded SQL database for Go.
 
 RovaDB is a Go-first embedded relational database engine designed for clarity, portability, and long-term extensibility. It is intended to feel natural to Go developers, remain understandable to contributors, and grow without boxing itself into a dead-end architecture.
 
-> **Status:** Pre-release. The current `v0.35.x` line reflects a practical, durable baseline with a small public API, focused SQL support, and explicit public transaction control through the Go API.
+> **Status:** Pre-release. The current `v0.36.x` line reflects a practical, durable baseline with a small public API, focused SQL support, explicit public transaction control through the Go API, and narrow index-only access for eligible query shapes.
 
 ## In Progress
 
-Current engineering focus is the next major storage evolution beyond the current `v0.16.x` baseline.
+Current engineering focus is the next major storage evolution beyond the current `v0.36.x` baseline.
 
 The direction under active exploration is:
 - moving from the current single-page table layout toward a fuller page-based storage engine
@@ -108,6 +108,7 @@ If you want to embed RovaDB in a Go program instead, see `examples/basic_usage/m
 - public catalog introspection via `ListTables` and `GetTableSchema`
 - shared product version via `Version()`
 - strict value support for `INT`, `TEXT`, `BOOL`, `REAL`, and `NULL`
+- narrow index-only access for eligible plain single-table `COUNT(*)` and single-column indexed projection queries
 
 ### Scope Discipline
 
@@ -149,6 +150,15 @@ Explicit transactions are supported through the Go API only. SQL `BEGIN` / `COMM
 - `ORDER BY` with one or more items
 - scalar functions: `LOWER`, `UPPER`, `LENGTH`, and `ABS`
 - aggregates: `COUNT(*)`, `COUNT(expr)`, `MIN`, `MAX`, `AVG`, and `SUM`
+
+### Narrow index-only support
+
+- true index-only means the result is satisfied from index contents plus index-structure metadata without fetching base table rows
+- supported today only for eligible plain single-table `COUNT(*)`
+- supported today only for eligible plain single-table single-column direct indexed projection such as `SELECT id FROM users`
+- qualified single-table direct indexed projection such as `SELECT users.id FROM users` is also supported when eligible
+- unsupported or uncertain shapes fall back to the existing table/index/join paths
+- current fallback examples include aliased projection, `ORDER BY` on projection, `WHERE`-bearing projection, multi-column projection, non-column expressions, non-indexed projection, and joins
 
 ### Not supported today
 

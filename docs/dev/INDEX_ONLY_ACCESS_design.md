@@ -59,5 +59,12 @@ Falling back to the current path is always acceptable when:
 The planner package reserves an `index_only` scan shape as a future internal
 execution contract.
 
-In `ixonly.1`, that placeholder exists only to lock the intended surface for
-later slices. It must not change runtime behavior by itself.
+That placeholder began in `ixonly.1` only as a surface lock-in. By the
+`v0.36.0` milestone line, the implemented narrow runtime surface is:
+
+- eligible plain single-table `COUNT(*)`
+- eligible plain single-table single-column direct indexed projection
+- eligible qualified single-table single-column direct indexed projection
+
+Everything else still falls back to the existing non-index-only paths unless
+and until a later milestone expands the supported surface.
