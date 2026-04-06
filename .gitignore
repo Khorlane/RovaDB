@@ -13,6 +13,8 @@ coverage.out
 *.so
 *.dylib
 *.db
+*.journal
+*.wal
 
 # Go workspace files
 go.work
