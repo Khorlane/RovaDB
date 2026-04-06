@@ -4,7 +4,7 @@ A small, idiomatic embedded SQL database for Go.
 
 RovaDB is a Go-first embedded relational database engine designed for clarity, portability, and long-term extensibility. It is intended to feel natural to Go developers, remain understandable to contributors, and grow without boxing itself into a dead-end architecture.
 
-> **Status:** Pre-release. The current `v0.16.x` line reflects a practical, durable baseline with a small public API and focused SQL support.
+> **Status:** Pre-release. The current `v0.34.x` line reflects a practical, durable baseline with a small public API and focused SQL support.
 
 ## In Progress
 
@@ -110,7 +110,7 @@ If you want to embed RovaDB in a Go program instead, see `examples/basic_usage/m
 
 ### Scope Discipline
 
-The current `v0.16.x` line is the practical baseline for this intended use case. Future changes should prioritize correctness, determinism, durability, and API stability over feature expansion, and any new feature should justify crossing this boundary.
+The current `v0.34.x` line is the practical baseline for this intended use case. Future changes should prioritize correctness, determinism, durability, and API stability over feature expansion, and any new feature should justify crossing this boundary.
 
 ## Supported SQL
 
@@ -138,7 +138,8 @@ Transaction control remains internal-only in the current public product surface.
 ### SELECT support
 
 - literal selects such as `SELECT 1`, `SELECT 'hello'`, `SELECT TRUE`, `SELECT FALSE`, and arithmetic expressions with `+` and `-`
-- projection expressions, column projection, qualified column references, and aliases
+- projection expressions, column projection, qualified column references, and `AS` aliases
+- `ORDER BY` resolution against select-item aliases at the same `SELECT` level
 - single-table `FROM`
 - two-table inner equi-joins via explicit `INNER JOIN ... ON ...` and comma join + `WHERE`
 - `WHERE` with `NOT`, precedence, and parenthesized grouping
@@ -157,6 +158,7 @@ Transaction control remains internal-only in the current public product surface.
 - non-equality join predicates
 - qualified star projection such as `a.*` or `b.*`
 - mixed aggregate and non-aggregate projections
+- alias resolution in `WHERE`
 - public `COMMIT` / `ROLLBACK` SQL
 - schema changes other than `ALTER TABLE ... ADD COLUMN`
 
