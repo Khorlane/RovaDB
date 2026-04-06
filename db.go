@@ -61,6 +61,7 @@ type DB struct {
 	pager  *storage.Pager
 	pool   *bufferpool.BufferPool
 	txn    *txn.Txn
+	tx     *Tx
 
 	afterJournalWriteHook func() error
 	afterDatabaseSyncHook func() error

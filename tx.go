@@ -1,7 +1,10 @@
 package rovadb
 
 // Tx is the public transaction handle reserved for explicit transaction support.
-type Tx struct{}
+type Tx struct {
+	db       *DB
+	finished bool
+}
 
 // Begin starts an explicit transaction.
 //
@@ -15,15 +18,34 @@ func (db *DB) Begin() (*Tx, error) {
 	if db.closed {
 		return nil, ErrClosed
 	}
-	return nil, ErrNotImplemented
+	if db.tx != nil && !db.tx.finished {
+		return nil, ErrTxnAlreadyActive
+	}
+	tx := &Tx{db: db}
+	db.tx = tx
+	return tx, nil
 }
 
 // Commit finalizes an explicit transaction.
 func (tx *Tx) Commit() error {
-	return ErrNotImplemented
+	if tx == nil || tx.db == nil || tx.finished {
+		return ErrTxnCommitWithoutActive
+	}
+	tx.finished = true
+	if tx.db.tx == tx {
+		tx.db.tx = nil
+	}
+	return nil
 }
 
 // Rollback abandons an explicit transaction.
 func (tx *Tx) Rollback() error {
-	return ErrNotImplemented
+	if tx == nil || tx.db == nil || tx.finished {
+		return ErrTxnRollbackWithoutActive
+	}
+	tx.finished = true
+	if tx.db.tx == tx {
+		tx.db.tx = nil
+	}
+	return nil
 }
