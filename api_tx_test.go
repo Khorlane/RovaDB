@@ -43,6 +43,18 @@ func TestBeginOnOpenDBReturnsActiveTx(t *testing.T) {
 	}
 }
 
+func TestBeginOnNilDBReturnsInvalidArgument(t *testing.T) {
+	var db *DB
+
+	tx, err := db.Begin()
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("Begin() error = %v, want %v", err, ErrInvalidArgument)
+	}
+	if tx != nil {
+		t.Fatalf("Begin() tx = %#v, want nil on nil DB", tx)
+	}
+}
+
 func TestBeginOnClosedDBReturnsClosed(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
@@ -58,6 +70,31 @@ func TestBeginOnClosedDBReturnsClosed(t *testing.T) {
 	}
 	if tx != nil {
 		t.Fatalf("Begin() tx = %#v, want nil on closed DB", tx)
+	}
+}
+
+func TestNilTxCommitAndRollbackReturnWithoutActiveErrors(t *testing.T) {
+	var tx *Tx
+
+	if err := tx.Commit(); !errors.Is(err, ErrTxnCommitWithoutActive) {
+		t.Fatalf("Commit() error = %v, want %v", err, ErrTxnCommitWithoutActive)
+	}
+	if err := tx.Rollback(); !errors.Is(err, ErrTxnRollbackWithoutActive) {
+		t.Fatalf("Rollback() error = %v, want %v", err, ErrTxnRollbackWithoutActive)
+	}
+}
+
+func TestNilTxExecQueryAndQueryRowUsePublicMisuseErrors(t *testing.T) {
+	var tx *Tx
+
+	if _, err := tx.Exec("CREATE TABLE users (id INT)"); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("Exec() error = %v, want %v", err, ErrInvalidArgument)
+	}
+	if _, err := tx.Query("SELECT 1"); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("Query() error = %v, want %v", err, ErrInvalidArgument)
+	}
+	if err := tx.QueryRow("SELECT 1").Scan(new(any)); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("QueryRow().Scan() error = %v, want %v", err, ErrInvalidArgument)
 	}
 }
 
@@ -226,6 +263,61 @@ func TestRollbackDiscardsTransactionLocalStateFromLaterDBReads(t *testing.T) {
 	}
 	if next == nil {
 		t.Fatal("Begin() after Rollback() tx = nil, want value")
+	}
+}
+
+func TestActiveTxRejectedAfterDBClose(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	if _, err := tx.Exec("CREATE TABLE users (id INT)"); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Exec() after DB close error = %v, want %v", err, ErrClosed)
+	}
+	if _, err := tx.Query("SELECT 1"); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Query() after DB close error = %v, want %v", err, ErrClosed)
+	}
+	if err := tx.QueryRow("SELECT 1").Scan(new(any)); !errors.Is(err, ErrClosed) {
+		t.Fatalf("QueryRow().Scan() after DB close error = %v, want %v", err, ErrClosed)
+	}
+}
+
+func TestTxOwnershipMismatchIsRejectedAsInactive(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	db.tx = nil
+
+	if _, err := tx.Exec("CREATE TABLE users (id INT)"); !errors.Is(err, ErrTxNotActive) {
+		t.Fatalf("Exec() with ownership mismatch error = %v, want %v", err, ErrTxNotActive)
+	}
+	if _, err := tx.Query("SELECT 1"); !errors.Is(err, ErrTxNotActive) {
+		t.Fatalf("Query() with ownership mismatch error = %v, want %v", err, ErrTxNotActive)
+	}
+	if err := tx.QueryRow("SELECT 1").Scan(new(any)); !errors.Is(err, ErrTxNotActive) {
+		t.Fatalf("QueryRow().Scan() with ownership mismatch error = %v, want %v", err, ErrTxNotActive)
+	}
+	if err := tx.Commit(); !errors.Is(err, ErrTxnCommitWithoutActive) {
+		t.Fatalf("Commit() with ownership mismatch error = %v, want %v", err, ErrTxnCommitWithoutActive)
+	}
+	if err := tx.Rollback(); !errors.Is(err, ErrTxnRollbackWithoutActive) {
+		t.Fatalf("Rollback() with ownership mismatch error = %v, want %v", err, ErrTxnRollbackWithoutActive)
 	}
 }
 

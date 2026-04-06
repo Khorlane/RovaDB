@@ -180,6 +180,9 @@ func (tx *Tx) Commit() error {
 	if tx == nil || tx.db == nil || tx.finished {
 		return ErrTxnCommitWithoutActive
 	}
+	if tx.db.tx != tx {
+		return ErrTxnCommitWithoutActive
+	}
 	tx.db.tables = cloneTables(tx.tables)
 	tx.db.txView = true
 	tx.finished = true
@@ -194,6 +197,9 @@ func (tx *Tx) Rollback() error {
 	if tx == nil || tx.db == nil || tx.finished {
 		return ErrTxnRollbackWithoutActive
 	}
+	if tx.db.tx != tx {
+		return ErrTxnRollbackWithoutActive
+	}
 	tx.finished = true
 	if tx.db.tx == tx {
 		tx.db.tx = nil
@@ -205,7 +211,13 @@ func (tx *Tx) ensureActive() error {
 	if tx == nil || tx.db == nil {
 		return ErrInvalidArgument
 	}
+	if tx.db.closed {
+		return ErrClosed
+	}
 	if tx.finished {
+		return ErrTxNotActive
+	}
+	if tx.db.tx != tx {
 		return ErrTxNotActive
 	}
 	return nil
