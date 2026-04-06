@@ -16,3 +16,10 @@ func newTableNotFoundError(tableName string) error {
 	}
 	return newExecError(fmt.Sprintf("table not found: %s", tableName))
 }
+
+func newColumnNotFoundError(columnName string) error {
+	if columnName == "" {
+		return errColumnDoesNotExist
+	}
+	return newExecError(fmt.Sprintf("column not found: %s", columnName))
+}

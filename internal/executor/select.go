@@ -247,7 +247,7 @@ func ProjectedColumnNames(plan *planner.SelectPlan, table *Table) ([]string, err
 	names := make([]string, 0, len(sel.Columns))
 	for _, name := range sel.Columns {
 		if _, err := resolveSelectColumnIndex(sel, name, table); err != nil {
-			return nil, errColumnDoesNotExist
+			return nil, err
 		}
 		names = append(names, name)
 	}
@@ -310,7 +310,7 @@ func resolveSelectColumns(sel *parser.SelectExpr, table *Table) ([]int, error) {
 	for _, name := range sel.Columns {
 		idx, err := resolveSelectColumnIndex(sel, name, table)
 		if err != nil {
-			return nil, errColumnDoesNotExist
+			return nil, err
 		}
 		indexes = append(indexes, idx)
 	}
@@ -356,7 +356,7 @@ func resolveSelectColumnIndex(sel *parser.SelectExpr, name string, table *Table)
 			return i, nil
 		}
 	}
-	return -1, errColumnDoesNotExist
+	return -1, newColumnNotFoundError(name)
 }
 
 func normalizeSelectQualifiedColumnName(sel *parser.SelectExpr, name string, table *Table) (string, error) {
@@ -365,20 +365,20 @@ func normalizeSelectQualifiedColumnName(sel *parser.SelectExpr, name string, tab
 	}
 	parts := strings.Split(name, ".")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", errColumnDoesNotExist
+		return "", newColumnNotFoundError(name)
 	}
 	if table == nil {
-		return "", errColumnDoesNotExist
+		return "", newColumnNotFoundError(name)
 	}
 	tableRef := sel.PrimaryTableRef()
 	if tableRef == nil {
 		if parts[0] != table.Name {
-			return "", errColumnDoesNotExist
+			return "", newColumnNotFoundError(name)
 		}
 		return parts[1], nil
 	}
 	if parts[0] != tableRef.Name && (tableRef.Alias == "" || parts[0] != tableRef.Alias) {
-		return "", errColumnDoesNotExist
+		return "", newColumnNotFoundError(name)
 	}
 	return parts[1], nil
 }

@@ -116,8 +116,33 @@ func TestQuerySelectInvalidColumn(t *testing.T) {
 	if rows.Next() {
 		t.Fatal("Next() = true, want false")
 	}
-	if rows.Err() == nil {
-		t.Fatal("Err() = nil, want column error")
+	if rows.Err() == nil || rows.Err().Error() != "execution: column not found: email" {
+		t.Fatalf("Err() = %v, want %q", rows.Err(), "execution: column not found: email")
+	}
+}
+
+func TestQuerySelectMissingWhereColumnIncludesName(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT id FROM users WHERE email = 'alice'")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() == nil || rows.Err().Error() != "execution: column not found: email" {
+		t.Fatalf("Err() = %v, want %q", rows.Err(), "execution: column not found: email")
 	}
 }
 
@@ -1563,8 +1588,8 @@ func TestQuerySelectOrderByUnknownColumn(t *testing.T) {
 	if rows.Next() {
 		t.Fatal("Next() = true, want false")
 	}
-	if rows.Err() == nil {
-		t.Fatal("Err() = nil, want order by column error")
+	if rows.Err() == nil || rows.Err().Error() != "execution: column not found: age" {
+		t.Fatalf("Err() = %v, want %q", rows.Err(), "execution: column not found: age")
 	}
 }
 

@@ -104,8 +104,8 @@ func TestSelectInvalidColumn(t *testing.T) {
 	}
 
 	_, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", Columns: []string{"email"}}), tables)
-	if err != errColumnDoesNotExist {
-		t.Fatalf("Select() error = %v, want %v", err, errColumnDoesNotExist)
+	if err == nil || err.Error() != "execution: column not found: email" {
+		t.Fatalf("Select() error = %v, want %q", err, "execution: column not found: email")
 	}
 }
 
@@ -143,8 +143,8 @@ func TestSelectWithUnknownWhereColumn(t *testing.T) {
 	}
 
 	_, err := Select(planSelect(t, &parser.SelectExpr{TableName: "users", Where: where(parser.Condition{Left: "email", Operator: "=", Right: parser.StringValue("bob")})}), tables)
-	if err != errColumnDoesNotExist {
-		t.Fatalf("Select() error = %v, want %v", err, errColumnDoesNotExist)
+	if err == nil || err.Error() != "execution: column not found: email" {
+		t.Fatalf("Select() error = %v, want %q", err, "execution: column not found: email")
 	}
 }
 
@@ -818,8 +818,8 @@ func TestSelectOrderByUnknownColumn(t *testing.T) {
 		TableName: "users",
 		OrderBy:   &parser.OrderByClause{Column: "age"},
 	}), tables)
-	if err != errColumnDoesNotExist {
-		t.Fatalf("Select() error = %v, want %v", err, errColumnDoesNotExist)
+	if err == nil || err.Error() != "execution: column not found: age" {
+		t.Fatalf("Select() error = %v, want %q", err, "execution: column not found: age")
 	}
 }
 
@@ -1012,8 +1012,8 @@ func TestProjectedColumnNamesInvalidColumn(t *testing.T) {
 	table := &Table{Name: "users", Columns: typedCols()}
 
 	_, err := ProjectedColumnNames(planSelect(t, &parser.SelectExpr{TableName: "users", Columns: []string{"email"}}), table)
-	if err != errColumnDoesNotExist {
-		t.Fatalf("ProjectedColumnNames() error = %v, want %v", err, errColumnDoesNotExist)
+	if err == nil || err.Error() != "execution: column not found: email" {
+		t.Fatalf("ProjectedColumnNames() error = %v, want %q", err, "execution: column not found: email")
 	}
 }
 
