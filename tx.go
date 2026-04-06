@@ -183,8 +183,23 @@ func (tx *Tx) Commit() error {
 	if tx.db.tx != tx {
 		return ErrTxnCommitWithoutActive
 	}
-	tx.db.tables = cloneTables(tx.tables)
-	tx.db.txView = true
+
+	committedTables := cloneTables(tx.tables)
+	committed, err := tx.db.execMutatingStatement(func() error {
+		return tx.db.persistPublicTxState(committedTables)
+	})
+	if committed {
+		if err := validateTables(committedTables, false); err != nil {
+			return err
+		}
+		clearLoadedRows(committedTables)
+		tx.db.tables = committedTables
+		tx.db.txView = false
+	}
+	if err != nil {
+		return err
+	}
+
 	tx.finished = true
 	if tx.db.tx == tx {
 		tx.db.tx = nil
@@ -200,6 +215,7 @@ func (tx *Tx) Rollback() error {
 	if tx.db.tx != tx {
 		return ErrTxnRollbackWithoutActive
 	}
+	tx.db.txView = false
 	tx.finished = true
 	if tx.db.tx == tx {
 		tx.db.tx = nil

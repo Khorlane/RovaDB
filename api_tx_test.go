@@ -422,3 +422,182 @@ func TestDBAutocommitBehaviorRemainsUnchangedWithoutBegin(t *testing.T) {
 		t.Fatalf("name = %q, want %q", name, "alice")
 	}
 }
+
+func TestTxCommitPersistsLifecycleStateAcrossCloseAndReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("DB.Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'cara')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("DB.Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (4, 'dana')",
+		"UPDATE users SET name = 'alice cooper' WHERE id = 1",
+		"DELETE FROM users WHERE id = 2",
+	} {
+		if _, err := tx.Exec(sql); err != nil {
+			t.Fatalf("Tx.Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	assertUserRows(t, tx, "SELECT id, name FROM users ORDER BY id",
+		userRow{id: 1, name: "alice cooper"},
+		userRow{id: 3, name: "cara"},
+		userRow{id: 4, name: "dana"},
+	)
+	assertUserRows(t, db, "SELECT id, name FROM users ORDER BY id",
+		userRow{id: 1, name: "alice"},
+		userRow{id: 2, name: "bob"},
+		userRow{id: 3, name: "cara"},
+	)
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	assertUserRows(t, db, "SELECT id, name FROM users ORDER BY id",
+		userRow{id: 1, name: "alice cooper"},
+		userRow{id: 3, name: "cara"},
+		userRow{id: 4, name: "dana"},
+	)
+
+	next, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin() after reopen error = %v", err)
+	}
+	if next == nil {
+		t.Fatal("Begin() after reopen tx = nil, want value")
+	}
+}
+
+func TestTxRollbackDiscardsLifecycleStateAcrossCloseAndReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("DB.Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'cara')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("DB.Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (4, 'dana')",
+		"UPDATE users SET name = 'alice cooper' WHERE id = 1",
+		"DELETE FROM users WHERE id = 2",
+	} {
+		if _, err := tx.Exec(sql); err != nil {
+			t.Fatalf("Tx.Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	assertUserRows(t, tx, "SELECT id, name FROM users ORDER BY id",
+		userRow{id: 1, name: "alice cooper"},
+		userRow{id: 3, name: "cara"},
+		userRow{id: 4, name: "dana"},
+	)
+	assertUserRows(t, db, "SELECT id, name FROM users ORDER BY id",
+		userRow{id: 1, name: "alice"},
+		userRow{id: 2, name: "bob"},
+		userRow{id: 3, name: "cara"},
+	)
+
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	assertUserRows(t, db, "SELECT id, name FROM users ORDER BY id",
+		userRow{id: 1, name: "alice"},
+		userRow{id: 2, name: "bob"},
+		userRow{id: 3, name: "cara"},
+	)
+
+	next, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin() after reopen error = %v", err)
+	}
+	if next == nil {
+		t.Fatal("Begin() after reopen tx = nil, want value")
+	}
+}
+
+type userRow struct {
+	id   int
+	name string
+}
+
+type queryer interface {
+	Query(string, ...any) (*Rows, error)
+}
+
+func assertUserRows(t *testing.T, q queryer, sql string, want ...userRow) {
+	t.Helper()
+
+	rows, err := q.Query(sql)
+	if err != nil {
+		t.Fatalf("Query(%q) error = %v", sql, err)
+	}
+	defer rows.Close()
+
+	got := make([]userRow, 0, len(want))
+	for rows.Next() {
+		var row userRow
+		if err := rows.Scan(&row.id, &row.name); err != nil {
+			t.Fatalf("rows.Scan() error = %v", err)
+		}
+		got = append(got, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err() = %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("row count = %d, want %d (rows = %#v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("row %d = %#v, want %#v (rows = %#v)", i, got[i], want[i], got)
+		}
+	}
+}

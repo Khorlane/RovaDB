@@ -2301,6 +2301,150 @@ func (db *DB) buildInsertedIndexPages(table *executor.Table, row []parser.Value,
 	return stager.finalizedPages(), nil
 }
 
+func (db *DB) persistPublicTxState(stagedTables map[string]*executor.Table) error {
+	if db == nil {
+		return ErrInvalidArgument
+	}
+	if db.pager == nil {
+		return nil
+	}
+
+	originalFreeListHead := db.freeListHead
+	newRoots, err := db.assignPublicTxSnapshotMetadata(stagedTables)
+	if err != nil {
+		db.freeListHead = originalFreeListHead
+		return err
+	}
+
+	tableNames := make([]string, 0, len(stagedTables))
+	for name, table := range stagedTables {
+		if table == nil || table.IsSystem {
+			continue
+		}
+		tableNames = append(tableNames, name)
+	}
+	sort.Strings(tableNames)
+
+	pages := make([]stagedPage, 0, len(tableNames))
+	for _, tableName := range tableNames {
+		table := stagedTables[tableName]
+		table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
+
+		tablePageData, locators, err := storage.BuildSlottedTablePageDataWithLocators(uint32(table.RootPageID()), table.Rows)
+		if err != nil {
+			db.freeListHead = originalFreeListHead
+			return wrapStorageError(err)
+		}
+		pages = append(pages, stagedPage{
+			id:    table.RootPageID(),
+			data:  tablePageData,
+			isNew: newRoots[table.RootPageID()],
+		})
+
+		indexPages, err := db.buildPublicTxRebuiltIndexPages(table, table.Rows, locators, newRoots)
+		if err != nil {
+			db.freeListHead = originalFreeListHead
+			return err
+		}
+		pages = append(pages, indexPages...)
+	}
+
+	if err := db.stageSchemaState(stagedTables, pages); err != nil {
+		db.freeListHead = originalFreeListHead
+		return err
+	}
+	return nil
+}
+
+func (db *DB) assignPublicTxSnapshotMetadata(stagedTables map[string]*executor.Table) (map[storage.PageID]bool, error) {
+	if db == nil {
+		return nil, ErrInvalidArgument
+	}
+	newRoots := make(map[storage.PageID]bool)
+
+	tableNames := make([]string, 0, len(stagedTables))
+	for name, table := range stagedTables {
+		if table == nil || table.IsSystem {
+			continue
+		}
+		tableNames = append(tableNames, name)
+	}
+	sort.Strings(tableNames)
+
+	for _, tableName := range tableNames {
+		table := stagedTables[tableName]
+		if table.TableID == 0 {
+			table.TableID = nextTableID(stagedTables)
+		}
+		if table.RootPageID() == 0 {
+			rootPageID, isNew, err := db.allocatePageID()
+			if err != nil {
+				return nil, err
+			}
+			table.SetStorageMeta(rootPageID, table.PersistedRowCount())
+			newRoots[rootPageID] = isNew
+		}
+		for i := range table.IndexDefs {
+			indexDef := &table.IndexDefs[i]
+			if indexDef.IndexID == 0 {
+				indexDef.IndexID = nextIndexID(stagedTables)
+			}
+			if indexDef.RootPageID != 0 {
+				continue
+			}
+			rootPageID, isNew, err := db.allocatePageID()
+			if err != nil {
+				return nil, err
+			}
+			indexDef.RootPageID = uint32(rootPageID)
+			newRoots[rootPageID] = isNew
+		}
+	}
+	return newRoots, nil
+}
+
+func (db *DB) buildPublicTxRebuiltIndexPages(table *executor.Table, rows [][]parser.Value, locators []storage.RowLocator, newRoots map[storage.PageID]bool) ([]stagedPage, error) {
+	if db == nil || table == nil || len(table.IndexDefs) == 0 {
+		return nil, nil
+	}
+	if len(rows) != len(locators) {
+		return nil, newStorageError("row locator mismatch")
+	}
+
+	nextFreshID := db.pager.NextPageID()
+	for pageID, isNew := range newRoots {
+		if isNew && pageID >= nextFreshID {
+			nextFreshID = pageID + 1
+		}
+	}
+	stager := newIndexPageStager(nextFreshID, func() (storage.PageID, bool, error) {
+		return db.allocatePageIDFrom(&nextFreshID)
+	})
+	for i := range table.IndexDefs {
+		indexDef := &table.IndexDefs[i]
+		if indexDef.RootPageID == 0 {
+			continue
+		}
+
+		rootPageID := storage.PageID(indexDef.RootPageID)
+		stager.stage(stagedPage{
+			id:    rootPageID,
+			data:  storage.InitIndexLeafPage(indexDef.RootPageID),
+			isNew: newRoots[rootPageID],
+		})
+		for rowIndex, row := range rows {
+			key, err := encodeIndexKeyForRow(row, table.Columns, *indexDef)
+			if err != nil {
+				return nil, err
+			}
+			if err := db.insertIndexRecord(table, indexDef, key, locators[rowIndex], stager); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return stager.finalizedPages(), nil
+}
+
 func (db *DB) buildRebuiltIndexPages(table *executor.Table, rows [][]parser.Value, locators []storage.RowLocator) ([]stagedPage, error) {
 	if db == nil || table == nil || len(table.IndexDefs) == 0 {
 		return nil, nil
