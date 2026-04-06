@@ -175,11 +175,13 @@ func (tx *Tx) QueryRow(query string, args ...any) *Row {
 	return newRow(rows)
 }
 
-// Commit finalizes an explicit transaction.
+// Commit finalizes an explicit transaction and installs its logical state.
 func (tx *Tx) Commit() error {
 	if tx == nil || tx.db == nil || tx.finished {
 		return ErrTxnCommitWithoutActive
 	}
+	tx.db.tables = cloneTables(tx.tables)
+	tx.db.txView = true
 	tx.finished = true
 	if tx.db.tx == tx {
 		tx.db.tx = nil
@@ -187,7 +189,7 @@ func (tx *Tx) Commit() error {
 	return nil
 }
 
-// Rollback abandons an explicit transaction.
+// Rollback abandons an explicit transaction and discards its logical state.
 func (tx *Tx) Rollback() error {
 	if tx == nil || tx.db == nil || tx.finished {
 		return ErrTxnRollbackWithoutActive

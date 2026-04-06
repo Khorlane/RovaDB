@@ -62,6 +62,7 @@ type DB struct {
 	pool   *bufferpool.BufferPool
 	txn    *txn.Txn
 	tx     *Tx
+	txView bool
 
 	afterJournalWriteHook func() error
 	afterDatabaseSyncHook func() error
@@ -842,6 +843,9 @@ func (db *DB) tablesForSelect(plan *planner.SelectPlan) (map[string]*executor.Ta
 func (db *DB) scanTableRows(table *executor.Table) ([][]parser.Value, error) {
 	if db == nil || table == nil {
 		return nil, ErrInvalidArgument
+	}
+	if db.txView && table.Rows != nil {
+		return cloneRows(table.Rows), nil
 	}
 
 	pageData, err := readCommittedPageData(db.pool, table.RootPageID())

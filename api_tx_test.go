@@ -85,7 +85,7 @@ func TestSecondBeginWhileTxActiveIsRejected(t *testing.T) {
 	}
 }
 
-func TestCommitReleasesBeginOwnershipWithoutRoutingExecution(t *testing.T) {
+func TestCommitAppliesTransactionLocalStateToLaterDBReads(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -95,6 +95,31 @@ func TestCommitReleasesBeginOwnershipWithoutRoutingExecution(t *testing.T) {
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("Begin() error = %v", err)
+	}
+	if _, err := tx.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Tx.Exec(create) error = %v", err)
+	}
+	if _, err := tx.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Tx.Exec(insert) error = %v", err)
+	}
+
+	var txName string
+	if err := tx.QueryRow("SELECT name FROM users WHERE id = 1").Scan(&txName); err != nil {
+		t.Fatalf("Tx.QueryRow().Scan() before commit error = %v", err)
+	}
+	if txName != "alice" {
+		t.Fatalf("tx-scoped name = %q, want %q", txName, "alice")
+	}
+
+	dbRows, err := db.Query("SELECT id, name FROM users")
+	if err != nil {
+		t.Fatalf("DB.Query() before commit error = %v", err)
+	}
+	if dbRows.Next() {
+		t.Fatal("DB.Query() before commit unexpectedly saw uncommitted rows")
+	}
+	if dbRows.Err() == nil || dbRows.Err().Error() != "execution: table not found: users" {
+		t.Fatalf("DB.Query() before commit Err() = %v, want %q", dbRows.Err(), "execution: table not found: users")
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -109,6 +134,14 @@ func TestCommitReleasesBeginOwnershipWithoutRoutingExecution(t *testing.T) {
 	if err := tx.Commit(); !errors.Is(err, ErrTxnCommitWithoutActive) {
 		t.Fatalf("second Commit() error = %v, want %v", err, ErrTxnCommitWithoutActive)
 	}
+
+	var dbName string
+	if err := db.QueryRow("SELECT name FROM users WHERE id = 1").Scan(&dbName); err != nil {
+		t.Fatalf("DB.QueryRow().Scan() after commit error = %v", err)
+	}
+	if dbName != "alice" {
+		t.Fatalf("committed name = %q, want %q", dbName, "alice")
+	}
 	if _, err := tx.Exec("CREATE TABLE later (id INT)"); !errors.Is(err, ErrTxNotActive) {
 		t.Fatalf("Exec() after Commit() error = %v, want %v", err, ErrTxNotActive)
 	}
@@ -118,9 +151,17 @@ func TestCommitReleasesBeginOwnershipWithoutRoutingExecution(t *testing.T) {
 	if err := tx.QueryRow("SELECT 1").Scan(new(any)); !errors.Is(err, ErrTxNotActive) {
 		t.Fatalf("QueryRow().Scan() after Commit() error = %v, want %v", err, ErrTxNotActive)
 	}
+
+	next, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin() after Commit() error = %v", err)
+	}
+	if next == nil {
+		t.Fatal("Begin() after Commit() tx = nil, want value")
+	}
 }
 
-func TestRollbackReleasesBeginOwnershipWithoutRoutingExecution(t *testing.T) {
+func TestRollbackDiscardsTransactionLocalStateFromLaterDBReads(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -130,6 +171,20 @@ func TestRollbackReleasesBeginOwnershipWithoutRoutingExecution(t *testing.T) {
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("Begin() error = %v", err)
+	}
+	if _, err := tx.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Tx.Exec(create) error = %v", err)
+	}
+	if _, err := tx.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Tx.Exec(insert) error = %v", err)
+	}
+
+	var txName string
+	if err := tx.QueryRow("SELECT name FROM users WHERE id = 1").Scan(&txName); err != nil {
+		t.Fatalf("Tx.QueryRow().Scan() before rollback error = %v", err)
+	}
+	if txName != "alice" {
+		t.Fatalf("tx-scoped name = %q, want %q", txName, "alice")
 	}
 
 	if err := tx.Rollback(); err != nil {
@@ -144,6 +199,17 @@ func TestRollbackReleasesBeginOwnershipWithoutRoutingExecution(t *testing.T) {
 	if err := tx.Rollback(); !errors.Is(err, ErrTxnRollbackWithoutActive) {
 		t.Fatalf("second Rollback() error = %v, want %v", err, ErrTxnRollbackWithoutActive)
 	}
+
+	dbRows, err := db.Query("SELECT id, name FROM users")
+	if err != nil {
+		t.Fatalf("DB.Query() after rollback error = %v", err)
+	}
+	if dbRows.Next() {
+		t.Fatal("DB.Query() after rollback unexpectedly saw discarded rows")
+	}
+	if dbRows.Err() == nil || dbRows.Err().Error() != "execution: table not found: users" {
+		t.Fatalf("DB.Query() after rollback Err() = %v, want %q", dbRows.Err(), "execution: table not found: users")
+	}
 	if _, err := tx.Exec("CREATE TABLE later (id INT)"); !errors.Is(err, ErrTxNotActive) {
 		t.Fatalf("Exec() after Rollback() error = %v, want %v", err, ErrTxNotActive)
 	}
@@ -152,6 +218,14 @@ func TestRollbackReleasesBeginOwnershipWithoutRoutingExecution(t *testing.T) {
 	}
 	if err := tx.QueryRow("SELECT 1").Scan(new(any)); !errors.Is(err, ErrTxNotActive) {
 		t.Fatalf("QueryRow().Scan() after Rollback() error = %v, want %v", err, ErrTxNotActive)
+	}
+
+	next, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin() after Rollback() error = %v", err)
+	}
+	if next == nil {
+		t.Fatal("Begin() after Rollback() tx = nil, want value")
 	}
 }
 
