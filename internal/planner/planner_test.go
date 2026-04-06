@@ -163,11 +163,29 @@ func TestPlanSelectCountStarWithSimpleIndexUsesIndexOnlyScan(t *testing.T) {
 	if plan.IndexOnlyScan == nil {
 		t.Fatal("PlanSelect().IndexOnlyScan = nil, want value")
 	}
-	if plan.IndexOnlyScan.TableName != "users" || !plan.IndexOnlyScan.CountStar {
+	if plan.IndexOnlyScan.TableName != "users" || !plan.IndexOnlyScan.CountStar || len(plan.IndexOnlyScan.ColumnNames) != 1 || plan.IndexOnlyScan.ColumnNames[0] != "id" {
 		t.Fatalf("PlanSelect().IndexOnlyScan = %#v, want count-star index-only plan for users", plan.IndexOnlyScan)
 	}
 	if plan.TableScan != nil || plan.IndexScan != nil {
 		t.Fatalf("PlanSelect() = %#v, want only index-only payload populated", plan)
+	}
+}
+
+func TestPlanSelectCountStarWithWhereFallsBackToTableScan(t *testing.T) {
+	stmt, ok := parser.ParseSelectExpr("SELECT COUNT(*) FROM users WHERE id > 1")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+
+	plan, err := PlanSelect(stmt, testPlannerTables("id"))
+	if err != nil {
+		t.Fatalf("PlanSelect() error = %v", err)
+	}
+	if plan.ScanType != ScanTypeTable || plan.TableScan == nil {
+		t.Fatalf("PlanSelect() = %#v, want table scan fallback", plan)
+	}
+	if plan.IndexOnlyScan != nil {
+		t.Fatalf("PlanSelect().IndexOnlyScan = %#v, want nil fallback index-only scan", plan.IndexOnlyScan)
 	}
 }
 

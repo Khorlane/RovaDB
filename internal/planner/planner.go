@@ -69,12 +69,17 @@ func chooseIndexOnlyScan(stmt *parser.SelectExpr, tables map[string]*TableMetada
 	}
 
 	if stmt.IsCountStar {
-		if _, ok := firstEligibleSimpleIndexName(table); !ok {
+		if stmt.Where != nil || stmt.Predicate != nil || len(stmt.OrderBys) > 0 || stmt.OrderBy != nil {
+			return nil
+		}
+		columnName, ok := firstEligibleSimpleIndexName(table)
+		if !ok {
 			return nil
 		}
 		return &IndexOnlyScan{
-			TableName: stmt.TableName,
-			CountStar: true,
+			TableName:   stmt.TableName,
+			ColumnNames: []string{columnName},
+			CountStar:   true,
 		}
 	}
 

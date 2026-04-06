@@ -152,6 +152,109 @@ func TestQueryAPICountStarStillReturnsRows(t *testing.T) {
 	}
 }
 
+func TestQueryAPIEligibleCountStarUsesIndexOnlyWithoutBaseRowFetch(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX users_ix1 ON users (id)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'cara')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil, want value")
+	}
+	table.SetStorageMeta(0, table.PersistedRowCount())
+
+	rows, err := db.Query("SELECT COUNT(*) FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || rows.err != nil {
+		t.Fatalf("rows = %#v, want successful count rowset", rows)
+	}
+	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 3 {
+		t.Fatalf("rows.data = %#v, want [[3]]", rows.data)
+	}
+}
+
+func TestQueryAPIEligibleCountStarOnEmptyIndexedTableReturnsZero(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX users_ix1 ON users (id)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT COUNT(*) FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || rows.err != nil {
+		t.Fatalf("rows = %#v, want successful count rowset", rows)
+	}
+	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 0 {
+		t.Fatalf("rows.data = %#v, want [[0]]", rows.data)
+	}
+}
+
+func TestQueryAPIEligibleCountStarTracksInsertAndDeleteChanges(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX users_ix1 ON users (id)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO users VALUES (2, 'bob')",
+		"INSERT INTO users VALUES (3, 'cara')",
+		"DELETE FROM users WHERE id = 2",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT COUNT(*) FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || rows.err != nil {
+		t.Fatalf("rows = %#v, want successful count rowset", rows)
+	}
+	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 2 {
+		t.Fatalf("rows.data = %#v, want [[2]]", rows.data)
+	}
+}
+
 func TestQueryAPINonSelectRejected(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

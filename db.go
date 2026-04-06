@@ -708,6 +708,12 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
+		if rows, ok, err := db.queryIndexOnlyCount(plan); ok {
+			if err != nil {
+				return &Rows{err: err, idx: -1}, nil
+			}
+			return rows, nil
+		}
 		plan = downgradeIndexOnlyPlanForExecution(plan)
 		if plan.ScanType == planner.ScanTypeIndex {
 			table := db.tables[plan.IndexScan.TableName]
@@ -769,6 +775,32 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		return &Rows{err: err, idx: -1}, nil
 	}
 	return newRows(nil, [][]any{{apiValue(value)}}), nil
+}
+
+func (db *DB) queryIndexOnlyCount(plan *planner.SelectPlan) (*Rows, bool, error) {
+	if db == nil || plan == nil || plan.Stmt == nil {
+		return nil, false, nil
+	}
+	if plan.ScanType != planner.ScanTypeIndexOnly || plan.IndexOnlyScan == nil || !plan.IndexOnlyScan.CountStar {
+		return nil, false, nil
+	}
+	if len(plan.IndexOnlyScan.ColumnNames) != 1 || plan.IndexOnlyScan.ColumnNames[0] == "" {
+		return nil, false, nil
+	}
+
+	table := db.tables[plan.IndexOnlyScan.TableName]
+	if table == nil {
+		return nil, true, newExecError("table not found: " + plan.IndexOnlyScan.TableName)
+	}
+	indexDef, err := db.resolveSimpleLogicalIndex(table, plan.IndexOnlyScan.ColumnNames[0])
+	if err != nil {
+		return nil, true, err
+	}
+	count, err := db.countAllRowsFromIndexOnly(table, indexDef)
+	if err != nil {
+		return nil, true, err
+	}
+	return newRows([]string{"count"}, [][]any{{count}}), true, nil
 }
 
 func downgradeIndexOnlyPlanForExecution(plan *planner.SelectPlan) *planner.SelectPlan {
@@ -926,6 +958,21 @@ func (db *DB) countIndexedRows(table *executor.Table, indexDef *storage.CatalogI
 			continue
 		}
 		count++
+	}
+	return count, nil
+}
+
+func (db *DB) countAllRowsFromIndexOnly(table *executor.Table, indexDef *storage.CatalogIndex) (int, error) {
+	if db == nil || table == nil || indexDef == nil {
+		return 0, ErrInvalidArgument
+	}
+	indexDef, err := db.validateIndexLookupMetadata(table, indexDef)
+	if err != nil {
+		return 0, err
+	}
+	count, err := storage.CountAllIndexEntries(db.pageReaderForLookup, indexDef.RootPageID)
+	if err != nil {
+		return 0, wrapStorageError(err)
 	}
 	return count, nil
 }
