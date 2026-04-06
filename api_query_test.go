@@ -362,6 +362,80 @@ func TestQueryAPIEligibleQualifiedIndexedProjectionWorks(t *testing.T) {
 	}
 }
 
+func TestQueryAPIAliasedIndexedProjectionFallsBackToExistingPath(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX users_ix1 ON users (id)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil, want value")
+	}
+	table.SetStorageMeta(0, table.PersistedRowCount())
+
+	rows, err := db.Query("SELECT id AS user_id FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() == nil {
+		t.Fatal("Err() = nil, want fallback base-row path failure after table root removal")
+	}
+}
+
+func TestQueryAPIIndexedProjectionWithOrderByFallsBackToExistingPath(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX users_ix1 ON users (id)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil, want value")
+	}
+	table.SetStorageMeta(0, table.PersistedRowCount())
+
+	rows, err := db.Query("SELECT id FROM users ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() == nil {
+		t.Fatal("Err() = nil, want fallback base-row path failure after table root removal")
+	}
+}
+
 func TestQueryAPINonIndexedProjectionStillUsesExistingPath(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

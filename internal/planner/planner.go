@@ -128,6 +128,9 @@ func simpleIndexOnlyProjectionColumn(stmt *parser.SelectExpr) (string, bool) {
 	if len(stmt.ProjectionExprs) != 1 {
 		return "", false
 	}
+	if len(stmt.ProjectionAliases) > 0 && stmt.ProjectionAliases[0] != "" {
+		return "", false
+	}
 	expr := stmt.ProjectionExprs[0]
 	if expr == nil || expr.Kind != parser.ValueExprKindColumnRef || expr.Column == "" {
 		return "", false

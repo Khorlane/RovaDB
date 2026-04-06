@@ -784,11 +784,11 @@ func (db *DB) queryIndexOnly(plan *planner.SelectPlan) (*Rows, bool, error) {
 	if plan.ScanType != planner.ScanTypeIndexOnly || plan.IndexOnlyScan == nil {
 		return nil, false, nil
 	}
-	if plan.IndexOnlyScan.CountStar {
-		if len(plan.IndexOnlyScan.ColumnNames) != 1 || plan.IndexOnlyScan.ColumnNames[0] == "" {
-			return nil, false, nil
-		}
+	if !supportsIndexOnlyExecutionPlan(plan) {
+		return nil, false, nil
+	}
 
+	if plan.IndexOnlyScan.CountStar {
 		table := db.tables[plan.IndexOnlyScan.TableName]
 		if table == nil {
 			return nil, true, newExecError("table not found: " + plan.IndexOnlyScan.TableName)
@@ -804,10 +804,6 @@ func (db *DB) queryIndexOnly(plan *planner.SelectPlan) (*Rows, bool, error) {
 		return newRows([]string{"count"}, [][]any{{count}}), true, nil
 	}
 
-	if len(plan.IndexOnlyScan.ColumnNames) != 1 || plan.IndexOnlyScan.ColumnNames[0] == "" {
-		return nil, false, nil
-	}
-
 	table := db.tables[plan.IndexOnlyScan.TableName]
 	if table == nil {
 		return nil, true, newExecError("table not found: " + plan.IndexOnlyScan.TableName)
@@ -821,6 +817,35 @@ func (db *DB) queryIndexOnly(plan *planner.SelectPlan) (*Rows, bool, error) {
 		return nil, true, err
 	}
 	return rows, true, nil
+}
+
+func supportsIndexOnlyExecutionPlan(plan *planner.SelectPlan) bool {
+	if plan == nil || plan.Stmt == nil || plan.IndexOnlyScan == nil {
+		return false
+	}
+	if plan.IndexOnlyScan.TableName == "" || len(plan.IndexOnlyScan.ColumnNames) != 1 || plan.IndexOnlyScan.ColumnNames[0] == "" {
+		return false
+	}
+	if plan.IndexOnlyScan.CountStar {
+		return plan.Stmt.IsCountStar &&
+			plan.Stmt.Where == nil &&
+			plan.Stmt.Predicate == nil &&
+			len(plan.Stmt.OrderBys) == 0 &&
+			plan.Stmt.OrderBy == nil
+	}
+	if plan.Stmt.IsCountStar ||
+		plan.Stmt.Where != nil ||
+		plan.Stmt.Predicate != nil ||
+		len(plan.Stmt.OrderBys) > 0 ||
+		plan.Stmt.OrderBy != nil ||
+		len(plan.Stmt.ProjectionExprs) != 1 {
+		return false
+	}
+	if len(plan.Stmt.ProjectionAliases) > 0 && plan.Stmt.ProjectionAliases[0] != "" {
+		return false
+	}
+	expr := plan.Stmt.ProjectionExprs[0]
+	return expr != nil && expr.Kind == parser.ValueExprKindColumnRef && expr.Column != ""
 }
 
 func downgradeIndexOnlyPlanForExecution(plan *planner.SelectPlan) *planner.SelectPlan {
