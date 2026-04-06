@@ -207,6 +207,92 @@ func TestQuerySelectSubsetOrder(t *testing.T) {
 	}
 }
 
+func TestQuerySelectAliasUsesAliasAsOutputColumnName(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE customers (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO customers VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT id AS cust_nbr FROM customers")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+	if got := rows.Columns(); len(got) != 1 || got[0] != "cust_nbr" {
+		t.Fatalf("Columns() = %#v, want [cust_nbr]", got)
+	}
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+	var custNbr int
+	if err := rows.Scan(&custNbr); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if custNbr != 1 {
+		t.Fatalf("cust_nbr = %d, want 1", custNbr)
+	}
+}
+
+func TestQuerySelectOrderByAlias(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE customers (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO customers VALUES (2, 'bob')",
+		"INSERT INTO customers VALUES (1, 'alice')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT id AS cust_nbr FROM customers ORDER BY cust_nbr")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+	assertRowsIntSequence(t, rows, 1, 2)
+}
+
+func TestQuerySelectWhereDoesNotResolveAlias(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE customers (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT id AS cust_nbr FROM customers WHERE cust_nbr = 1")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if rows.Err() == nil || rows.Err().Error() != "execution: column not found: cust_nbr" {
+		t.Fatalf("Err() = %v, want %q", rows.Err(), "execution: column not found: cust_nbr")
+	}
+}
+
 func TestQuerySelectSingleProjectedColumn(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

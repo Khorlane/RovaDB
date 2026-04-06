@@ -88,18 +88,19 @@ type JoinClause struct {
 
 // SelectExpr is the minimal parsed form for SELECT <expr>.
 type SelectExpr struct {
-	Expr             *Expr
-	TableName        string
-	From             []TableRef
-	Joins            []JoinClause
-	Columns          []string
-	ProjectionExprs  []*ValueExpr
-	ProjectionLabels []string
-	Where            *WhereClause
-	Predicate        *PredicateExpr
-	OrderBy          *OrderByClause
-	OrderBys         []OrderByClause
-	IsCountStar      bool
+	Expr              *Expr
+	TableName         string
+	From              []TableRef
+	Joins             []JoinClause
+	Columns           []string
+	ProjectionExprs   []*ValueExpr
+	ProjectionLabels  []string
+	ProjectionAliases []string
+	Where             *WhereClause
+	Predicate         *PredicateExpr
+	OrderBy           *OrderByClause
+	OrderBys          []OrderByClause
+	IsCountStar       bool
 }
 
 // ParseSelectExpr recognizes the tiny Stage 1 SELECT <expr> shape.

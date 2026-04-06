@@ -781,6 +781,29 @@ func TestSelectOrderByWithWhereAndProjection(t *testing.T) {
 	}
 }
 
+func TestSelectOrderByProjectionAlias(t *testing.T) {
+	tables := map[string]*Table{
+		"customers": {Name: "customers", Columns: typedCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.Int64Value(1), parser.StringValue("alice")},
+		}},
+	}
+
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
+		TableName:         "customers",
+		ProjectionExprs:   []*parser.ValueExpr{{Kind: parser.ValueExprKindColumnRef, Column: "id"}},
+		ProjectionLabels:  []string{"id AS cust_nbr"},
+		ProjectionAliases: []string{"cust_nbr"},
+		OrderBy:           &parser.OrderByClause{Column: "cust_nbr"},
+	}), tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 2 || rows[0][0] != parser.Int64Value(1) || rows[1][0] != parser.Int64Value(2) {
+		t.Fatalf("Select() rows = %#v, want [[1] [2]]", rows)
+	}
+}
+
 func TestSelectOrderByMultipleColumns(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
@@ -1045,6 +1068,23 @@ func TestProjectedColumnNamesExpressionProjection(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != "LOWER(name)" || got[1] != "id" {
 		t.Fatalf("ProjectedColumnNames() = %#v, want [LOWER(name) id]", got)
+	}
+}
+
+func TestProjectedColumnNamesUsesAliasWhenPresent(t *testing.T) {
+	table := &Table{Name: "customers", Columns: typedCols()}
+
+	got, err := ProjectedColumnNames(planSelect(t, &parser.SelectExpr{
+		TableName:         "customers",
+		ProjectionExprs:   []*parser.ValueExpr{{Kind: parser.ValueExprKindColumnRef, Column: "id"}},
+		ProjectionLabels:  []string{"id AS cust_nbr"},
+		ProjectionAliases: []string{"cust_nbr"},
+	}), table)
+	if err != nil {
+		t.Fatalf("ProjectedColumnNames() error = %v", err)
+	}
+	if len(got) != 1 || got[0] != "cust_nbr" {
+		t.Fatalf("ProjectedColumnNames() = %#v, want [cust_nbr]", got)
 	}
 }
 

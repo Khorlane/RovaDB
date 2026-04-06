@@ -88,6 +88,31 @@ func TestParseSelectExprProjectionArithmetic(t *testing.T) {
 	}
 }
 
+func TestParseSelectExprProjectionAliasWithAs(t *testing.T) {
+	got, ok := ParseSelectExpr("SELECT id AS cust_nbr FROM customers ORDER BY cust_nbr")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	if got == nil || len(got.ProjectionExprs) != 1 {
+		t.Fatalf("ParseSelectExpr() = %#v, want one projection", got)
+	}
+	if len(got.ProjectionAliases) != 1 || got.ProjectionAliases[0] != "cust_nbr" {
+		t.Fatalf("ProjectionAliases = %#v, want [cust_nbr]", got.ProjectionAliases)
+	}
+	if len(got.ProjectionLabels) != 1 || got.ProjectionLabels[0] != "id AS cust_nbr" {
+		t.Fatalf("ProjectionLabels = %#v, want [\"id AS cust_nbr\"]", got.ProjectionLabels)
+	}
+	if got.OrderBy == nil || got.OrderBy.Column != "cust_nbr" {
+		t.Fatalf("OrderBy = %#v, want ORDER BY cust_nbr", got.OrderBy)
+	}
+}
+
+func TestParseSelectExprProjectionBareAliasRejected(t *testing.T) {
+	if got, ok := ParseSelectExpr("SELECT id cust_nbr FROM customers"); ok {
+		t.Fatalf("ParseSelectExpr() = %#v, want parse failure for bare alias", got)
+	}
+}
+
 func TestParseSelectExprQualifiedProjectionColumn(t *testing.T) {
 	got, ok := ParseSelectExpr("SELECT users.id FROM users")
 	if !ok {

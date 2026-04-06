@@ -155,6 +155,7 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 
 	rawColumns := strings.Split(selectList, ",")
 	labels := make([]string, 0, len(rawColumns))
+	aliases := make([]string, 0, len(rawColumns))
 	projections := make([]*ValueExpr, 0, len(rawColumns))
 	columns := make([]string, 0, len(rawColumns))
 	allColumns := true
@@ -163,13 +164,18 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 		if item == "*" || item == "" {
 			return nil, false
 		}
-		expr, ok := parseValueExpr(item)
+		exprText, alias, ok := parseSelectProjectionItem(item)
+		if !ok {
+			return nil, false
+		}
+		expr, ok := parseValueExpr(exprText)
 		if !ok {
 			return nil, false
 		}
 		labels = append(labels, item)
+		aliases = append(aliases, alias)
 		projections = append(projections, expr)
-		if expr.Kind == ValueExprKindColumnRef {
+		if expr.Kind == ValueExprKindColumnRef && alias == "" {
 			columns = append(columns, expr.Column)
 		} else {
 			allColumns = false
@@ -183,17 +189,43 @@ func (p *selectFromTokenParser) parseAfterFrom(selectList string) (*SelectExpr, 
 	}
 
 	return &SelectExpr{
-		TableName:        primary.Name,
-		From:             fromRefs,
-		Joins:            joins,
-		Columns:          columns,
-		ProjectionExprs:  projections,
-		ProjectionLabels: labels,
-		Where:            where,
-		Predicate:        predicate,
-		OrderBy:          orderBy,
-		OrderBys:         orderBys,
+		TableName:         primary.Name,
+		From:              fromRefs,
+		Joins:             joins,
+		Columns:           columns,
+		ProjectionExprs:   projections,
+		ProjectionLabels:  labels,
+		ProjectionAliases: aliases,
+		Where:             where,
+		Predicate:         predicate,
+		OrderBy:           orderBy,
+		OrderBys:          orderBys,
 	}, true
+}
+
+func parseSelectProjectionItem(input string) (string, string, bool) {
+	tokens, err := lexSQL(input)
+	if err != nil || len(tokens) < 2 {
+		return "", "", false
+	}
+	for i := 0; i < len(tokens)-1; i++ {
+		if tokens[i].Kind != tokenKeywordAs {
+			continue
+		}
+		if len(tokens) < 4 || tokens[len(tokens)-1].Kind != tokenEOF || i != len(tokens)-3 {
+			return "", "", false
+		}
+		aliasTok := tokens[i+1]
+		if aliasTok.Kind != tokenIdentifier || !isIdentifier(aliasTok.Lexeme) {
+			return "", "", false
+		}
+		exprText := strings.TrimSpace(input[:tokens[i].Pos])
+		if exprText == "" {
+			return "", "", false
+		}
+		return exprText, aliasTok.Lexeme, true
+	}
+	return input, "", true
 }
 
 func (p *selectFromTokenParser) parseFromClause() ([]TableRef, []JoinClause, bool) {

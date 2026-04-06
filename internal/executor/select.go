@@ -223,11 +223,16 @@ func ProjectedColumnNames(plan *planner.SelectPlan, table *Table) ([]string, err
 		if err := validateProjectionExprs(sel, table); err != nil {
 			return nil, err
 		}
-		if len(sel.ProjectionLabels) == len(sel.ProjectionExprs) {
-			return append([]string(nil), sel.ProjectionLabels...), nil
-		}
 		names := make([]string, 0, len(sel.ProjectionExprs))
-		for _, expr := range sel.ProjectionExprs {
+		for i, expr := range sel.ProjectionExprs {
+			if alias := projectionAliasAt(sel, i); alias != "" {
+				names = append(names, alias)
+				continue
+			}
+			if i < len(sel.ProjectionLabels) && sel.ProjectionLabels[i] != "" {
+				names = append(names, sel.ProjectionLabels[i])
+				continue
+			}
 			if expr != nil && expr.Kind == parser.ValueExprKindColumnRef {
 				names = append(names, expr.Column)
 			} else {
@@ -903,17 +908,44 @@ func selectOrderByList(sel *parser.SelectExpr) []parser.OrderByClause {
 	return nil
 }
 
+func projectionAliasAt(sel *parser.SelectExpr, idx int) string {
+	if sel == nil || idx < 0 || idx >= len(sel.ProjectionAliases) {
+		return ""
+	}
+	return sel.ProjectionAliases[idx]
+}
+
+func projectionExprForOrderByAlias(sel *parser.SelectExpr, alias string) *parser.ValueExpr {
+	if sel == nil || alias == "" {
+		return nil
+	}
+	for i, expr := range sel.ProjectionExprs {
+		if projectionAliasAt(sel, i) == alias {
+			return expr
+		}
+	}
+	return nil
+}
+
 func sortSelectRows(rows [][]parser.Value, sel *parser.SelectExpr, table *Table, orderBys []parser.OrderByClause) error {
 	if len(orderBys) == 0 {
 		return nil
 	}
-	indexes := make([]int, 0, len(orderBys))
+	type orderByResolver struct {
+		index int
+		expr  *parser.ValueExpr
+	}
+	resolvers := make([]orderByResolver, 0, len(orderBys))
 	for _, orderBy := range orderBys {
+		if expr := projectionExprForOrderByAlias(sel, orderBy.Column); expr != nil {
+			resolvers = append(resolvers, orderByResolver{index: -1, expr: expr})
+			continue
+		}
 		idx, err := resolveSelectColumnIndex(sel, orderBy.Column, table)
 		if err != nil {
 			return err
 		}
-		indexes = append(indexes, idx)
+		resolvers = append(resolvers, orderByResolver{index: idx})
 	}
 
 	var sortErr error
@@ -921,8 +953,26 @@ func sortSelectRows(rows [][]parser.Value, sel *parser.SelectExpr, table *Table,
 		if sortErr != nil {
 			return false
 		}
-		for idxPos, idx := range indexes {
-			cmp, err := compareSortableValues(rows[i][idx], rows[j][idx])
+		for idxPos, resolver := range resolvers {
+			left := parser.Value{}
+			right := parser.Value{}
+			var err error
+			if resolver.expr != nil {
+				left, err = evalSelectValueExpr(rows[i], sel, table, resolver.expr)
+				if err != nil {
+					sortErr = err
+					return false
+				}
+				right, err = evalSelectValueExpr(rows[j], sel, table, resolver.expr)
+				if err != nil {
+					sortErr = err
+					return false
+				}
+			} else {
+				left = rows[i][resolver.index]
+				right = rows[j][resolver.index]
+			}
+			cmp, err := compareSortableValues(left, right)
 			if err != nil {
 				sortErr = err
 				return false
