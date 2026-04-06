@@ -575,15 +575,17 @@ func createSampleDatabase(session *cliSession, path string) error {
 
 func sampleDatabaseSQL() []string {
 	return []string{
-		"CREATE TABLE customers (id INT, name TEXT, city TEXT)",
-		"CREATE TABLE orders (id INT, customer_id INT, item TEXT, total REAL)",
+		"CREATE TABLE customers (cust_nbr INT, name TEXT, city TEXT)",
+		"CREATE UNIQUE INDEX uq_customers_cust_nbr ON customers (cust_nbr)",
+		"CREATE TABLE orders (cust_nbr INT, order_nbr INT, item TEXT, total_amt REAL)",
+		"CREATE UNIQUE INDEX uq_orders_cust_order ON orders (cust_nbr, order_nbr)",
 		"INSERT INTO customers VALUES (1, 'Alice Co', 'Boston')",
 		"INSERT INTO customers VALUES (2, 'Bravo Shop', 'Chicago')",
 		"INSERT INTO customers VALUES (3, 'Charlie Market', 'Denver')",
 		"INSERT INTO orders VALUES (1, 1, 'Paper', 12.50)",
-		"INSERT INTO orders VALUES (2, 1, 'Pens', 8.25)",
-		"INSERT INTO orders VALUES (3, 2, 'Stapler', 15.00)",
-		"INSERT INTO orders VALUES (4, 3, 'Notebook', 6.75)",
+		"INSERT INTO orders VALUES (1, 2, 'Pens', 8.25)",
+		"INSERT INTO orders VALUES (2, 3, 'Stapler', 15.00)",
+		"INSERT INTO orders VALUES (3, 4, 'Notebook', 6.75)",
 	}
 }
 

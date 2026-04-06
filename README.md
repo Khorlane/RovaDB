@@ -37,28 +37,34 @@ rovadb> sample demo.db
 Run this query:
 
 ```sql
-SELECT a.id, a.name, a.city, b.id, b.item, b.total
+SELECT a.cust_nbr AS customer_number, a.name, a.city, b.order_nbr, b.item, b.total_amt
 FROM customers a
-INNER JOIN orders b ON a.id = b.customer_id
-ORDER BY a.name DESC, b.total;
+INNER JOIN orders b ON a.cust_nbr = b.cust_nbr
+WHERE b.total_amt > 7
+ORDER BY a.name DESC, b.total_amt;
 ```
 
 Or copy/paste this one-line form directly into the CLI:
 
 ```text
-SELECT a.id, a.name, a.city, b.id, b.item, b.total FROM customers a INNER JOIN orders b ON a.id = b.customer_id ORDER BY a.name DESC, b.total;
+SELECT a.cust_nbr AS customer_number, a.name, a.city, b.order_nbr, b.item, b.total_amt FROM customers a INNER JOIN orders b ON a.cust_nbr = b.cust_nbr WHERE b.total_amt > 7 ORDER BY a.name DESC, b.total_amt;
+```
+
+Equivalent comma-join form:
+
+```text
+SELECT a.cust_nbr, a.name, b.order_nbr, b.total_amt FROM customers a, orders b WHERE a.cust_nbr = b.cust_nbr AND b.total_amt > 7 ORDER BY a.name DESC, b.total_amt;
 ```
 
 You should see:
 
 ```text
-rovadb> SELECT a.id, a.name, a.city, b.id, b.item, b.total FROM customers a INNER JOIN orders b ON a.id = b.customer_id ORDER BY a.name DESC, b.total;
-  a.id | a.name         | a.city  | b.id | b.item   | b.total
-  -----|----------------|---------|------|----------|--------
-  3    | Charlie Market | Denver  | 4    | Notebook | 6.75
-  2    | Bravo Shop     | Chicago | 3    | Stapler  | 15
-  1    | Alice Co       | Boston  | 2    | Pens     | 8.25
-  1    | Alice Co       | Boston  | 1    | Paper    | 12.5
+rovadb> SELECT a.cust_nbr AS customer_number, a.name, a.city, b.order_nbr, b.item, b.total_amt FROM customers a INNER JOIN orders b ON a.cust_nbr = b.cust_nbr WHERE b.total_amt > 7 ORDER BY a.name DESC, b.total_amt;
+  customer_number | a.name      | a.city  | b.order_nbr | b.item  | b.total_amt
+  ----------------|-------------|---------|-------------|---------|------------
+  2               | Bravo Shop  | Chicago | 3           | Stapler | 15
+  1               | Alice Co    | Boston  | 2           | Pens    | 8.25
+  1               | Alice Co    | Boston  | 1           | Paper   | 12.5
 ```
 
 If you want to embed RovaDB in a Go program instead, see `examples/basic_usage/main.go`.
@@ -134,7 +140,7 @@ Transaction control remains internal-only in the current public product surface.
 - literal selects such as `SELECT 1`, `SELECT 'hello'`, `SELECT TRUE`, `SELECT FALSE`, and arithmetic expressions with `+` and `-`
 - projection expressions, column projection, qualified column references, and aliases
 - single-table `FROM`
-- explicit two-table `INNER JOIN ... ON ...` equality joins
+- two-table inner equi-joins via explicit `INNER JOIN ... ON ...` and comma join + `WHERE`
 - `WHERE` with `NOT`, precedence, and parenthesized grouping
 - comparison operators: `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`
 - `ORDER BY` with one or more items
@@ -149,7 +155,6 @@ Transaction control remains internal-only in the current public product surface.
 - joins over more than two tables
 - non-`INNER` joins
 - non-equality join predicates
-- comma-style multi-table `FROM` queries at runtime
 - qualified star projection such as `a.*` or `b.*`
 - mixed aggregate and non-aggregate projections
 - public `COMMIT` / `ROLLBACK` SQL

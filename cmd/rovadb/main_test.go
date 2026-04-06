@@ -502,7 +502,7 @@ func TestRunSampleDatabase(t *testing.T) {
 		"sample " + path,
 		"tables",
 		"schema customers",
-		"SELECT id, name FROM customers ORDER BY id",
+		"SELECT cust_nbr AS customer_number, name FROM customers ORDER BY customer_number",
 		"quit",
 		"",
 	}, "\n")
@@ -519,14 +519,14 @@ func TestRunSampleDatabase(t *testing.T) {
 		"customers",
 		"orders",
 		"table: customers",
-		"id INT",
+		"cust_nbr INT",
 		"name TEXT",
 		"city TEXT",
-		"id | name          ",
-		"---|---------------",
-		"1  | Alice Co      ",
-		"2  | Bravo Shop    ",
-		"3  | Charlie Market",
+		"customer_number | name          ",
+		"----------------|---------------",
+		"1               | Alice Co      ",
+		"2               | Bravo Shop    ",
+		"3               | Charlie Market",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
