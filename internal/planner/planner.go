@@ -39,6 +39,11 @@ func PlanSelect(stmt *parser.SelectExpr, tables ...map[string]*TableMetadata) (*
 		return nil, newPlanError("unsupported query form")
 	}
 	if stmt != nil && stmt.TableName != "" {
+		if indexOnlyScan := chooseIndexOnlyScan(stmt, firstTableMetadata(tables)); indexOnlyScan != nil {
+			plan.ScanType = ScanTypeIndexOnly
+			plan.IndexOnlyScan = indexOnlyScan
+			return plan, nil
+		}
 		if indexScan := chooseIndexScan(stmt, firstTableMetadata(tables)); indexScan != nil {
 			plan.ScanType = ScanTypeIndex
 			plan.IndexScan = indexScan
@@ -48,6 +53,95 @@ func PlanSelect(stmt *parser.SelectExpr, tables ...map[string]*TableMetadata) (*
 		plan.TableScan = &TableScan{TableName: stmt.TableName}
 	}
 	return plan, nil
+}
+
+func chooseIndexOnlyScan(stmt *parser.SelectExpr, tables map[string]*TableMetadata) *IndexOnlyScan {
+	if stmt == nil || stmt.TableName == "" || tables == nil {
+		return nil
+	}
+	if len(stmt.From) > 1 || len(stmt.Joins) > 0 {
+		return nil
+	}
+
+	table := tables[stmt.TableName]
+	if table == nil {
+		return nil
+	}
+
+	if stmt.IsCountStar {
+		if _, ok := firstEligibleSimpleIndexName(table); !ok {
+			return nil
+		}
+		return &IndexOnlyScan{
+			TableName: stmt.TableName,
+			CountStar: true,
+		}
+	}
+
+	columnName, ok := simpleIndexOnlyProjectionColumn(stmt)
+	if !ok {
+		return nil
+	}
+	if _, ok := eligibleSimpleIndexForColumn(table, stmt.TableName, columnName); !ok {
+		return nil
+	}
+	return &IndexOnlyScan{
+		TableName:   stmt.TableName,
+		ColumnNames: []string{columnName},
+	}
+}
+
+func firstEligibleSimpleIndexName(table *TableMetadata) (string, bool) {
+	if table == nil || len(table.SimpleIndexes) == 0 {
+		return "", false
+	}
+	best := ""
+	for columnName, index := range table.SimpleIndexes {
+		if _, ok := eligibleSimpleIndexForColumn(table, index.TableName, columnName); !ok {
+			continue
+		}
+		if best == "" || columnName < best {
+			best = columnName
+		}
+	}
+	if best == "" {
+		return "", false
+	}
+	return best, true
+}
+
+func simpleIndexOnlyProjectionColumn(stmt *parser.SelectExpr) (string, bool) {
+	if stmt == nil || stmt.IsCountStar {
+		return "", false
+	}
+	if stmt.Where != nil || stmt.Predicate != nil {
+		return "", false
+	}
+	if len(stmt.OrderBys) > 0 || stmt.OrderBy != nil {
+		return "", false
+	}
+	if len(stmt.ProjectionExprs) != 1 {
+		return "", false
+	}
+	expr := stmt.ProjectionExprs[0]
+	if expr == nil || expr.Kind != parser.ValueExprKindColumnRef || expr.Column == "" {
+		return "", false
+	}
+	normalized, ok := normalizePlannerColumnName(columnRefName(expr), stmt.PrimaryTableRef())
+	if !ok || normalized == "" {
+		return "", false
+	}
+	return normalized, true
+}
+
+func columnRefName(expr *parser.ValueExpr) string {
+	if expr == nil {
+		return ""
+	}
+	if expr.Qualifier != "" {
+		return expr.Qualifier + "." + expr.Column
+	}
+	return expr.Column
 }
 
 func chooseJoinScan(stmt *parser.SelectExpr) (*JoinScan, bool) {

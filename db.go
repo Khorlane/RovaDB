@@ -708,6 +708,7 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
+		plan = downgradeIndexOnlyPlanForExecution(plan)
 		if plan.ScanType == planner.ScanTypeIndex {
 			table := db.tables[plan.IndexScan.TableName]
 			if table == nil {
@@ -768,6 +769,17 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		return &Rows{err: err, idx: -1}, nil
 	}
 	return newRows(nil, [][]any{{apiValue(value)}}), nil
+}
+
+func downgradeIndexOnlyPlanForExecution(plan *planner.SelectPlan) *planner.SelectPlan {
+	if plan == nil || plan.ScanType != planner.ScanTypeIndexOnly || plan.Stmt == nil || plan.Stmt.TableName == "" {
+		return plan
+	}
+	downgraded := *plan
+	downgraded.ScanType = planner.ScanTypeTable
+	downgraded.TableScan = &planner.TableScan{TableName: plan.Stmt.TableName}
+	downgraded.IndexOnlyScan = nil
+	return &downgraded
 }
 
 func cloneSelectTableMeta(table *executor.Table) *executor.Table {
