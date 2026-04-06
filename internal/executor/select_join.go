@@ -22,7 +22,7 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 	if plan == nil || plan.Stmt == nil || plan.JoinScan == nil {
 		return nil, errInvalidSelectPlan
 	}
-	if len(plan.Stmt.From) != 1 || len(plan.Stmt.Joins) != 1 {
+	if !isSupportedJoinSelectShape(plan.Stmt) {
 		return nil, errUnsupportedStatement
 	}
 
@@ -183,6 +183,8 @@ func newJoinSelectResolver(sel *parser.SelectExpr, leftTable, rightTable *Table)
 		}
 		if len(sel.Joins) > 0 {
 			rightRef = sel.Joins[0].Right
+		} else if len(sel.From) > 1 {
+			rightRef = sel.From[1]
 		}
 	}
 
@@ -192,6 +194,19 @@ func newJoinSelectResolver(sel *parser.SelectExpr, leftTable, rightTable *Table)
 			{ref: rightRef, table: rightTable, offset: len(leftTable.Columns)},
 		},
 	}
+}
+
+func isSupportedJoinSelectShape(sel *parser.SelectExpr) bool {
+	if sel == nil {
+		return false
+	}
+	if len(sel.From) == 1 && len(sel.Joins) == 1 {
+		return true
+	}
+	if len(sel.From) == 2 && len(sel.Joins) == 0 {
+		return true
+	}
+	return false
 }
 
 func (r *joinSelectResolver) resolveColumnIndex(name string) (int, error) {

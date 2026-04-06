@@ -188,15 +188,24 @@ func TestPlanSelectComplexWhereFallsBackToTableScan(t *testing.T) {
 	}
 }
 
-func TestPlanSelectMultiTableFromUnsupported(t *testing.T) {
-	stmt, ok := parser.ParseSelectExpr("SELECT u.id FROM users u, accounts a WHERE u.id = 1")
+func TestPlanSelectCommaJoinUsesJoinScan(t *testing.T) {
+	stmt, ok := parser.ParseSelectExpr("SELECT u.id FROM users u, accounts a WHERE u.id = a.id AND a.name = 'eng'")
 	if !ok {
 		t.Fatal("ParseSelectExpr() ok = false, want true")
 	}
 
-	plan, err := PlanSelect(stmt, testPlannerTables("id"))
-	if err == nil {
-		t.Fatalf("PlanSelect() = %#v, want error", plan)
+	plan, err := PlanSelect(stmt)
+	if err != nil {
+		t.Fatalf("PlanSelect() error = %v", err)
+	}
+	if plan.ScanType != ScanTypeJoin {
+		t.Fatalf("PlanSelect().ScanType = %q, want %q", plan.ScanType, ScanTypeJoin)
+	}
+	if plan.JoinScan == nil {
+		t.Fatal("PlanSelect().JoinScan = nil, want value")
+	}
+	if plan.JoinScan.LeftTableName != "users" || plan.JoinScan.RightTableName != "accounts" || plan.JoinScan.LeftColumnName != "id" || plan.JoinScan.RightColumnName != "id" {
+		t.Fatalf("PlanSelect().JoinScan = %#v, want users.id = accounts.id", plan.JoinScan)
 	}
 }
 

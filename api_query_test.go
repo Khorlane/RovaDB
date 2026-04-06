@@ -180,26 +180,49 @@ func TestQueryAPINonSelectRejected(t *testing.T) {
 	}
 }
 
-func TestQueryAPIMultiTableFromStillUnsupported(t *testing.T) {
+func TestQueryAPICommaJoinReturnsRows(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer db.Close()
 
-	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
-		t.Fatalf("Exec(create users) error = %v", err)
+	if _, err := db.Exec("CREATE TABLE customers (cust_nbr INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create customers) error = %v", err)
 	}
-	if _, err := db.Exec("CREATE TABLE accounts (id INT, name TEXT)"); err != nil {
-		t.Fatalf("Exec(create accounts) error = %v", err)
+	if _, err := db.Exec("CREATE TABLE orders (order_nbr INT, cust_nbr INT, total_amt INT)"); err != nil {
+		t.Fatalf("Exec(create orders) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO customers VALUES (1, 'alice')",
+		"INSERT INTO customers VALUES (2, 'bob')",
+		"INSERT INTO orders VALUES (101, 1, 75)",
+		"INSERT INTO orders VALUES (102, 1, 25)",
+		"INSERT INTO orders VALUES (103, 2, 60)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
 	}
 
-	rows, err := db.Query("SELECT u.id FROM users u, accounts a WHERE u.id = 1")
+	rows, err := db.Query("SELECT a.cust_nbr, a.name, b.order_nbr, b.total_amt FROM customers a, orders b WHERE a.cust_nbr = b.cust_nbr AND b.total_amt > 50 ORDER BY a.name")
 	if err != nil {
-		t.Fatalf("Query() error = %v, want nil top-level error", err)
+		t.Fatalf("Query() error = %v", err)
 	}
-	if rows == nil || rows.err == nil {
-		t.Fatalf("rows = %#v, want deferred unsupported-query error", rows)
+	if rows == nil || rows.err != nil {
+		t.Fatalf("rows = %#v, want successful joined rowset", rows)
+	}
+	if len(rows.columns) != 4 || rows.columns[0] != "a.cust_nbr" || rows.columns[1] != "a.name" || rows.columns[2] != "b.order_nbr" || rows.columns[3] != "b.total_amt" {
+		t.Fatalf("rows.columns = %#v, want qualified projected columns", rows.columns)
+	}
+	if len(rows.data) != 2 {
+		t.Fatalf("rows.data = %#v, want two joined rows", rows.data)
+	}
+	if rows.data[0][0] != 1 || rows.data[0][1] != "alice" || rows.data[0][2] != 101 || rows.data[0][3] != 75 {
+		t.Fatalf("rows.data[0] = %#v, want [1 alice 101 75]", rows.data[0])
+	}
+	if rows.data[1][0] != 2 || rows.data[1][1] != "bob" || rows.data[1][2] != 103 || rows.data[1][3] != 60 {
+		t.Fatalf("rows.data[1] = %#v, want [2 bob 103 60]", rows.data[1])
 	}
 }
 
@@ -239,6 +262,61 @@ func TestQueryAPIExplicitJoinReturnsRows(t *testing.T) {
 	}
 	if rows.data[0][0] != "alice" || rows.data[0][1] != "eng" || rows.data[1][0] != "bob" || rows.data[1][1] != "ops" {
 		t.Fatalf("rows.data = %#v, want [[alice eng] [bob ops]]", rows.data)
+	}
+}
+
+func TestQueryAPICommaJoinAndExplicitJoinMatch(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE customers (cust_nbr INT, name TEXT)",
+		"CREATE TABLE orders (order_nbr INT, cust_nbr INT, total_amt INT)",
+		"INSERT INTO customers VALUES (1, 'alice')",
+		"INSERT INTO customers VALUES (2, 'bob')",
+		"INSERT INTO orders VALUES (101, 1, 75)",
+		"INSERT INTO orders VALUES (102, 1, 25)",
+		"INSERT INTO orders VALUES (103, 2, 60)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	commaRows, err := db.Query("SELECT a.cust_nbr, a.name, b.order_nbr, b.total_amt FROM customers a, orders b WHERE a.cust_nbr = b.cust_nbr AND b.total_amt > 50 ORDER BY a.name")
+	if err != nil {
+		t.Fatalf("Query(comma join) error = %v", err)
+	}
+	explicitRows, err := db.Query("SELECT a.cust_nbr, a.name, b.order_nbr, b.total_amt FROM customers a JOIN orders b ON a.cust_nbr = b.cust_nbr WHERE b.total_amt > 50 ORDER BY a.name")
+	if err != nil {
+		t.Fatalf("Query(explicit join) error = %v", err)
+	}
+	if commaRows == nil || explicitRows == nil {
+		t.Fatalf("rows = (%#v, %#v), want non-nil rowsets", commaRows, explicitRows)
+	}
+	if len(commaRows.columns) != len(explicitRows.columns) {
+		t.Fatalf("column lengths = (%d, %d), want match", len(commaRows.columns), len(explicitRows.columns))
+	}
+	for i := range commaRows.columns {
+		if commaRows.columns[i] != explicitRows.columns[i] {
+			t.Fatalf("columns differ at %d: %q vs %q", i, commaRows.columns[i], explicitRows.columns[i])
+		}
+	}
+	if len(commaRows.data) != len(explicitRows.data) {
+		t.Fatalf("row counts = (%d, %d), want match", len(commaRows.data), len(explicitRows.data))
+	}
+	for i := range commaRows.data {
+		if len(commaRows.data[i]) != len(explicitRows.data[i]) {
+			t.Fatalf("row %d widths = (%d, %d), want match", i, len(commaRows.data[i]), len(explicitRows.data[i]))
+		}
+		for j := range commaRows.data[i] {
+			if commaRows.data[i][j] != explicitRows.data[i][j] {
+				t.Fatalf("row %d col %d differ: %v vs %v", i, j, commaRows.data[i][j], explicitRows.data[i][j])
+			}
+		}
 	}
 }
 

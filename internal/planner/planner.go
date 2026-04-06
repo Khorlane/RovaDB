@@ -51,29 +51,115 @@ func PlanSelect(stmt *parser.SelectExpr, tables ...map[string]*TableMetadata) (*
 }
 
 func chooseJoinScan(stmt *parser.SelectExpr) (*JoinScan, bool) {
-	if stmt == nil || len(stmt.From) != 1 || len(stmt.Joins) != 1 {
-		return nil, false
-	}
-	join := stmt.Joins[0]
-	if join.Predicate == nil || join.Predicate.Kind != parser.PredicateKindComparison || join.Predicate.Comparison == nil {
-		return nil, false
-	}
-	cond := join.Predicate.Comparison
-	if cond.Operator != "=" || cond.LeftExpr == nil || cond.RightExpr == nil {
-		return nil, false
-	}
-	_, leftName, ok := valueExprOperandShape(cond.LeftExpr)
-	if !ok || leftName == "" {
-		return nil, false
-	}
-	_, rightName, ok := valueExprOperandShape(cond.RightExpr)
-	if !ok || rightName == "" {
+	if stmt == nil {
 		return nil, false
 	}
 
-	leftRef := stmt.From[0]
-	rightRef := join.Right
+	if len(stmt.From) == 1 && len(stmt.Joins) == 1 {
+		join := stmt.Joins[0]
+		if join.Predicate == nil || join.Predicate.Kind != parser.PredicateKindComparison || join.Predicate.Comparison == nil {
+			return nil, false
+		}
+		cond := join.Predicate.Comparison
+		if cond.Operator != "=" || cond.LeftExpr == nil || cond.RightExpr == nil {
+			return nil, false
+		}
+		_, leftName, ok := valueExprOperandShape(cond.LeftExpr)
+		if !ok || leftName == "" {
+			return nil, false
+		}
+		_, rightName, ok := valueExprOperandShape(cond.RightExpr)
+		if !ok || rightName == "" {
+			return nil, false
+		}
 
+		leftRef := stmt.From[0]
+		rightRef := join.Right
+		return joinScanFromColumnPair(leftRef, rightRef, leftName, rightName)
+	}
+
+	if len(stmt.From) == 2 && len(stmt.Joins) == 0 {
+		leftRef := stmt.From[0]
+		rightRef := stmt.From[1]
+		leftName, rightName, ok := commaJoinEqualityColumns(stmt)
+		if !ok {
+			return nil, false
+		}
+		return joinScanFromColumnPair(leftRef, rightRef, leftName, rightName)
+	}
+
+	return nil, false
+}
+
+func commaJoinEqualityColumns(stmt *parser.SelectExpr) (string, string, bool) {
+	if stmt == nil {
+		return "", "", false
+	}
+	if stmt.Predicate != nil {
+		if left, right, ok := findJoinEqualityInPredicate(stmt.Predicate); ok {
+			return left, right, true
+		}
+	}
+	return findJoinEqualityInWhere(stmt.Where)
+}
+
+func findJoinEqualityInPredicate(predicate *parser.PredicateExpr) (string, string, bool) {
+	if predicate == nil {
+		return "", "", false
+	}
+	switch predicate.Kind {
+	case parser.PredicateKindComparison:
+		if predicate.Comparison == nil || predicate.Comparison.Operator != "=" {
+			return "", "", false
+		}
+		return joinEqualityColumnsFromCondition(*predicate.Comparison)
+	case parser.PredicateKindAnd, parser.PredicateKindOr:
+		if left, right, ok := findJoinEqualityInPredicate(predicate.Left); ok {
+			return left, right, true
+		}
+		return findJoinEqualityInPredicate(predicate.Right)
+	case parser.PredicateKindNot:
+		return findJoinEqualityInPredicate(predicate.Inner)
+	default:
+		return "", "", false
+	}
+}
+
+func findJoinEqualityInWhere(where *parser.WhereClause) (string, string, bool) {
+	if where == nil {
+		return "", "", false
+	}
+	for _, item := range where.Items {
+		left, right, ok := joinEqualityColumnsFromCondition(item.Condition)
+		if ok {
+			return left, right, true
+		}
+	}
+	return "", "", false
+}
+
+func joinEqualityColumnsFromCondition(cond parser.Condition) (string, string, bool) {
+	if cond.Operator != "=" {
+		return "", "", false
+	}
+	if cond.LeftExpr != nil && cond.RightExpr != nil {
+		_, leftName, ok := valueExprOperandShape(cond.LeftExpr)
+		if !ok || leftName == "" {
+			return "", "", false
+		}
+		_, rightName, ok := valueExprOperandShape(cond.RightExpr)
+		if !ok || rightName == "" {
+			return "", "", false
+		}
+		return leftName, rightName, true
+	}
+	if cond.Left == "" || cond.RightRef == "" {
+		return "", "", false
+	}
+	return cond.Left, cond.RightRef, true
+}
+
+func joinScanFromColumnPair(leftRef, rightRef parser.TableRef, leftName, rightName string) (*JoinScan, bool) {
 	leftColumn, okLeft := normalizeJoinColumnName(leftName, leftRef)
 	rightColumn, okRight := normalizeJoinColumnName(rightName, rightRef)
 	if okLeft && okRight {
