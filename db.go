@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -570,7 +571,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 				return err
 			}
 
-			if err := db.applyStagedTableRewrite(stagedTables, stmt.TableName); err != nil {
+			if err := db.applyStagedUpdate(stagedTables, stmt.TableName); err != nil {
 				return err
 			}
 			committedTables = stagedTables
@@ -1659,6 +1660,43 @@ func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, t
 	return nil
 }
 
+func (db *DB) applyStagedUpdate(stagedTables map[string]*executor.Table, tableName string) error {
+	if db == nil || db.pager == nil {
+		return nil
+	}
+
+	table := stagedTables[tableName]
+	if table == nil {
+		return nil
+	}
+	committedTable := db.tables[tableName]
+	if committedTable == nil {
+		return newExecError("table not found: " + tableName)
+	}
+
+	table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
+	originalFreeListHead := db.freeListHead
+	pages, locators, err := db.stageTableUpdateViaPhysicalStorage(committedTable, table)
+	if err != nil {
+		db.freeListHead = originalFreeListHead
+		return err
+	}
+
+	indexPages, err := db.buildRebuiltIndexPages(table, table.Rows, locators, nextFreshPageIDAfter(pages, db.pager.NextPageID()))
+	if err != nil {
+		db.freeListHead = originalFreeListHead
+		return err
+	}
+	pages = append(pages, indexPages...)
+
+	catalogData, err := db.buildCatalogPageData(stagedTables, pages)
+	if err != nil {
+		db.freeListHead = originalFreeListHead
+		return wrapStorageError(err)
+	}
+	return db.stageDirtyState(catalogData, pages)
+}
+
 func (db *DB) applyStagedInsert(stagedTables map[string]*executor.Table, tableName string) error {
 	if db == nil || db.pager == nil {
 		return nil
@@ -1738,6 +1776,35 @@ func (db *DB) stageTableInsertViaPhysicalStorage(table *executor.Table, row []pa
 		return nil, storage.RowLocator{}, err
 	}
 	return finalizedStagedPages(staged, order), locator, nil
+}
+
+func (db *DB) stageTableUpdateViaPhysicalStorage(committedTable, updatedTable *executor.Table) ([]stagedPage, []storage.RowLocator, error) {
+	if db == nil || committedTable == nil || updatedTable == nil {
+		return nil, nil, ErrInvalidArgument
+	}
+	oldLocators, oldRows, err := loadCommittedTableRowsAndLocators(db.pool, committedTable)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(oldRows) != len(updatedTable.Rows) || len(oldLocators) != len(updatedTable.Rows) {
+		return nil, nil, newStorageError("row locator mismatch")
+	}
+
+	nextFreshID := db.pager.NextPageID()
+	staged := make(map[storage.PageID]stagedPage)
+	order := make([]storage.PageID, 0)
+	finalLocators := append([]storage.RowLocator(nil), oldLocators...)
+	for rowIndex, oldRow := range oldRows {
+		if reflect.DeepEqual(oldRow, updatedTable.Rows[rowIndex]) {
+			continue
+		}
+		newLocator, err := db.stageUpdatedRowViaPhysicalStorage(updatedTable, oldLocators[rowIndex], updatedTable.Rows[rowIndex], &nextFreshID, staged, &order)
+		if err != nil {
+			return nil, nil, err
+		}
+		finalLocators[rowIndex] = newLocator
+	}
+	return finalizedStagedPages(staged, order), finalLocators, nil
 }
 
 func (db *DB) stageTableRewriteViaPhysicalStorage(table *executor.Table, rows [][]parser.Value, allowFreshHeaderBootstrap bool, startNextFreshID storage.PageID, freeReplacedPages bool) ([]stagedPage, []storage.RowLocator, error) {
@@ -2006,6 +2073,118 @@ func (db *DB) insertRowIntoPhysicalStorageState(table *executor.Table, row []par
 		return storage.RowLocator{}, wrapStorageError(err)
 	}
 	return storage.RowLocator{PageID: uint32(targetDataPage), SlotID: uint16(slotID)}, nil
+}
+
+func (db *DB) stageUpdatedRowViaPhysicalStorage(table *executor.Table, locator storage.RowLocator, row []parser.Value, nextFreshID *storage.PageID, staged map[storage.PageID]stagedPage, order *[]storage.PageID) (storage.RowLocator, error) {
+	if db == nil || table == nil || nextFreshID == nil {
+		return storage.RowLocator{}, ErrInvalidArgument
+	}
+	pageID := storage.PageID(locator.PageID)
+	if pageID == 0 {
+		return storage.RowLocator{}, newStorageError("corrupted table page")
+	}
+
+	dataPage, err := db.mutablePageImage(staged, order, pageID)
+	if err != nil {
+		return storage.RowLocator{}, err
+	}
+	if err := storage.ValidateOwnedDataPage(dataPage, table.TableID); err != nil {
+		return storage.RowLocator{}, wrapStorageError(err)
+	}
+
+	rowBytes, err := storage.EncodeSlottedRow(row)
+	if err != nil {
+		return storage.RowLocator{}, wrapStorageError(err)
+	}
+
+	fit, err := storage.CanUpdateRowInPlace(dataPage, int(locator.SlotID), len(rowBytes))
+	if err != nil {
+		return storage.RowLocator{}, wrapStorageError(err)
+	}
+	if fit {
+		if err := storage.UpdateRowBySlot(dataPage, int(locator.SlotID), rowBytes); err != nil {
+			return storage.RowLocator{}, wrapStorageError(err)
+		}
+		if err := db.refreshSpaceMapBucketForDataPage(table, pageID, staged, order); err != nil {
+			return storage.RowLocator{}, err
+		}
+		return locator, nil
+	}
+
+	if err := storage.DeleteRowBySlot(dataPage, int(locator.SlotID)); err != nil {
+		return storage.RowLocator{}, wrapStorageError(err)
+	}
+	if err := db.refreshSpaceMapBucketForDataPage(table, pageID, staged, order); err != nil {
+		return storage.RowLocator{}, err
+	}
+	return db.insertRowIntoPhysicalStorageState(table, row, nextFreshID, staged, order)
+}
+
+func (db *DB) refreshSpaceMapBucketForDataPage(table *executor.Table, dataPageID storage.PageID, staged map[storage.PageID]stagedPage, order *[]storage.PageID) error {
+	if db == nil || table == nil {
+		return ErrInvalidArgument
+	}
+	if table.FirstSpaceMapPageID() == 0 || dataPageID == 0 {
+		return newStorageError("corrupted space map page")
+	}
+
+	dataPage, err := db.mutablePageImage(staged, order, dataPageID)
+	if err != nil {
+		return err
+	}
+	if err := storage.ValidateOwnedDataPage(dataPage, table.TableID); err != nil {
+		return wrapStorageError(err)
+	}
+	bucket, err := storage.TablePageFreeSpaceBucket(dataPage)
+	if err != nil {
+		return wrapStorageError(err)
+	}
+
+	for spaceMapPageID := table.FirstSpaceMapPageID(); spaceMapPageID != 0; {
+		spaceMapPage, err := db.mutablePageImage(staged, order, spaceMapPageID)
+		if err != nil {
+			return err
+		}
+		if err := storage.ValidateSpaceMapPage(spaceMapPage); err != nil {
+			return wrapStorageError(err)
+		}
+		owningTableID, err := storage.SpaceMapOwningTableID(spaceMapPage)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		if owningTableID != table.TableID {
+			return newStorageError("corrupted space map page")
+		}
+		entryCount, err := storage.SpaceMapEntryCount(spaceMapPage)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		for entryID := 0; entryID < entryCount; entryID++ {
+			entry, err := storage.SpaceMapPageEntry(spaceMapPage, entryID)
+			if err != nil {
+				return wrapStorageError(err)
+			}
+			if entry.DataPageID != dataPageID {
+				continue
+			}
+			if entry.FreeSpaceBucket == bucket {
+				return nil
+			}
+			if err := storage.UpdateSpaceMapEntry(spaceMapPage, entryID, storage.SpaceMapEntry{
+				DataPageID:      dataPageID,
+				FreeSpaceBucket: bucket,
+			}); err != nil {
+				return wrapStorageError(err)
+			}
+			return nil
+		}
+		nextPageID, err := storage.SpaceMapNextPageID(spaceMapPage)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		spaceMapPageID = storage.PageID(nextPageID)
+	}
+	return newStorageError("corrupted space map page")
 }
 
 func (db *DB) applyStagedCatalogOnly(stagedTables map[string]*executor.Table) error {

@@ -75,7 +75,7 @@ func TablePageRowCount(page *Page) uint32 {
 		return 0
 	}
 	if IsSlottedTablePage(page.data) {
-		slotCount, err := TablePageSlotCount(page.data)
+		slotCount, err := TablePageLiveRowCount(page.data)
 		if err != nil {
 			return 0
 		}
@@ -263,10 +263,37 @@ func TablePageSlot(page []byte, slotID int) (offset int, length int, err error) 
 	entryOffset := tablePageBodyStart + slotID*tablePageSlotEntrySize
 	offset = int(binary.LittleEndian.Uint16(page[entryOffset : entryOffset+2]))
 	length = int(binary.LittleEndian.Uint16(page[entryOffset+2 : entryOffset+4]))
+	if length == 0 {
+		if offset != tablePageBodyStart {
+			return 0, 0, errCorruptedTablePage
+		}
+		return offset, length, nil
+	}
 	if offset < tablePageBodyStart || length < 0 || offset+length > PageSize {
 		return 0, 0, errCorruptedTablePage
 	}
 	return offset, length, nil
+}
+
+func TablePageLiveRowCount(page []byte) (int, error) {
+	if err := validateSlottedTablePage(page); err != nil {
+		return 0, err
+	}
+	slotCount, err := TablePageSlotCount(page)
+	if err != nil {
+		return 0, err
+	}
+	live := 0
+	for slotID := 0; slotID < slotCount; slotID++ {
+		_, length, err := TablePageSlot(page, slotID)
+		if err != nil {
+			return 0, err
+		}
+		if length != 0 {
+			live++
+		}
+	}
+	return live, nil
 }
 
 func SlotLocator(pageID uint32, slotID int) (RowLocator, error) {
@@ -284,8 +311,12 @@ func TablePageLocators(page []byte, pageID uint32) ([]RowLocator, error) {
 
 	locators := make([]RowLocator, 0, slotCount)
 	for slotID := 0; slotID < slotCount; slotID++ {
-		if _, _, err := TablePageSlot(page, slotID); err != nil {
+		_, length, err := TablePageSlot(page, slotID)
+		if err != nil {
 			return nil, err
+		}
+		if length == 0 {
+			continue
 		}
 		locator, err := SlotLocator(pageID, slotID)
 		if err != nil {
@@ -378,6 +409,69 @@ func InsertRowIntoTablePage(page []byte, row []byte) (slotID int, err error) {
 	return slotCount, nil
 }
 
+func CanUpdateRowInPlace(page []byte, slotID int, rowLen int) (bool, error) {
+	if err := validateSlottedTablePage(page); err != nil {
+		return false, err
+	}
+	if rowLen < 0 {
+		return false, errCorruptedTablePage
+	}
+	_, existingLen, err := TablePageSlot(page, slotID)
+	if err != nil {
+		return false, err
+	}
+	if existingLen == 0 {
+		return false, errCorruptedTablePage
+	}
+	freeSpace, err := TablePageFreeSpace(page)
+	if err != nil {
+		return false, err
+	}
+	return freeSpace+existingLen >= rowLen, nil
+}
+
+func UpdateRowBySlot(page []byte, slotID int, row []byte) error {
+	if err := validateSlottedTablePage(page); err != nil {
+		return err
+	}
+	payloads, pageID, owningTableID, err := tablePagePayloadLayout(page)
+	if err != nil {
+		return err
+	}
+	if slotID < 0 || slotID >= len(payloads) || payloads[slotID] == nil {
+		return errCorruptedTablePage
+	}
+	payloads[slotID] = append([]byte(nil), row...)
+	rewritten, err := buildSlottedTablePageImageWithSlotLayout(pageID, owningTableID, payloads)
+	if err != nil {
+		return err
+	}
+	clear(page)
+	copy(page, rewritten)
+	return nil
+}
+
+func DeleteRowBySlot(page []byte, slotID int) error {
+	if err := validateSlottedTablePage(page); err != nil {
+		return err
+	}
+	payloads, pageID, owningTableID, err := tablePagePayloadLayout(page)
+	if err != nil {
+		return err
+	}
+	if slotID < 0 || slotID >= len(payloads) || payloads[slotID] == nil {
+		return errCorruptedTablePage
+	}
+	payloads[slotID] = nil
+	rewritten, err := buildSlottedTablePageImageWithSlotLayout(pageID, owningTableID, payloads)
+	if err != nil {
+		return err
+	}
+	clear(page)
+	copy(page, rewritten)
+	return nil
+}
+
 func ExtractSlottedRowPayload(page []byte, slotID int) ([]byte, error) {
 	if err := validateSlottedTablePage(page); err != nil {
 		return nil, err
@@ -385,6 +479,9 @@ func ExtractSlottedRowPayload(page []byte, slotID int) ([]byte, error) {
 	offset, length, err := TablePageSlot(page, slotID)
 	if err != nil {
 		return nil, err
+	}
+	if length == 0 {
+		return nil, errCorruptedTablePage
 	}
 	return append([]byte(nil), page[offset:offset+length]...), nil
 }
@@ -451,11 +548,78 @@ func readSlottedRowPayloads(page []byte) ([][]byte, error) {
 	for slotID := 0; slotID < slotCount; slotID++ {
 		payload, err := ExtractSlottedRowPayload(page, slotID)
 		if err != nil {
+			if err == errCorruptedTablePage {
+				_, length, slotErr := TablePageSlot(page, slotID)
+				if slotErr != nil {
+					return nil, slotErr
+				}
+				if length == 0 {
+					continue
+				}
+			}
 			return nil, err
 		}
 		rows = append(rows, payload)
 	}
 	return rows, nil
+}
+
+func tablePagePayloadLayout(page []byte) ([][]byte, uint32, uint32, error) {
+	if err := validateSlottedTablePage(page); err != nil {
+		return nil, 0, 0, err
+	}
+	pageID := binary.LittleEndian.Uint32(page[tablePageHeaderOffsetPageID : tablePageHeaderOffsetPageID+4])
+	owningTableID := binary.LittleEndian.Uint32(page[tablePageBodyOffsetOwningTableID : tablePageBodyOffsetOwningTableID+4])
+	slotCount, err := TablePageSlotCount(page)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	payloads := make([][]byte, slotCount)
+	for slotID := 0; slotID < slotCount; slotID++ {
+		offset, length, err := TablePageSlot(page, slotID)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		if length == 0 {
+			continue
+		}
+		payloads[slotID] = append([]byte(nil), page[offset:offset+length]...)
+	}
+	return payloads, pageID, owningTableID, nil
+}
+
+func buildSlottedTablePageImageWithSlotLayout(pageID uint32, owningTableID uint32, payloads [][]byte) ([]byte, error) {
+	page := InitializeTablePage(pageID)
+	binary.LittleEndian.PutUint32(page[tablePageBodyOffsetOwningTableID:tablePageBodyOffsetOwningTableID+4], owningTableID)
+	slotCount := len(payloads)
+	freeStart := tablePageBodyStart + slotCount*tablePageSlotEntrySize
+	if freeStart > PageSize {
+		return nil, errTablePageFull
+	}
+	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetSlotCount:tablePageBodyOffsetSlotCount+2], uint16(slotCount))
+	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeStart:tablePageBodyOffsetFreeStart+2], uint16(freeStart))
+	freeEnd := PageSize
+	for slotID, payload := range payloads {
+		entryOffset := tablePageBodyStart + slotID*tablePageSlotEntrySize
+		if len(payload) == 0 {
+			binary.LittleEndian.PutUint16(page[entryOffset:entryOffset+2], uint16(tablePageBodyStart))
+			binary.LittleEndian.PutUint16(page[entryOffset+2:entryOffset+4], 0)
+			continue
+		}
+		if freeEnd-len(payload) < freeStart {
+			return nil, errTablePageFull
+		}
+		rowOffset := freeEnd - len(payload)
+		copy(page[rowOffset:freeEnd], payload)
+		binary.LittleEndian.PutUint16(page[entryOffset:entryOffset+2], uint16(rowOffset))
+		binary.LittleEndian.PutUint16(page[entryOffset+2:entryOffset+4], uint16(len(payload)))
+		freeEnd = rowOffset
+	}
+	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeEnd:tablePageBodyOffsetFreeEnd+2], uint16(freeEnd))
+	if err := FinalizePageImage(page); err != nil {
+		return nil, err
+	}
+	return page, nil
 }
 
 func decodeSlottedRowPayload(payload []byte, columnTypes []uint8) ([]parser.Value, error) {

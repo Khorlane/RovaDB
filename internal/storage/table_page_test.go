@@ -284,6 +284,92 @@ func TestInsertMultipleRowsIntoTablePage(t *testing.T) {
 	}
 }
 
+func TestUpdateRowBySlotKeepsLocatorStableWhenReplacementFits(t *testing.T) {
+	page := InitializeTablePage(21)
+	slot0, err := InsertRowIntoTablePage(page, []byte{0x10, 0x11, 0x12})
+	if err != nil {
+		t.Fatalf("InsertRowIntoTablePage(slot0) error = %v", err)
+	}
+	slot1, err := InsertRowIntoTablePage(page, []byte{0x20, 0x21})
+	if err != nil {
+		t.Fatalf("InsertRowIntoTablePage(slot1) error = %v", err)
+	}
+
+	fit, err := CanUpdateRowInPlace(page, slot0, 6)
+	if err != nil {
+		t.Fatalf("CanUpdateRowInPlace() error = %v", err)
+	}
+	if !fit {
+		t.Fatal("CanUpdateRowInPlace() = false, want true")
+	}
+
+	if err := UpdateRowBySlot(page, slot0, []byte{0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF}); err != nil {
+		t.Fatalf("UpdateRowBySlot() error = %v", err)
+	}
+
+	payload, err := ExtractSlottedRowPayload(page, slot0)
+	if err != nil {
+		t.Fatalf("ExtractSlottedRowPayload(slot0) error = %v", err)
+	}
+	if !bytes.Equal(payload, []byte{0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF}) {
+		t.Fatalf("slot0 payload = %v, want replacement bytes", payload)
+	}
+	locators, err := TablePageLocators(page, 21)
+	if err != nil {
+		t.Fatalf("TablePageLocators() error = %v", err)
+	}
+	want := []RowLocator{{PageID: 21, SlotID: 0}, {PageID: 21, SlotID: 1}}
+	if len(locators) != len(want) {
+		t.Fatalf("len(locators) = %d, want %d", len(locators), len(want))
+	}
+	for i := range want {
+		if locators[i] != want[i] {
+			t.Fatalf("locators[%d] = %#v, want %#v", i, locators[i], want[i])
+		}
+	}
+	if _, err := ExtractSlottedRowPayload(page, slot1); err != nil {
+		t.Fatalf("ExtractSlottedRowPayload(slot1) error = %v", err)
+	}
+}
+
+func TestDeleteRowBySlotPreservesOtherLocatorsAndSkipsDeletedSlot(t *testing.T) {
+	page := InitializeTablePage(22)
+	for _, row := range [][]byte{{0x01}, {0x02, 0x03}, {0x04}} {
+		if _, err := InsertRowIntoTablePage(page, row); err != nil {
+			t.Fatalf("InsertRowIntoTablePage() error = %v", err)
+		}
+	}
+
+	if err := DeleteRowBySlot(page, 1); err != nil {
+		t.Fatalf("DeleteRowBySlot() error = %v", err)
+	}
+	if _, err := ExtractSlottedRowPayload(page, 1); !errors.Is(err, errCorruptedTablePage) {
+		t.Fatalf("ExtractSlottedRowPayload(deleted) error = %v, want %v", err, errCorruptedTablePage)
+	}
+
+	locators, err := TablePageLocators(page, 22)
+	if err != nil {
+		t.Fatalf("TablePageLocators() error = %v", err)
+	}
+	want := []RowLocator{{PageID: 22, SlotID: 0}, {PageID: 22, SlotID: 2}}
+	if len(locators) != len(want) {
+		t.Fatalf("len(locators) = %d, want %d", len(locators), len(want))
+	}
+	for i := range want {
+		if locators[i] != want[i] {
+			t.Fatalf("locators[%d] = %#v, want %#v", i, locators[i], want[i])
+		}
+	}
+
+	liveRows, err := TablePageLiveRowCount(page)
+	if err != nil {
+		t.Fatalf("TablePageLiveRowCount() error = %v", err)
+	}
+	if liveRows != 2 {
+		t.Fatalf("TablePageLiveRowCount() = %d, want 2", liveRows)
+	}
+}
+
 func TestCanFitRowFalseWhenInsufficientSpace(t *testing.T) {
 	page := InitializeTablePage(3)
 	rowLen := PageSize - tablePageBodyStart - tablePageSlotEntrySize + 1
