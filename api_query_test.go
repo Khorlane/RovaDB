@@ -488,7 +488,7 @@ func TestQueryAPIEligibleQualifiedIndexedProjectionRemainsCorrectAfterReopen(t *
 	}
 }
 
-func TestQueryAPIAliasedIndexedProjectionFallsBackToExistingPath(t *testing.T) {
+func TestQueryAPIAliasedIndexedProjectionSurvivesLegacyRootRemoval(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -517,15 +517,25 @@ func TestQueryAPIAliasedIndexedProjectionFallsBackToExistingPath(t *testing.T) {
 	}
 	defer rows.Close()
 
-	if rows.Next() {
-		t.Fatal("Next() = true, want false")
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
 	}
-	if rows.Err() == nil {
-		t.Fatal("Err() = nil, want fallback base-row path failure after table root removal")
+	var userID int
+	if err := rows.Scan(&userID); err != nil {
+		t.Fatalf("rows.Scan() error = %v", err)
+	}
+	if userID != 1 {
+		t.Fatalf("rows.Scan() = %d, want 1", userID)
+	}
+	if rows.Next() {
+		t.Fatal("Next() second = true, want false")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err() = %v", err)
 	}
 }
 
-func TestQueryAPIIndexedProjectionWithOrderByFallsBackToExistingPath(t *testing.T) {
+func TestQueryAPIIndexedProjectionWithOrderBySurvivesLegacyRootRemoval(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -554,15 +564,25 @@ func TestQueryAPIIndexedProjectionWithOrderByFallsBackToExistingPath(t *testing.
 	}
 	defer rows.Close()
 
-	if rows.Next() {
-		t.Fatal("Next() = true, want false")
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
 	}
-	if rows.Err() == nil {
-		t.Fatal("Err() = nil, want fallback base-row path failure after table root removal")
+	var id int
+	if err := rows.Scan(&id); err != nil {
+		t.Fatalf("rows.Scan() error = %v", err)
+	}
+	if id != 1 {
+		t.Fatalf("rows.Scan() = %d, want 1", id)
+	}
+	if rows.Next() {
+		t.Fatal("Next() second = true, want false")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err() = %v", err)
 	}
 }
 
-func TestQueryAPINonIndexedProjectionStillUsesExistingPath(t *testing.T) {
+func TestQueryAPINonIndexedProjectionSurvivesLegacyRootRemoval(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -591,11 +611,21 @@ func TestQueryAPINonIndexedProjectionStillUsesExistingPath(t *testing.T) {
 	}
 	defer rows.Close()
 
-	if rows.Next() {
-		t.Fatal("Next() = true, want false")
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
 	}
-	if rows.Err() == nil {
-		t.Fatal("Err() = nil, want base-row path failure after table root removal")
+	var name string
+	if err := rows.Scan(&name); err != nil {
+		t.Fatalf("rows.Scan() error = %v", err)
+	}
+	if name != "alice" {
+		t.Fatalf("rows.Scan() = %q, want %q", name, "alice")
+	}
+	if rows.Next() {
+		t.Fatal("Next() second = true, want false")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err() = %v", err)
 	}
 }
 

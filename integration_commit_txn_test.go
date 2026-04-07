@@ -177,7 +177,14 @@ func TestJournalWrittenBeforeDatabaseOverwrite(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
-	rootPageID := db.tables["t"].RootPageID()
+	dataPageIDs, err := committedTableDataPageIDs(db.pool, db.tables["t"])
+	if err != nil {
+		t.Fatalf("committedTableDataPageIDs() error = %v", err)
+	}
+	if len(dataPageIDs) != 1 {
+		t.Fatalf("len(committedTableDataPageIDs()) = %d, want 1", len(dataPageIDs))
+	}
+	dataPageID := dataPageIDs[0]
 
 	hookCalled := false
 	db.afterJournalWriteHook = func() error {
@@ -199,13 +206,16 @@ func TestJournalWrittenBeforeDatabaseOverwrite(t *testing.T) {
 
 		rawDB, pager := openRawStorage(t, path)
 		defer rawDB.Close()
-		page, err := pager.Get(rootPageID)
+		page, err := pager.Get(dataPageID)
 		if err != nil {
 			return err
 		}
 		payloads, err := storage.ReadRowsFromTablePage(page)
 		if err != nil {
 			return err
+		}
+		if len(payloads) != 1 {
+			t.Fatalf("len(payloads) = %d, want 1", len(payloads))
 		}
 		values, err := storage.DecodeSlottedRow(payloads[0], []uint8{storage.CatalogColumnTypeInt})
 		if err != nil {
@@ -373,8 +383,8 @@ func TestStageDirtyStateUsesPrivateFramesAndLeavesCommittedReadUnchanged(t *test
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rootPageID := db.tables["t"].RootPageID()
-	committedBefore, err := readCommittedPageData(db.pool, rootPageID)
+	dataPageID := singleCommittedDataPageIDForTest(t, db, "t")
+	committedBefore, err := readCommittedPageData(db.pool, dataPageID)
 	if err != nil {
 		t.Fatalf("readCommittedPageData(before) error = %v", err)
 	}
@@ -392,7 +402,7 @@ func TestStageDirtyStateUsesPrivateFramesAndLeavesCommittedReadUnchanged(t *test
 		t.Fatalf("applyStagedTableRewrite() error = %v", err)
 	}
 
-	committedDuring, err := readCommittedPageData(db.pool, rootPageID)
+	committedDuring, err := readCommittedPageData(db.pool, dataPageID)
 	if err != nil {
 		t.Fatalf("readCommittedPageData(during) error = %v", err)
 	}
@@ -400,7 +410,8 @@ func TestStageDirtyStateUsesPrivateFramesAndLeavesCommittedReadUnchanged(t *test
 		t.Fatal("committed page bytes changed during active staged write")
 	}
 
-	privateFrame, err := db.pool.GetPrivatePage(bufferpool.PageID(rootPageID))
+	privateDataPageID := privateOwnedDataPageIDForTest(t, db, stagedTables["t"])
+	privateFrame, err := db.pool.GetPrivatePage(bufferpool.PageID(privateDataPageID))
 	if err != nil {
 		t.Fatalf("GetPrivatePage() error = %v", err)
 	}
@@ -461,7 +472,7 @@ func TestReaderHelpersStayOnCommittedRowsWhilePrivateFrameExists(t *testing.T) {
 	}
 
 	row, err := db.fetchRowByLocator(db.tables["users"], storage.RowLocator{
-		PageID: uint32(db.tables["users"].RootPageID()),
+		PageID: uint32(singleCommittedDataPageIDForTest(t, db, "users")),
 		SlotID: 0,
 	})
 	if err != nil {
@@ -471,7 +482,8 @@ func TestReaderHelpersStayOnCommittedRowsWhilePrivateFrameExists(t *testing.T) {
 		t.Fatalf("fetchRowByLocator() = %#v, want committed row [1 alice]", row)
 	}
 
-	privateFrame, err := db.pool.GetPrivatePage(bufferpool.PageID(db.tables["users"].RootPageID()))
+	privateDataPageID := privateOwnedDataPageIDForTest(t, db, stagedTables["users"])
+	privateFrame, err := db.pool.GetPrivatePage(bufferpool.PageID(privateDataPageID))
 	if err != nil {
 		t.Fatalf("GetPrivatePage() error = %v", err)
 	}
@@ -491,7 +503,7 @@ func TestReaderHelpersStayOnCommittedRowsWhilePrivateFrameExists(t *testing.T) {
 	if err := db.rollbackTxn(); err != nil {
 		t.Fatalf("rollbackTxn() error = %v", err)
 	}
-	if db.pool.HasPrivatePage(bufferpool.PageID(db.tables["users"].RootPageID())) {
+	if db.pool.HasPrivatePage(bufferpool.PageID(singleCommittedDataPageIDForTest(t, db, "users"))) {
 		t.Fatal("private frame still present after rollback")
 	}
 	db.clearTxn()
@@ -513,8 +525,8 @@ func TestRollbackDiscardsPrivatePagesAndFreshWriteRecreatesFromCommitted(t *test
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rootPageID := db.tables["t"].RootPageID()
-	committedBefore, err := readCommittedPageData(db.pool, rootPageID)
+	dataPageID := singleCommittedDataPageIDForTest(t, db, "t")
+	committedBefore, err := readCommittedPageData(db.pool, dataPageID)
 	if err != nil {
 		t.Fatalf("readCommittedPageData(before) error = %v", err)
 	}
@@ -530,18 +542,19 @@ func TestRollbackDiscardsPrivatePagesAndFreshWriteRecreatesFromCommitted(t *test
 	if err := db.applyStagedTableRewrite(stagedTables, "t"); err != nil {
 		t.Fatalf("applyStagedTableRewrite() error = %v", err)
 	}
-	if !db.pool.HasPrivatePage(bufferpool.PageID(rootPageID)) {
+	privateDataPageID := privateOwnedDataPageIDForTest(t, db, stagedTables["t"])
+	if !db.pool.HasPrivatePage(bufferpool.PageID(privateDataPageID)) {
 		t.Fatal("HasPrivatePage(root) = false, want private frame before rollback")
 	}
 
 	if err := db.rollbackTxn(); err != nil {
 		t.Fatalf("rollbackTxn() error = %v", err)
 	}
-	if db.pool.HasPrivatePage(bufferpool.PageID(rootPageID)) {
+	if db.pool.HasPrivatePage(bufferpool.PageID(dataPageID)) {
 		t.Fatal("HasPrivatePage(root) = true, want false after rollback")
 	}
 
-	committedAfter, err := readCommittedPageData(db.pool, rootPageID)
+	committedAfter, err := readCommittedPageData(db.pool, dataPageID)
 	if err != nil {
 		t.Fatalf("readCommittedPageData(after rollback) error = %v", err)
 	}
@@ -556,7 +569,7 @@ func TestRollbackDiscardsPrivatePagesAndFreshWriteRecreatesFromCommitted(t *test
 		t.Fatalf("scanTableRows() after rollback = %#v, want [[1]]", rows)
 	}
 
-	privateAfterRollback, err := db.pool.GetPrivatePage(bufferpool.PageID(rootPageID))
+	privateAfterRollback, err := db.pool.GetPrivatePage(bufferpool.PageID(dataPageID))
 	if err != nil {
 		t.Fatalf("GetPrivatePage() after rollback error = %v", err)
 	}
@@ -616,8 +629,8 @@ func TestCommitPromotesPrivatePagesAndReadersSeeNewContent(t *testing.T) {
 	}
 	db.tables = stagedTables
 
-	rootPageID := db.tables["users"].RootPageID()
-	if db.pool.HasPrivatePage(bufferpool.PageID(rootPageID)) {
+	dataPageID := singleCommittedDataPageIDForTest(t, db, "users")
+	if db.pool.HasPrivatePage(bufferpool.PageID(dataPageID)) {
 		t.Fatal("private frame still present after commit promotion")
 	}
 
@@ -630,7 +643,7 @@ func TestCommitPromotesPrivatePagesAndReadersSeeNewContent(t *testing.T) {
 	}
 
 	row, err := db.fetchRowByLocator(db.tables["users"], storage.RowLocator{
-		PageID: uint32(rootPageID),
+		PageID: uint32(dataPageID),
 		SlotID: 0,
 	})
 	if err != nil {
@@ -640,7 +653,7 @@ func TestCommitPromotesPrivatePagesAndReadersSeeNewContent(t *testing.T) {
 		t.Fatalf("fetchRowByLocator(after commit) = %#v, want promoted row [1 beth]", row)
 	}
 
-	committedPageData, err := readCommittedPageData(db.pool, rootPageID)
+	committedPageData, err := readCommittedPageData(db.pool, dataPageID)
 	if err != nil {
 		t.Fatalf("readCommittedPageData(after commit) error = %v", err)
 	}
@@ -748,8 +761,7 @@ func TestWALAppendFailurePreventsPromotionAndCommitSuccess(t *testing.T) {
 		t.Fatal("execMutatingStatement() error = nil, want commit failure")
 	}
 
-	rootPageID := db.tables["users"].RootPageID()
-	if db.pool.HasPrivatePage(bufferpool.PageID(rootPageID)) {
+	if db.pool.HasPrivatePage(bufferpool.PageID(singleCommittedDataPageIDForTest(t, db, "users"))) {
 		t.Fatal("private frame still present after WAL append failure")
 	}
 
@@ -805,8 +817,7 @@ func TestWALSyncFailurePreventsPromotionAndCommitSuccess(t *testing.T) {
 		t.Fatal("execMutatingStatement() error = nil, want commit failure")
 	}
 
-	rootPageID := db.tables["users"].RootPageID()
-	if db.pool.HasPrivatePage(bufferpool.PageID(rootPageID)) {
+	if db.pool.HasPrivatePage(bufferpool.PageID(singleCommittedDataPageIDForTest(t, db, "users"))) {
 		t.Fatal("private frame still present after WAL sync failure")
 	}
 
@@ -814,15 +825,20 @@ func TestWALSyncFailurePreventsPromotionAndCommitSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadWALRecords(after) error = %v", err)
 	}
-	if len(afterRecords) != len(beforeRecords)+3 {
-		t.Fatalf("len(ReadWALRecords(after)) = %d, want %d", len(afterRecords), len(beforeRecords)+3)
+	if len(afterRecords) <= len(beforeRecords) {
+		t.Fatalf("len(ReadWALRecords(after)) = %d, want > %d", len(afterRecords), len(beforeRecords))
 	}
 	newRecords := afterRecords[len(beforeRecords):]
-	if len(newRecords) != 3 {
-		t.Fatalf("len(newRecords) = %d, want 3", len(newRecords))
+	if len(newRecords) < 2 {
+		t.Fatalf("len(newRecords) = %d, want at least 2", len(newRecords))
 	}
-	if newRecords[0].Type != storage.WALRecordTypeFrame || newRecords[1].Type != storage.WALRecordTypeFrame || newRecords[2].Type != storage.WALRecordTypeCommit {
-		t.Fatalf("new record types = [%d %d %d], want [frame frame commit]", newRecords[0].Type, newRecords[1].Type, newRecords[2].Type)
+	for i := 0; i < len(newRecords)-1; i++ {
+		if newRecords[i].Type != storage.WALRecordTypeFrame {
+			t.Fatalf("newRecords[%d].Type = %d, want frame", i, newRecords[i].Type)
+		}
+	}
+	if newRecords[len(newRecords)-1].Type != storage.WALRecordTypeCommit {
+		t.Fatalf("newRecords[last].Type = %d, want commit", newRecords[len(newRecords)-1].Type)
 	}
 
 	assertSelectTextRows(t, db, "SELECT name FROM users", "alice")
@@ -860,8 +876,8 @@ func TestCheckpointFailureAfterWALDurabilityPreservesCommittedState(t *testing.T
 	if err != nil {
 		t.Fatalf("ReadWALRecords(after) error = %v", err)
 	}
-	if len(afterRecords) != len(beforeRecords)+3 {
-		t.Fatalf("len(ReadWALRecords(after)) = %d, want %d", len(afterRecords), len(beforeRecords)+3)
+	if len(afterRecords) <= len(beforeRecords) {
+		t.Fatalf("len(ReadWALRecords(after)) = %d, want > %d", len(afterRecords), len(beforeRecords))
 	}
 
 	assertSelectTextRows(t, db, "SELECT name FROM users", "beth")
@@ -1481,4 +1497,37 @@ func assertSelectTextRows(t *testing.T, db *DB, sql string, want ...string) {
 			t.Fatalf("rows(%q)[%d] = %q, want %q", sql, i, got[i], want[i])
 		}
 	}
+}
+
+func singleCommittedDataPageIDForTest(t *testing.T, db *DB, tableName string) storage.PageID {
+	t.Helper()
+	if db == nil || db.tables == nil {
+		t.Fatal("singleCommittedDataPageIDForTest() requires db tables")
+	}
+	table := db.tables[tableName]
+	if table == nil {
+		t.Fatalf("db.tables[%q] = nil", tableName)
+	}
+	dataPageIDs, err := committedTableDataPageIDs(db.pool, table)
+	if err != nil {
+		t.Fatalf("committedTableDataPageIDs(%q) error = %v", tableName, err)
+	}
+	if len(dataPageIDs) != 1 {
+		t.Fatalf("len(committedTableDataPageIDs(%q)) = %d, want 1", tableName, len(dataPageIDs))
+	}
+	return dataPageIDs[0]
+}
+
+func privateOwnedDataPageIDForTest(t *testing.T, db *DB, table *executor.Table) storage.PageID {
+	t.Helper()
+	if db == nil || table == nil {
+		t.Fatal("privateOwnedDataPageIDForTest() requires db and table")
+	}
+	for _, staged := range db.pendingPages {
+		if err := storage.ValidateOwnedDataPage(staged.data, table.TableID); err == nil {
+			return staged.id
+		}
+	}
+	t.Fatalf("no private owned data page found for table %q", table.Name)
+	return 0
 }

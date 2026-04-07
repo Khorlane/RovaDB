@@ -528,7 +528,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		var committedTables map[string]*executor.Table
 		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
-			droppedRootPageIDs := droppedTableRootPageIDs(stagedTables, stmt.Name)
+			droppedRootPageIDs := droppedTableRootPageIDs(db.pool, stagedTables, stmt.Name)
 
 			var err error
 			rowsAffected, committedTables, err = executeDropTable(stmt, stagedTables)
@@ -943,20 +943,9 @@ func (db *DB) scanTableRows(table *executor.Table) ([][]parser.Value, error) {
 	if db.txView && table.Rows != nil {
 		return cloneRows(table.Rows), nil
 	}
-
-	pageData, err := readCommittedPageData(db.pool, table.RootPageID())
-	if err != nil {
-		return nil, wrapStorageError(err)
-	}
-	if pageData == nil {
-		return nil, newStorageError("corrupted table page")
-	}
-	rows, err := decodePersistedTableRows(pageData, table.Columns)
+	_, rows, err := loadCommittedTableRowsAndLocators(db.pool, table)
 	if err != nil {
 		return nil, err
-	}
-	if uint32(len(rows)) != table.PersistedRowCount() {
-		return nil, newStorageError("row count mismatch")
 	}
 	return cloneRows(rows), nil
 }
@@ -1262,26 +1251,9 @@ func (db *DB) committedTableLocators(table *executor.Table) ([]storage.RowLocato
 	if db == nil || table == nil {
 		return nil, ErrInvalidArgument
 	}
-	if table.RootPageID() == 0 {
-		return nil, newStorageError("corrupted table page")
-	}
-	if len(table.Rows) == 0 {
-		if table.PersistedRowCount() != 0 {
-			return nil, newStorageError("row locator mismatch")
-		}
-		return nil, nil
-	}
-
-	pageData, err := readCommittedPageData(db.pool, table.RootPageID())
+	locators, persistedRows, err := loadCommittedTableRowsAndLocators(db.pool, table)
 	if err != nil {
-		return nil, wrapStorageError(err)
-	}
-	if pageData == nil {
-		return nil, newStorageError("corrupted table page")
-	}
-	locators, persistedRows, err := storage.ReadSlottedRowsWithLocators(pageData, uint32(table.RootPageID()), storageColumnTypes(table.Columns))
-	if err != nil {
-		return nil, wrapStorageError(err)
+		return nil, err
 	}
 	if len(locators) != len(table.Rows) || len(persistedRows) != len(table.Rows) {
 		return nil, newStorageError("row locator mismatch")
@@ -1657,32 +1629,28 @@ func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, t
 	// table root-page rewrite. This is the intentional fallback path when the
 	// planner/executor cannot use a narrower persistence strategy.
 	table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
-
-	tablePageData, locators, err := storage.BuildSlottedTablePageDataWithLocators(uint32(table.RootPageID()), table.Rows)
+	originalFreeListHead := db.freeListHead
+	pages, locators, err := db.stageTableRewriteViaPhysicalStorage(table, table.Rows, false)
 	if err != nil {
-		return wrapStorageError(err)
-	}
-	if len(locators) != len(table.Rows) {
-		return newStorageError("row locator mismatch")
+		db.freeListHead = originalFreeListHead
+		return err
 	}
 
-	pages := []stagedPage{{
-		id:   table.RootPageID(),
-		data: tablePageData,
-	}}
-
-	indexPages, err := db.buildRebuiltIndexPages(table, table.Rows, locators)
+	indexPages, err := db.buildRebuiltIndexPages(table, table.Rows, locators, nextFreshPageIDAfter(pages, db.pager.NextPageID()))
 	if err != nil {
+		db.freeListHead = originalFreeListHead
 		return err
 	}
 	pages = append(pages, indexPages...)
 
 	catalogData, err := db.buildCatalogPageData(stagedTables, pages)
 	if err != nil {
+		db.freeListHead = originalFreeListHead
 		return wrapStorageError(err)
 	}
 
 	if err := db.stageDirtyState(catalogData, pages); err != nil {
+		db.freeListHead = originalFreeListHead
 		return err
 	}
 	return nil
@@ -1699,30 +1667,339 @@ func (db *DB) applyStagedInsert(stagedTables map[string]*executor.Table, tableNa
 	}
 
 	table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
-	tablePageData, locators, err := storage.BuildSlottedTablePageDataWithLocators(uint32(table.RootPageID()), table.Rows)
-	if err != nil {
-		return wrapStorageError(err)
-	}
-	if len(table.Rows) == 0 || len(locators) != len(table.Rows) {
+	if len(table.Rows) == 0 {
 		return newStorageError("row locator mismatch")
 	}
-
-	pages := []stagedPage{{
-		id:   table.RootPageID(),
-		data: tablePageData,
-	}}
-
-	indexPages, err := db.buildInsertedIndexPages(table, table.Rows[len(table.Rows)-1], locators[len(locators)-1])
+	originalFreeListHead := db.freeListHead
+	pages, locator, err := db.stageTableInsertViaPhysicalStorage(table, table.Rows[len(table.Rows)-1])
 	if err != nil {
+		db.freeListHead = originalFreeListHead
+		return err
+	}
+
+	indexPages, err := db.buildInsertedIndexPages(table, table.Rows[len(table.Rows)-1], locator, nextFreshPageIDAfter(pages, db.pager.NextPageID()))
+	if err != nil {
+		db.freeListHead = originalFreeListHead
 		return err
 	}
 	pages = append(pages, indexPages...)
 
 	catalogData, err := db.buildCatalogPageData(stagedTables, pages)
 	if err != nil {
+		db.freeListHead = originalFreeListHead
 		return wrapStorageError(err)
 	}
 	return db.stageDirtyState(catalogData, pages)
+}
+
+func stagePageImage(staged map[storage.PageID]stagedPage, order *[]storage.PageID, id storage.PageID, data []byte, isNew bool) {
+	if _, exists := staged[id]; !exists {
+		*order = append(*order, id)
+	}
+	staged[id] = stagedPage{
+		id:    id,
+		data:  data,
+		isNew: isNew,
+	}
+}
+
+func (db *DB) mutablePageImage(staged map[storage.PageID]stagedPage, order *[]storage.PageID, pageID storage.PageID) ([]byte, error) {
+	if existing, ok := staged[pageID]; ok {
+		return existing.data, nil
+	}
+	pageData, err := db.pager.ReadPage(pageID)
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+	cloned := append([]byte(nil), pageData...)
+	stagePageImage(staged, order, pageID, cloned, false)
+	return cloned, nil
+}
+
+func (db *DB) allocatePageImage(nextFreshID *storage.PageID, staged map[storage.PageID]stagedPage, order *[]storage.PageID, init func(pageID storage.PageID) []byte) (storage.PageID, []byte, error) {
+	pageID, isNew, err := db.allocatePageIDFrom(nextFreshID)
+	if err != nil {
+		return 0, nil, err
+	}
+	pageData := init(pageID)
+	stagePageImage(staged, order, pageID, pageData, isNew)
+	return pageID, pageData, nil
+}
+
+func (db *DB) stageTableInsertViaPhysicalStorage(table *executor.Table, row []parser.Value) ([]stagedPage, storage.RowLocator, error) {
+	nextFreshID := db.pager.NextPageID()
+	staged := make(map[storage.PageID]stagedPage)
+	order := make([]storage.PageID, 0)
+	locator, err := db.insertRowIntoPhysicalStorageState(table, row, &nextFreshID, staged, &order)
+	if err != nil {
+		return nil, storage.RowLocator{}, err
+	}
+	return finalizedStagedPages(staged, order), locator, nil
+}
+
+func (db *DB) stageTableRewriteViaPhysicalStorage(table *executor.Table, rows [][]parser.Value, allowFreshHeaderBootstrap bool) ([]stagedPage, []storage.RowLocator, error) {
+	if db == nil || table == nil {
+		return nil, nil, ErrInvalidArgument
+	}
+	nextFreshID := db.pager.NextPageID()
+	staged := make(map[storage.PageID]stagedPage)
+	order := make([]storage.PageID, 0)
+
+	spaceMapPageIDs, dataPageIDs, err := committedTablePhysicalStorageInventory(db.pool, table)
+	if err != nil {
+		return nil, nil, err
+	}
+	headerPage, err := db.mutablePageImage(staged, &order, table.TableHeaderPageID())
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := storage.ValidateTableHeaderPage(headerPage); err != nil {
+		if !allowFreshHeaderBootstrap || table.TableHeaderPageID() == 0 || table.TableID == 0 || table.FirstSpaceMapPageID() != 0 || table.OwnedDataPageCount() != 0 || table.OwnedSpaceMapPageCount() != 0 {
+			return nil, nil, wrapStorageError(err)
+		}
+		headerPage = storage.InitTableHeaderPage(uint32(table.TableHeaderPageID()), table.TableID)
+		stagePageImage(staged, &order, table.TableHeaderPageID(), headerPage, true)
+	}
+	if err := storage.SetTableHeaderOwnedDataPageCount(headerPage, 0); err != nil {
+		return nil, nil, wrapStorageError(err)
+	}
+	if err := storage.SetTableHeaderOwnedSpaceMapPageCount(headerPage, 0); err != nil {
+		return nil, nil, wrapStorageError(err)
+	}
+	if err := storage.SetTableHeaderFirstSpaceMapPageID(headerPage, 0); err != nil {
+		return nil, nil, wrapStorageError(err)
+	}
+	table.SetPhysicalTableRootMeta(table.TableHeaderPageID(), table.TableStorageFormatVersion(), 0, 0, 0)
+
+	locators := make([]storage.RowLocator, 0, len(rows))
+	for _, row := range rows {
+		locator, err := db.insertRowIntoPhysicalStorageState(table, row, &nextFreshID, staged, &order)
+		if err != nil {
+			return nil, nil, err
+		}
+		locators = append(locators, locator)
+	}
+	if len(spaceMapPageIDs) != 0 || len(dataPageIDs) != 0 {
+		freedPages, err := db.buildFreedPages(append(spaceMapPageIDs, dataPageIDs...)...)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, freed := range freedPages {
+			stagePageImage(staged, &order, freed.id, freed.data, freed.isNew)
+		}
+	}
+	return finalizedStagedPages(staged, order), locators, nil
+}
+
+func finalizedStagedPages(staged map[storage.PageID]stagedPage, order []storage.PageID) []stagedPage {
+	pages := make([]stagedPage, 0, len(order))
+	for _, pageID := range order {
+		pages = append(pages, staged[pageID])
+	}
+	return pages
+}
+
+func (db *DB) insertRowIntoPhysicalStorageState(table *executor.Table, row []parser.Value, nextFreshID *storage.PageID, staged map[storage.PageID]stagedPage, order *[]storage.PageID) (storage.RowLocator, error) {
+	if db == nil || table == nil || nextFreshID == nil {
+		return storage.RowLocator{}, ErrInvalidArgument
+	}
+	if table.TableHeaderPageID() == 0 {
+		return storage.RowLocator{}, newStorageError("corrupted header page")
+	}
+
+	headerPage, err := db.mutablePageImage(staged, order, table.TableHeaderPageID())
+	if err != nil {
+		return storage.RowLocator{}, err
+	}
+	if err := storage.ValidateTableHeaderPage(headerPage); err != nil {
+		return storage.RowLocator{}, wrapStorageError(err)
+	}
+
+	rowBytes, err := storage.EncodeSlottedRow(row)
+	if err != nil {
+		return storage.RowLocator{}, wrapStorageError(err)
+	}
+
+	firstSpaceMapID := table.FirstSpaceMapPageID()
+	var targetDataPage storage.PageID
+	var targetSpaceMapPage storage.PageID
+	targetEntryID := -1
+	lastSpaceMapPageID := storage.PageID(0)
+
+	for currentSpaceMapID := firstSpaceMapID; currentSpaceMapID != 0; {
+		lastSpaceMapPageID = currentSpaceMapID
+		spaceMapPage, err := db.mutablePageImage(staged, order, currentSpaceMapID)
+		if err != nil {
+			return storage.RowLocator{}, err
+		}
+		if err := storage.ValidateSpaceMapPage(spaceMapPage); err != nil {
+			return storage.RowLocator{}, wrapStorageError(err)
+		}
+		owningTableID, err := storage.SpaceMapOwningTableID(spaceMapPage)
+		if err != nil {
+			return storage.RowLocator{}, wrapStorageError(err)
+		}
+		if owningTableID != table.TableID {
+			return storage.RowLocator{}, newStorageError("corrupted space map page")
+		}
+		entryCount, err := storage.SpaceMapEntryCount(spaceMapPage)
+		if err != nil {
+			return storage.RowLocator{}, wrapStorageError(err)
+		}
+		for entryID := 0; entryID < entryCount; entryID++ {
+			entry, err := storage.SpaceMapPageEntry(spaceMapPage, entryID)
+			if err != nil {
+				return storage.RowLocator{}, wrapStorageError(err)
+			}
+			if entry.FreeSpaceBucket == storage.SpaceMapBucketFull {
+				continue
+			}
+			dataPage, err := db.mutablePageImage(staged, order, entry.DataPageID)
+			if err != nil {
+				return storage.RowLocator{}, err
+			}
+			if err := storage.ValidateOwnedDataPage(dataPage, table.TableID); err != nil {
+				return storage.RowLocator{}, wrapStorageError(err)
+			}
+			fit, err := storage.CanFitRow(dataPage, len(rowBytes))
+			if err != nil {
+				return storage.RowLocator{}, wrapStorageError(err)
+			}
+			if !fit {
+				bucket, err := storage.TablePageFreeSpaceBucket(dataPage)
+				if err != nil {
+					return storage.RowLocator{}, wrapStorageError(err)
+				}
+				if bucket != entry.FreeSpaceBucket {
+					if err := storage.UpdateSpaceMapEntry(spaceMapPage, entryID, storage.SpaceMapEntry{
+						DataPageID:      entry.DataPageID,
+						FreeSpaceBucket: bucket,
+					}); err != nil {
+						return storage.RowLocator{}, wrapStorageError(err)
+					}
+				}
+				continue
+			}
+			targetDataPage = entry.DataPageID
+			targetSpaceMapPage = currentSpaceMapID
+			targetEntryID = entryID
+			break
+		}
+		if targetDataPage != 0 {
+			break
+		}
+		nextSpaceMapID, err := storage.SpaceMapNextPageID(spaceMapPage)
+		if err != nil {
+			return storage.RowLocator{}, wrapStorageError(err)
+		}
+		currentSpaceMapID = storage.PageID(nextSpaceMapID)
+	}
+
+	var dataPage []byte
+	if targetDataPage == 0 {
+		var spaceMapPage []byte
+		if firstSpaceMapID == 0 {
+			targetSpaceMapPage, spaceMapPage, err = db.allocatePageImage(nextFreshID, staged, order, func(pageID storage.PageID) []byte {
+				return storage.InitSpaceMapPage(uint32(pageID), table.TableID)
+			})
+			if err != nil {
+				return storage.RowLocator{}, err
+			}
+			if err := storage.SetTableHeaderFirstSpaceMapPageID(headerPage, uint32(targetSpaceMapPage)); err != nil {
+				return storage.RowLocator{}, wrapStorageError(err)
+			}
+			if err := storage.SetTableHeaderOwnedSpaceMapPageCount(headerPage, table.OwnedSpaceMapPageCount()+1); err != nil {
+				return storage.RowLocator{}, wrapStorageError(err)
+			}
+			table.SetPhysicalTableRootMeta(table.TableHeaderPageID(), table.TableStorageFormatVersion(), targetSpaceMapPage, table.OwnedDataPageCount(), table.OwnedSpaceMapPageCount()+1)
+		} else {
+			spaceMapPage, err = db.mutablePageImage(staged, order, lastSpaceMapPageID)
+			if err != nil {
+				return storage.RowLocator{}, err
+			}
+			entryCount, err := storage.SpaceMapEntryCount(spaceMapPage)
+			if err != nil {
+				return storage.RowLocator{}, wrapStorageError(err)
+			}
+			if entryCount >= storage.SpaceMapPageEntryCapacity() {
+				targetSpaceMapPage, _, err = db.allocatePageImage(nextFreshID, staged, order, func(pageID storage.PageID) []byte {
+					return storage.InitSpaceMapPage(uint32(pageID), table.TableID)
+				})
+				if err != nil {
+					return storage.RowLocator{}, err
+				}
+				if err := storage.SetSpaceMapNextPageID(spaceMapPage, uint32(targetSpaceMapPage)); err != nil {
+					return storage.RowLocator{}, wrapStorageError(err)
+				}
+				spaceMapPage, err = db.mutablePageImage(staged, order, targetSpaceMapPage)
+				if err != nil {
+					return storage.RowLocator{}, err
+				}
+				if err := storage.SetTableHeaderOwnedSpaceMapPageCount(headerPage, table.OwnedSpaceMapPageCount()+1); err != nil {
+					return storage.RowLocator{}, wrapStorageError(err)
+				}
+				table.SetPhysicalTableRootMeta(table.TableHeaderPageID(), table.TableStorageFormatVersion(), table.FirstSpaceMapPageID(), table.OwnedDataPageCount(), table.OwnedSpaceMapPageCount()+1)
+			} else {
+				targetSpaceMapPage = lastSpaceMapPageID
+			}
+		}
+
+		targetDataPage, dataPage, err = db.allocatePageImage(nextFreshID, staged, order, func(pageID storage.PageID) []byte {
+			return storage.InitOwnedDataPage(uint32(pageID), table.TableID)
+		})
+		if err != nil {
+			return storage.RowLocator{}, err
+		}
+		slotID, err := storage.InsertRowIntoTablePage(dataPage, rowBytes)
+		if err != nil {
+			return storage.RowLocator{}, wrapStorageError(err)
+		}
+		bucket, err := storage.TablePageFreeSpaceBucket(dataPage)
+		if err != nil {
+			return storage.RowLocator{}, wrapStorageError(err)
+		}
+		spaceMapPage, err = db.mutablePageImage(staged, order, targetSpaceMapPage)
+		if err != nil {
+			return storage.RowLocator{}, err
+		}
+		entryID, err := storage.AppendSpaceMapEntry(spaceMapPage, storage.SpaceMapEntry{
+			DataPageID:      targetDataPage,
+			FreeSpaceBucket: bucket,
+		})
+		if err != nil {
+			return storage.RowLocator{}, wrapStorageError(err)
+		}
+		targetEntryID = entryID
+		if err := storage.SetTableHeaderOwnedDataPageCount(headerPage, table.OwnedDataPageCount()+1); err != nil {
+			return storage.RowLocator{}, wrapStorageError(err)
+		}
+		table.SetPhysicalTableRootMeta(table.TableHeaderPageID(), table.TableStorageFormatVersion(), table.FirstSpaceMapPageID(), table.OwnedDataPageCount()+1, table.OwnedSpaceMapPageCount())
+		return storage.RowLocator{PageID: uint32(targetDataPage), SlotID: uint16(slotID)}, nil
+	}
+
+	dataPage, err = db.mutablePageImage(staged, order, targetDataPage)
+	if err != nil {
+		return storage.RowLocator{}, err
+	}
+	slotID, err := storage.InsertRowIntoTablePage(dataPage, rowBytes)
+	if err != nil {
+		return storage.RowLocator{}, wrapStorageError(err)
+	}
+	bucket, err := storage.TablePageFreeSpaceBucket(dataPage)
+	if err != nil {
+		return storage.RowLocator{}, wrapStorageError(err)
+	}
+	spaceMapPage, err := db.mutablePageImage(staged, order, targetSpaceMapPage)
+	if err != nil {
+		return storage.RowLocator{}, err
+	}
+	if err := storage.UpdateSpaceMapEntry(spaceMapPage, targetEntryID, storage.SpaceMapEntry{
+		DataPageID:      targetDataPage,
+		FreeSpaceBucket: bucket,
+	}); err != nil {
+		return storage.RowLocator{}, wrapStorageError(err)
+	}
+	return storage.RowLocator{PageID: uint32(targetDataPage), SlotID: uint16(slotID)}, nil
 }
 
 func (db *DB) applyStagedCatalogOnly(stagedTables map[string]*executor.Table) error {
@@ -1810,7 +2087,7 @@ func (db *DB) applyStagedIndexCreate(stagedTables map[string]*executor.Table, ta
 		if err != nil {
 			return err
 		}
-		indexPages, err := db.buildRebuiltIndexPagesForDefs(table, table.Rows, locators, []*storage.CatalogIndex{indexDef})
+		indexPages, err := db.buildRebuiltIndexPagesForDefs(table, table.Rows, locators, []*storage.CatalogIndex{indexDef}, db.pager.NextPageID())
 		if err != nil {
 			return err
 		}
@@ -2497,12 +2774,12 @@ func (s *indexPageStager) finalizedPages() []stagedPage {
 	return pages
 }
 
-func (db *DB) buildInsertedIndexPages(table *executor.Table, row []parser.Value, locator storage.RowLocator) ([]stagedPage, error) {
+func (db *DB) buildInsertedIndexPages(table *executor.Table, row []parser.Value, locator storage.RowLocator, startNextFreshID storage.PageID) ([]stagedPage, error) {
 	if db == nil || table == nil || len(table.IndexDefs) == 0 {
 		return nil, nil
 	}
 
-	nextFreshID := db.pager.NextPageID()
+	nextFreshID := startNextFreshID
 	stager := newIndexPageStager(nextFreshID, func() (storage.PageID, bool, error) {
 		return db.allocatePageIDFrom(&nextFreshID)
 	})
@@ -2552,18 +2829,14 @@ func (db *DB) persistPublicTxState(stagedTables map[string]*executor.Table) erro
 		table := stagedTables[tableName]
 		table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
 
-		tablePageData, locators, err := storage.BuildSlottedTablePageDataWithLocators(uint32(table.RootPageID()), table.Rows)
+		tablePages, locators, err := db.stageTableRewriteViaPhysicalStorage(table, table.Rows, true)
 		if err != nil {
 			db.freeListHead = originalFreeListHead
-			return wrapStorageError(err)
+			return err
 		}
-		pages = append(pages, stagedPage{
-			id:    table.RootPageID(),
-			data:  tablePageData,
-			isNew: newRoots[table.RootPageID()],
-		})
+		pages = append(pages, tablePages...)
 
-		indexPages, err := db.buildPublicTxRebuiltIndexPages(table, table.Rows, locators, newRoots)
+		indexPages, err := db.buildPublicTxRebuiltIndexPages(table, table.Rows, locators, newRoots, nextFreshPageIDAfter(pages, db.pager.NextPageID()))
 		if err != nil {
 			db.freeListHead = originalFreeListHead
 			return err
@@ -2606,6 +2879,13 @@ func (db *DB) assignPublicTxSnapshotMetadata(stagedTables map[string]*executor.T
 			table.SetStorageMeta(rootPageID, table.PersistedRowCount())
 			newRoots[rootPageID] = isNew
 		}
+		if table.TableHeaderPageID() == 0 {
+			tableHeaderPageID, _, err := db.allocatePageID()
+			if err != nil {
+				return nil, err
+			}
+			table.SetPhysicalTableRootMeta(tableHeaderPageID, storage.CurrentTableStorageFormatVersion, 0, 0, 0)
+		}
 		for i := range table.IndexDefs {
 			indexDef := &table.IndexDefs[i]
 			if indexDef.IndexID == 0 {
@@ -2625,7 +2905,7 @@ func (db *DB) assignPublicTxSnapshotMetadata(stagedTables map[string]*executor.T
 	return newRoots, nil
 }
 
-func (db *DB) buildPublicTxRebuiltIndexPages(table *executor.Table, rows [][]parser.Value, locators []storage.RowLocator, newRoots map[storage.PageID]bool) ([]stagedPage, error) {
+func (db *DB) buildPublicTxRebuiltIndexPages(table *executor.Table, rows [][]parser.Value, locators []storage.RowLocator, newRoots map[storage.PageID]bool, startNextFreshID storage.PageID) ([]stagedPage, error) {
 	if db == nil || table == nil || len(table.IndexDefs) == 0 {
 		return nil, nil
 	}
@@ -2633,7 +2913,7 @@ func (db *DB) buildPublicTxRebuiltIndexPages(table *executor.Table, rows [][]par
 		return nil, newStorageError("row locator mismatch")
 	}
 
-	nextFreshID := db.pager.NextPageID()
+	nextFreshID := startNextFreshID
 	for pageID, isNew := range newRoots {
 		if isNew && pageID >= nextFreshID {
 			nextFreshID = pageID + 1
@@ -2667,7 +2947,7 @@ func (db *DB) buildPublicTxRebuiltIndexPages(table *executor.Table, rows [][]par
 	return stager.finalizedPages(), nil
 }
 
-func (db *DB) buildRebuiltIndexPages(table *executor.Table, rows [][]parser.Value, locators []storage.RowLocator) ([]stagedPage, error) {
+func (db *DB) buildRebuiltIndexPages(table *executor.Table, rows [][]parser.Value, locators []storage.RowLocator, startNextFreshID storage.PageID) ([]stagedPage, error) {
 	if db == nil || table == nil || len(table.IndexDefs) == 0 {
 		return nil, nil
 	}
@@ -2675,10 +2955,10 @@ func (db *DB) buildRebuiltIndexPages(table *executor.Table, rows [][]parser.Valu
 	for i := range table.IndexDefs {
 		indexDefs = append(indexDefs, &table.IndexDefs[i])
 	}
-	return db.buildRebuiltIndexPagesForDefs(table, rows, locators, indexDefs)
+	return db.buildRebuiltIndexPagesForDefs(table, rows, locators, indexDefs, startNextFreshID)
 }
 
-func (db *DB) buildRebuiltIndexPagesForDefs(table *executor.Table, rows [][]parser.Value, locators []storage.RowLocator, indexDefs []*storage.CatalogIndex) ([]stagedPage, error) {
+func (db *DB) buildRebuiltIndexPagesForDefs(table *executor.Table, rows [][]parser.Value, locators []storage.RowLocator, indexDefs []*storage.CatalogIndex, startNextFreshID storage.PageID) ([]stagedPage, error) {
 	if db == nil || table == nil || len(table.IndexDefs) == 0 {
 		return nil, nil
 	}
@@ -2686,7 +2966,7 @@ func (db *DB) buildRebuiltIndexPagesForDefs(table *executor.Table, rows [][]pars
 		return nil, newStorageError("row locator mismatch")
 	}
 
-	nextFreshID := db.pager.NextPageID()
+	nextFreshID := startNextFreshID
 	stager := newIndexPageStager(nextFreshID, func() (storage.PageID, bool, error) {
 		return db.allocatePageIDFrom(&nextFreshID)
 	})
@@ -3280,7 +3560,7 @@ func droppedIndexRootForName(tables map[string]*executor.Table, indexName string
 	return "", 0
 }
 
-func droppedTableRootPageIDs(tables map[string]*executor.Table, tableName string) []storage.PageID {
+func droppedTableRootPageIDs(pool *bufferpool.BufferPool, tables map[string]*executor.Table, tableName string) []storage.PageID {
 	table := tables[tableName]
 	if table == nil {
 		return nil
@@ -3297,9 +3577,16 @@ func droppedTableRootPageIDs(tables map[string]*executor.Table, tableName string
 	}
 	sort.Strings(indexNames)
 
-	pageIDs := make([]storage.PageID, 0, len(indexNames)+2)
+	pageIDs := make([]storage.PageID, 0, len(indexNames)+2+int(table.OwnedSpaceMapPageCount())+int(table.OwnedDataPageCount()))
 	if table.TableHeaderPageID() != 0 {
 		pageIDs = append(pageIDs, table.TableHeaderPageID())
+	}
+	if pool != nil && table.FirstSpaceMapPageID() != 0 {
+		spaceMapPageIDs, dataPageIDs, err := committedTablePhysicalStorageInventory(pool, table)
+		if err == nil {
+			pageIDs = append(pageIDs, spaceMapPageIDs...)
+			pageIDs = append(pageIDs, dataPageIDs...)
+		}
 	}
 	for _, indexName := range indexNames {
 		pageIDs = append(pageIDs, indexRoots[indexName])
@@ -3395,20 +3682,9 @@ func loadPersistedRows(pool *bufferpool.BufferPool, tables map[string]*executor.
 		if table == nil {
 			continue
 		}
-
-		pageData, err := readCommittedPageData(pool, table.RootPageID())
-		if err != nil {
-			return wrapStorageError(err)
-		}
-		if pageData == nil {
-			return newStorageError("corrupted table page")
-		}
-		rows, err := decodePersistedTableRows(pageData, table.Columns)
+		_, rows, err := loadCommittedTableRowsAndLocators(pool, table)
 		if err != nil {
 			return err
-		}
-		if uint32(len(rows)) != table.PersistedRowCount() {
-			return newStorageError("row count mismatch")
 		}
 
 		table.Rows = table.Rows[:0]
@@ -3469,7 +3745,7 @@ func (db *DB) fetchRowByLocator(table *executor.Table, locator storage.RowLocato
 	if db == nil || table == nil {
 		return nil, ErrInvalidArgument
 	}
-	if locator.PageID == 0 || storage.PageID(locator.PageID) != table.RootPageID() {
+	if locator.PageID == 0 {
 		return nil, newStorageError("corrupted table page")
 	}
 
@@ -3480,12 +3756,168 @@ func (db *DB) fetchRowByLocator(table *executor.Table, locator storage.RowLocato
 	if pageData == nil {
 		return nil, newStorageError("corrupted table page")
 	}
+	if table.FirstSpaceMapPageID() != 0 {
+		if err := storage.ValidateOwnedDataPage(pageData, table.TableID); err != nil {
+			return nil, wrapStorageError(err)
+		}
+	} else if storage.PageID(locator.PageID) != table.RootPageID() {
+		return nil, newStorageError("corrupted table page")
+	}
 
 	row, err := storage.ReadRowByLocatorFromTablePageData(pageData, locator, storageColumnTypes(table.Columns))
 	if err != nil {
 		return nil, wrapStorageError(err)
 	}
 	return append([]parser.Value(nil), row...), nil
+}
+
+func loadCommittedTableRowsAndLocators(pool *bufferpool.BufferPool, table *executor.Table) ([]storage.RowLocator, [][]parser.Value, error) {
+	if pool == nil || table == nil {
+		return nil, nil, ErrInvalidArgument
+	}
+	if table.FirstSpaceMapPageID() == 0 {
+		if table.RootPageID() == 0 {
+			return nil, nil, newStorageError("corrupted table page")
+		}
+		pageData, err := readCommittedPageData(pool, table.RootPageID())
+		if err != nil {
+			return nil, nil, wrapStorageError(err)
+		}
+		if pageData == nil {
+			return nil, nil, newStorageError("corrupted table page")
+		}
+		var (
+			locators []storage.RowLocator
+			rows     [][]parser.Value
+			readErr  error
+		)
+		if storage.IsSlottedTablePage(pageData) {
+			locators, rows, readErr = storage.ReadSlottedRowsWithLocators(pageData, uint32(table.RootPageID()), storageColumnTypes(table.Columns))
+			if readErr != nil {
+				return nil, nil, wrapStorageError(readErr)
+			}
+		} else {
+			rows, readErr = decodePersistedTableRows(pageData, table.Columns)
+			if readErr != nil {
+				return nil, nil, readErr
+			}
+			locators = make([]storage.RowLocator, 0, len(rows))
+			for rowIndex := range rows {
+				locators = append(locators, storage.RowLocator{
+					PageID: uint32(table.RootPageID()),
+					SlotID: uint16(rowIndex),
+				})
+			}
+		}
+		if uint32(len(rows)) != table.PersistedRowCount() {
+			return nil, nil, newStorageError("row count mismatch")
+		}
+		return locators, rows, nil
+	}
+
+	_, dataPageIDs, err := committedTablePhysicalStorageInventory(pool, table)
+	if err != nil {
+		return nil, nil, err
+	}
+	locators := make([]storage.RowLocator, 0)
+	rows := make([][]parser.Value, 0)
+	for _, pageID := range dataPageIDs {
+		pageData, err := readCommittedPageData(pool, pageID)
+		if err != nil {
+			return nil, nil, wrapStorageError(err)
+		}
+		if pageData == nil {
+			return nil, nil, newStorageError("corrupted table page")
+		}
+		if err := storage.ValidateOwnedDataPage(pageData, table.TableID); err != nil {
+			return nil, nil, wrapStorageError(err)
+		}
+		pageLocators, pageRows, err := storage.ReadSlottedRowsWithLocators(pageData, uint32(pageID), storageColumnTypes(table.Columns))
+		if err != nil {
+			return nil, nil, wrapStorageError(err)
+		}
+		locators = append(locators, pageLocators...)
+		rows = append(rows, pageRows...)
+	}
+	if uint32(len(rows)) != table.PersistedRowCount() {
+		return nil, nil, newStorageError("row count mismatch")
+	}
+	return locators, rows, nil
+}
+
+func committedTableDataPageIDs(pool *bufferpool.BufferPool, table *executor.Table) ([]storage.PageID, error) {
+	_, dataPageIDs, err := committedTablePhysicalStorageInventory(pool, table)
+	return dataPageIDs, err
+}
+
+func committedTablePhysicalStorageInventory(pool *bufferpool.BufferPool, table *executor.Table) ([]storage.PageID, []storage.PageID, error) {
+	if table == nil {
+		return nil, nil, ErrInvalidArgument
+	}
+	if table.FirstSpaceMapPageID() == 0 {
+		return nil, nil, nil
+	}
+	if pool == nil {
+		return nil, nil, newStorageError("corrupted space map page")
+	}
+
+	seenSpaceMaps := make(map[storage.PageID]struct{})
+	spaceMapPageIDs := make([]storage.PageID, 0, table.OwnedSpaceMapPageCount())
+	dataPageIDs := make([]storage.PageID, 0, table.OwnedDataPageCount())
+	seenDataPages := make(map[storage.PageID]struct{}, table.OwnedDataPageCount())
+	nextSpaceMapID := table.FirstSpaceMapPageID()
+	for nextSpaceMapID != 0 {
+		if _, exists := seenSpaceMaps[nextSpaceMapID]; exists {
+			return nil, nil, newStorageError("corrupted space map page")
+		}
+		seenSpaceMaps[nextSpaceMapID] = struct{}{}
+		spaceMapPageIDs = append(spaceMapPageIDs, nextSpaceMapID)
+
+		pageData, err := readCommittedPageData(pool, nextSpaceMapID)
+		if err != nil {
+			return nil, nil, wrapStorageError(err)
+		}
+		if pageData == nil {
+			return nil, nil, newStorageError("corrupted space map page")
+		}
+		if err := storage.ValidateSpaceMapPage(pageData); err != nil {
+			return nil, nil, wrapStorageError(err)
+		}
+		owningTableID, err := storage.SpaceMapOwningTableID(pageData)
+		if err != nil {
+			return nil, nil, wrapStorageError(err)
+		}
+		if owningTableID != table.TableID {
+			return nil, nil, newStorageError("corrupted space map page")
+		}
+		entryCount, err := storage.SpaceMapEntryCount(pageData)
+		if err != nil {
+			return nil, nil, wrapStorageError(err)
+		}
+		for entryID := 0; entryID < entryCount; entryID++ {
+			entry, err := storage.SpaceMapPageEntry(pageData, entryID)
+			if err != nil {
+				return nil, nil, wrapStorageError(err)
+			}
+			if _, exists := seenDataPages[entry.DataPageID]; exists {
+				return nil, nil, newStorageError("corrupted space map page")
+			}
+			seenDataPages[entry.DataPageID] = struct{}{}
+			dataPageIDs = append(dataPageIDs, entry.DataPageID)
+		}
+		nextPageID, err := storage.SpaceMapNextPageID(pageData)
+		if err != nil {
+			return nil, nil, wrapStorageError(err)
+		}
+		nextSpaceMapID = storage.PageID(nextPageID)
+	}
+	if uint32(len(spaceMapPageIDs)) != table.OwnedSpaceMapPageCount() {
+		return nil, nil, newStorageError("corrupted header page")
+	}
+	if uint32(len(dataPageIDs)) != table.OwnedDataPageCount() {
+		return nil, nil, newStorageError("corrupted header page")
+	}
+	return spaceMapPageIDs, dataPageIDs, nil
 }
 
 func decodePersistedTableRows(pageData []byte, columns []parser.ColumnDef) ([][]parser.Value, error) {

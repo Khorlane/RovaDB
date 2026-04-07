@@ -68,7 +68,14 @@ func TestCorruptedTablePageDetected(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO users VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
-	rootPageID := db.tables["users"].RootPageID()
+	dataPageIDs, err := committedTableDataPageIDs(db.pool, db.tables["users"])
+	if err != nil {
+		t.Fatalf("committedTableDataPageIDs() error = %v", err)
+	}
+	if len(dataPageIDs) != 1 {
+		t.Fatalf("len(committedTableDataPageIDs()) = %d, want 1", len(dataPageIDs))
+	}
+	dataPageID := dataPageIDs[0]
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
@@ -77,9 +84,9 @@ func TestCorruptedTablePageDetected(t *testing.T) {
 	}
 
 	dbFile, pager := openRawStorage(t, path)
-	page, err := pager.Get(rootPageID)
+	page, err := pager.Get(dataPageID)
 	if err != nil {
-		t.Fatalf("pager.Get(root) error = %v", err)
+		t.Fatalf("pager.Get(data) error = %v", err)
 	}
 	binary.LittleEndian.PutUint32(page.Data()[4:8], 4)
 	pager.MarkDirty(page)
@@ -112,7 +119,14 @@ func TestCorruptedRowDataDetected(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO users VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
-	rootPageID := db.tables["users"].RootPageID()
+	dataPageIDs, err := committedTableDataPageIDs(db.pool, db.tables["users"])
+	if err != nil {
+		t.Fatalf("committedTableDataPageIDs() error = %v", err)
+	}
+	if len(dataPageIDs) != 1 {
+		t.Fatalf("len(committedTableDataPageIDs()) = %d, want 1", len(dataPageIDs))
+	}
+	dataPageID := dataPageIDs[0]
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
@@ -121,9 +135,9 @@ func TestCorruptedRowDataDetected(t *testing.T) {
 	}
 
 	dbFile, pager := openRawStorage(t, path)
-	page, err := pager.Get(rootPageID)
+	page, err := pager.Get(dataPageID)
 	if err != nil {
-		t.Fatalf("pager.Get(root) error = %v", err)
+		t.Fatalf("pager.Get(data) error = %v", err)
 	}
 	offset, _, err := storage.TablePageSlot(page.Data(), 0)
 	if err != nil {

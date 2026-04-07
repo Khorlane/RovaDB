@@ -6,7 +6,7 @@ import (
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
-func TestInsertPersistsRowsToTableRootPage(t *testing.T) {
+func TestInsertPersistsRowsToOwnedDataPage(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := Open(path)
@@ -42,6 +42,14 @@ func TestInsertPersistsRowsToTableRootPage(t *testing.T) {
 	if table.RootPageID() != rootPageID {
 		t.Fatalf("table.RootPageID() = %d, want %d", table.RootPageID(), rootPageID)
 	}
+	dataPageIDs, err := committedTableDataPageIDs(db.pool, table)
+	if err != nil {
+		t.Fatalf("committedTableDataPageIDs() error = %v", err)
+	}
+	if len(dataPageIDs) != 1 {
+		t.Fatalf("len(committedTableDataPageIDs()) = %d, want 1", len(dataPageIDs))
+	}
+	dataPageID := dataPageIDs[0]
 	if err := db.Close(); err != nil {
 		t.Fatalf("second Close() error = %v", err)
 	}
@@ -56,9 +64,12 @@ func TestInsertPersistsRowsToTableRootPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("storage.NewPager() error = %v", err)
 	}
-	page, err := pager.Get(rootPageID)
+	page, err := pager.Get(dataPageID)
 	if err != nil {
 		t.Fatalf("pager.Get() error = %v", err)
+	}
+	if err := storage.ValidateOwnedDataPage(page.Data(), table.TableID); err != nil {
+		t.Fatalf("storage.ValidateOwnedDataPage() error = %v", err)
 	}
 	if got := storage.TablePageRowCount(page); got != 2 {
 		t.Fatalf("storage.TablePageRowCount() = %d, want 2", got)

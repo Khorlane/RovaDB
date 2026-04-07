@@ -1543,17 +1543,24 @@ func TestOpenReplaysCommittedWALState(t *testing.T) {
 	} else if len(records) == 0 {
 		t.Fatal("len(ReadWALRecords()) = 0, want committed WAL after checkpoint failure")
 	}
-	rootPageID := db.tables["t"].RootPageID()
+	dataPageIDs, err := committedTableDataPageIDs(db.pool, db.tables["t"])
+	if err != nil {
+		t.Fatalf("committedTableDataPageIDs() error = %v", err)
+	}
+	if len(dataPageIDs) != 1 {
+		t.Fatalf("len(committedTableDataPageIDs()) = %d, want 1", len(dataPageIDs))
+	}
+	dataPageID := dataPageIDs[0]
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 
 	rawDB, pager := openRawStorage(t, path)
-	rootPage, err := pager.Get(rootPageID)
+	rootPage, err := pager.Get(dataPageID)
 	if err != nil {
-		t.Fatalf("pager.Get(root) error = %v", err)
+		t.Fatalf("pager.Get(data) error = %v", err)
 	}
-	corrupted := storage.InitializeTablePage(uint32(rootPageID))
+	corrupted := storage.InitializeTablePage(uint32(dataPageID))
 	if err := storage.RecomputePageChecksum(corrupted); err != nil {
 		t.Fatalf("RecomputePageChecksum() error = %v", err)
 	}
@@ -1589,15 +1596,22 @@ func TestOpenIgnoresTrailingUncommittedWALFrames(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO t VALUES (1)"); err != nil {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
-	rootPageID := db.tables["t"].RootPageID()
+	dataPageIDs, err := committedTableDataPageIDs(db.pool, db.tables["t"])
+	if err != nil {
+		t.Fatalf("committedTableDataPageIDs() error = %v", err)
+	}
+	if len(dataPageIDs) != 1 {
+		t.Fatalf("len(committedTableDataPageIDs()) = %d, want 1", len(dataPageIDs))
+	}
+	dataPageID := dataPageIDs[0]
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 
 	rawDB, pager := openRawStorage(t, path)
-	rootPage, err := pager.Get(rootPageID)
+	rootPage, err := pager.Get(dataPageID)
 	if err != nil {
-		t.Fatalf("pager.Get(root) error = %v", err)
+		t.Fatalf("pager.Get(data) error = %v", err)
 	}
 	uncommitted := append([]byte(nil), rootPage.Data()...)
 	row, err := storage.EncodeSlottedRow([]parser.Value{parser.Int64Value(2)})
@@ -1622,7 +1636,7 @@ func TestOpenIgnoresTrailingUncommittedWALFrames(t *testing.T) {
 	}
 	var frame storage.WALFrame
 	frame.FrameLSN = 999
-	frame.PageID = uint32(rootPageID)
+	frame.PageID = uint32(dataPageID)
 	frame.PageLSN = 999
 	copy(frame.PageData[:], uncommitted)
 	if err := storage.AppendWALFrame(path, frame); err != nil {

@@ -226,7 +226,14 @@ func TestInsertMaintainsPersistedIndexLeafEntries(t *testing.T) {
 		t.Fatalf("IndexDefinition(idx_users_name) = nil, defs=%#v", table.IndexDefs)
 	}
 	rootPageID := indexDef.RootPageID
-	tableRootPageID := uint32(table.RootPageID())
+	dataPageIDs, err := committedTableDataPageIDs(db.pool, table)
+	if err != nil {
+		t.Fatalf("committedTableDataPageIDs() error = %v", err)
+	}
+	if len(dataPageIDs) != 1 {
+		t.Fatalf("len(committedTableDataPageIDs()) = %d, want 1", len(dataPageIDs))
+	}
+	tableDataPageID := uint32(dataPageIDs[0])
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
@@ -253,14 +260,14 @@ func TestInsertMaintainsPersistedIndexLeafEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncodeIndexKey(bob) error = %v", err)
 	}
-	if !bytes.Equal(records[0].Key, aliceKey) || records[0].Locator != (storage.RowLocator{PageID: tableRootPageID, SlotID: 1}) {
-		t.Fatalf("records[0] = %#v, want alice -> (%d,1)", records[0], tableRootPageID)
+	if !bytes.Equal(records[0].Key, aliceKey) || records[0].Locator != (storage.RowLocator{PageID: tableDataPageID, SlotID: 1}) {
+		t.Fatalf("records[0] = %#v, want alice -> (%d,1)", records[0], tableDataPageID)
 	}
-	if !bytes.Equal(records[1].Key, aliceKey) || records[1].Locator != (storage.RowLocator{PageID: tableRootPageID, SlotID: 2}) {
-		t.Fatalf("records[1] = %#v, want alice -> (%d,2)", records[1], tableRootPageID)
+	if !bytes.Equal(records[1].Key, aliceKey) || records[1].Locator != (storage.RowLocator{PageID: tableDataPageID, SlotID: 2}) {
+		t.Fatalf("records[1] = %#v, want alice -> (%d,2)", records[1], tableDataPageID)
 	}
-	if !bytes.Equal(records[2].Key, bobKey) || records[2].Locator != (storage.RowLocator{PageID: tableRootPageID, SlotID: 0}) {
-		t.Fatalf("records[2] = %#v, want bob -> (%d,0)", records[2], tableRootPageID)
+	if !bytes.Equal(records[2].Key, bobKey) || records[2].Locator != (storage.RowLocator{PageID: tableDataPageID, SlotID: 0}) {
+		t.Fatalf("records[2] = %#v, want bob -> (%d,0)", records[2], tableDataPageID)
 	}
 
 	pageReader := func(pageID uint32) ([]byte, error) {
@@ -270,8 +277,8 @@ func TestInsertMaintainsPersistedIndexLeafEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LookupIndexExact(alice) error = %v", err)
 	}
-	if len(locators) != 2 || locators[0] != (storage.RowLocator{PageID: tableRootPageID, SlotID: 1}) || locators[1] != (storage.RowLocator{PageID: tableRootPageID, SlotID: 2}) {
-		t.Fatalf("LookupIndexExact(alice) = %#v, want [(%d,1), (%d,2)]", locators, tableRootPageID, tableRootPageID)
+	if len(locators) != 2 || locators[0] != (storage.RowLocator{PageID: tableDataPageID, SlotID: 1}) || locators[1] != (storage.RowLocator{PageID: tableDataPageID, SlotID: 2}) {
+		t.Fatalf("LookupIndexExact(alice) = %#v, want [(%d,1), (%d,2)]", locators, tableDataPageID, tableDataPageID)
 	}
 }
 
@@ -962,7 +969,14 @@ func TestSplitIndexLookupSurvivesReopen(t *testing.T) {
 	if indexDef == nil {
 		t.Fatalf("IndexDefinition(idx_users_name) = nil, defs=%#v", db.tables["users"].IndexDefs)
 	}
-	tableRootPageID := uint32(db.tables["users"].RootPageID())
+	dataPageIDs, err := committedTableDataPageIDs(db.pool, db.tables["users"])
+	if err != nil {
+		t.Fatalf("committedTableDataPageIDs() error = %v", err)
+	}
+	if len(dataPageIDs) != 1 {
+		t.Fatalf("len(committedTableDataPageIDs()) = %d, want 1", len(dataPageIDs))
+	}
+	tableDataPageID := uint32(dataPageIDs[0])
 
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -981,13 +995,13 @@ func TestSplitIndexLookupSurvivesReopen(t *testing.T) {
 		t.Fatalf("EncodeIndexKey(zoe) error = %v", err)
 	}
 	leftLeafData, err := storage.BuildIndexLeafPageData(uint32(leftLeafPage.ID()), []storage.IndexLeafRecord{
-		{Key: aliceKey, Locator: storage.RowLocator{PageID: tableRootPageID, SlotID: 0}},
+		{Key: aliceKey, Locator: storage.RowLocator{PageID: tableDataPageID, SlotID: 0}},
 	}, uint32(rightLeafPage.ID()))
 	if err != nil {
 		t.Fatalf("BuildIndexLeafPageData(left) error = %v", err)
 	}
 	rightLeafData, err := storage.BuildIndexLeafPageData(uint32(rightLeafPage.ID()), []storage.IndexLeafRecord{
-		{Key: zoeKey, Locator: storage.RowLocator{PageID: tableRootPageID, SlotID: 1}},
+		{Key: zoeKey, Locator: storage.RowLocator{PageID: tableDataPageID, SlotID: 1}},
 	}, 0)
 	if err != nil {
 		t.Fatalf("BuildIndexLeafPageData(right) error = %v", err)

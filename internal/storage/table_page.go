@@ -10,18 +10,19 @@ const tablePageHeaderSize = 8
 
 const (
 	tablePageCommonHeaderSize = 32
-	tablePageBodyHeaderSize   = 8
+	tablePageBodyHeaderSize   = 12
 	tablePageSlotEntrySize    = 4
 	tablePageBodyStart        = tablePageCommonHeaderSize + tablePageBodyHeaderSize
 
-	tablePageHeaderOffsetPageID   = 0
-	tablePageHeaderOffsetPageType = 4
-	tablePageHeaderOffsetPageLSN  = 8
-	tablePageHeaderOffsetChecksum = 16
-
-	tablePageBodyOffsetSlotCount = tablePageCommonHeaderSize
-	tablePageBodyOffsetFreeStart = tablePageCommonHeaderSize + 4
-	tablePageBodyOffsetFreeEnd   = tablePageCommonHeaderSize + 6
+	tablePageHeaderOffsetPageID      = 0
+	tablePageHeaderOffsetPageType    = 4
+	tablePageHeaderOffsetPageLSN     = 8
+	tablePageHeaderOffsetChecksum    = 16
+	tablePageBodyOffsetOwningTableID = tablePageCommonHeaderSize
+	tablePageBodyOffsetSlotCount     = tablePageCommonHeaderSize + 4
+	tablePageBodyOffsetFreeStart     = tablePageCommonHeaderSize + 6
+	tablePageBodyOffsetFreeEnd       = tablePageCommonHeaderSize + 8
+	tablePageBodyOffsetReserved      = tablePageCommonHeaderSize + 10
 )
 
 // InitTableRootPage initializes a blank table root page header.
@@ -179,11 +180,39 @@ func InitializeTablePage(pageID uint32) []byte {
 	page := make([]byte, PageSize)
 	binary.LittleEndian.PutUint32(page[tablePageHeaderOffsetPageID:tablePageHeaderOffsetPageID+4], pageID)
 	binary.LittleEndian.PutUint16(page[tablePageHeaderOffsetPageType:tablePageHeaderOffsetPageType+2], uint16(PageTypeTable))
+	binary.LittleEndian.PutUint32(page[tablePageBodyOffsetOwningTableID:tablePageBodyOffsetOwningTableID+4], 0)
 	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetSlotCount:tablePageBodyOffsetSlotCount+2], 0)
 	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeStart:tablePageBodyOffsetFreeStart+2], tablePageBodyStart)
 	binary.LittleEndian.PutUint16(page[tablePageBodyOffsetFreeEnd:tablePageBodyOffsetFreeEnd+2], PageSize)
 	_ = FinalizePageImage(page)
 	return page
+}
+
+func InitOwnedDataPage(pageID uint32, tableID uint32) []byte {
+	page := InitializeTablePage(pageID)
+	binary.LittleEndian.PutUint32(page[tablePageBodyOffsetOwningTableID:tablePageBodyOffsetOwningTableID+4], tableID)
+	_ = FinalizePageImage(page)
+	return page
+}
+
+func TablePageOwningTableID(page []byte) (uint32, error) {
+	if err := validateSlottedTablePage(page); err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(page[tablePageBodyOffsetOwningTableID : tablePageBodyOffsetOwningTableID+4]), nil
+}
+
+func ValidateOwnedDataPage(page []byte, tableID uint32) error {
+	if err := validateSlottedTablePage(page); err != nil {
+		return err
+	}
+	if tableID == 0 {
+		return errCorruptedTablePage
+	}
+	if binary.LittleEndian.Uint32(page[tablePageBodyOffsetOwningTableID:tablePageBodyOffsetOwningTableID+4]) != tableID {
+		return errCorruptedTablePage
+	}
+	return nil
 }
 
 func TablePageSlotCount(page []byte) (int, error) {
@@ -283,6 +312,29 @@ func CanFitRow(page []byte, rowLen int) (bool, error) {
 		return false, err
 	}
 	return freeSpace >= rowLen+tablePageSlotEntrySize, nil
+}
+
+func TablePageFreeSpaceBucket(page []byte) (SpaceMapFreeSpaceBucket, error) {
+	if err := validateSlottedTablePage(page); err != nil {
+		return 0, err
+	}
+	freeSpace, err := TablePageFreeSpace(page)
+	if err != nil {
+		return 0, err
+	}
+	if freeSpace < tablePageSlotEntrySize+2 {
+		return SpaceMapBucketFull, nil
+	}
+
+	usable := PageSize - tablePageBodyStart
+	switch {
+	case freeSpace <= usable/8:
+		return SpaceMapBucketLow, nil
+	case freeSpace <= usable/3:
+		return SpaceMapBucketMedium, nil
+	default:
+		return SpaceMapBucketHigh, nil
+	}
 }
 
 func InsertRowIntoTablePage(page []byte, row []byte) (slotID int, err error) {
