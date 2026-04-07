@@ -149,7 +149,8 @@ Implemented architecture:
   `Data` pages
 - ownership is logical and metadata-driven rather than physically contiguous
 - CAT/DIR remains authoritative for logical metadata
-- `TableHeader` is authoritative for physical table root metadata
+- `TableHeader` is authoritative for physical table root and owned-page
+  metadata
 - `SpaceMap` is authoritative for table-local `Data` page inventory and
   free-space classification
 - rows remain addressed by `PageID + SlotID`

@@ -21,7 +21,7 @@ The completed storage milestone is:
 The next named milestone is:
 - `v0.38.0-physical-storage-polish`
 
-That milestone is now implemented in the engine:
+The current engine storage truth is:
 - tables have authoritative `TableHeader` roots
 - `SpaceMap` pages enumerate owned `Data` pages
 - normal writes land on owned `Data` pages

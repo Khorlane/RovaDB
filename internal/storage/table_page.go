@@ -25,7 +25,11 @@ const (
 	tablePageBodyOffsetReserved      = tablePageCommonHeaderSize + 10
 )
 
-// InitTableRootPage initializes a blank table root page header.
+// These helpers operate on the older compact table-page image still used in a
+// few narrow internal/test paths. Normal runtime rows live on owned slotted
+// Data pages tracked through TableHeader/SpaceMap metadata.
+//
+// InitTableRootPage initializes a blank compact table-page header.
 func InitTableRootPage(page *Page) {
 	if page == nil {
 		return
@@ -41,7 +45,7 @@ func InitTableRootPage(page *Page) {
 	page.MarkDirty()
 }
 
-// AppendRowToTablePage appends one encoded row to a table root page.
+// AppendRowToTablePage appends one encoded row to a compact table-page image.
 func AppendRowToTablePage(page *Page, row []byte) error {
 	if page == nil {
 		return errCorruptedTablePage
@@ -69,7 +73,8 @@ func AppendRowToTablePage(page *Page, row []byte) error {
 	return nil
 }
 
-// TablePageRowCount reports the row count stored in a table root page.
+// TablePageRowCount reports the row count stored in a compact or slotted table
+// page image.
 func TablePageRowCount(page *Page) uint32 {
 	if page == nil || len(page.data) < tablePageHeaderSize {
 		return 0
@@ -84,7 +89,8 @@ func TablePageRowCount(page *Page) uint32 {
 	return binary.LittleEndian.Uint32(page.data[0:4])
 }
 
-// ReadRowsFromTablePage reads all encoded row payloads from a table root page.
+// ReadRowsFromTablePage reads all encoded row payloads from a compact or
+// slotted table page image.
 func ReadRowsFromTablePage(page *Page) ([][]byte, error) {
 	if page == nil {
 		return nil, errCorruptedTablePage
@@ -95,7 +101,7 @@ func ReadRowsFromTablePage(page *Page) ([][]byte, error) {
 	return ReadRowsFromTablePageData(page.data)
 }
 
-// ReadRowsFromTablePageData reads all encoded row payloads from a table root
+// ReadRowsFromTablePageData reads all encoded row payloads from a compact table
 // page image.
 func ReadRowsFromTablePageData(pageData []byte) ([][]byte, error) {
 	if len(pageData) < tablePageHeaderSize {
@@ -150,7 +156,8 @@ func BuildTablePageData(encodedRows [][]byte) ([]byte, error) {
 	return append([]byte(nil), page.data...), nil
 }
 
-// RewriteTablePage rebuilds a table root page from the provided encoded rows.
+// RewriteTablePage rebuilds a compact table-page image from the provided
+// encoded rows.
 func RewriteTablePage(page *Page, encodedRows [][]byte) error {
 	if page == nil {
 		return errCorruptedTablePage

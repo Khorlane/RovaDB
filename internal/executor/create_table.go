@@ -42,7 +42,8 @@ func (t *Table) SetStorageMeta(rootPageID storage.PageID, rowCount uint32) {
 	t.persistedRowCount = rowCount
 }
 
-// RootPageID reports the reserved root page for the table's future row storage.
+// RootPageID reports the reserved logical table root page. Normal runtime rows
+// live on table-owned Data pages tracked from the TableHeader/SpaceMap chain.
 func (t *Table) RootPageID() storage.PageID {
 	if t == nil {
 		return 0

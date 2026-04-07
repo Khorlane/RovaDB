@@ -63,7 +63,8 @@ database file. A table's pages do not need to be adjacent on disk.
 The intended authority split is:
 
 - CAT/DIR is authoritative for logical metadata
-- `TableHeader` is authoritative for physical table root metadata
+- `TableHeader` is authoritative for physical table root and owned-page
+  metadata
 - `SpaceMap` is authoritative for the table-local `Data`-page inventory and
   free-space classification
 - `Data` pages are authoritative only for row and slot contents

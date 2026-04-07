@@ -47,7 +47,8 @@ Primary target:
 Implemented outcome:
 
 - tables now use the locked `TableHeader` / `SpaceMap` / `Data` storage model
-- the old single-page table-storage limit is removed from normal runtime
+- normal runtime rows now live on table-owned `Data` pages rather than on a
+  single table-row root page
 - writes, reads, scans, relocation-on-growth updates, reopen, and corruption
   detection now follow one physical ownership model
 - CAT/DIR logical authority and physical table-root authority remain separated
@@ -59,7 +60,7 @@ Guiding doc:
 Why this mattered:
 
 - it was the major storage milestone after the `v0.36.x` baseline
-- it removed the standout table-storage limitation directly
+- it removed the standout single-page table-row-storage limitation directly
 - later lifecycle and hardening work should now build on this physical storage
   model rather than on temporary assumptions
 
@@ -166,7 +167,8 @@ Completed milestone anchor:
 
 - `v0.37.0-physical-storage-layer`
   - `TableHeader` / `SpaceMap` / multi-page `Data` ownership model
-  - multi-page table storage for normal runtime
+  - normal runtime rows live on table-owned `Data` pages enumerated by
+    `SpaceMap`
   - storage, runtime, and recovery implications for the new model
 
 After `v0.38.0`, reassess the remaining V1 path intentionally rather than
