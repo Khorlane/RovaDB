@@ -2119,10 +2119,35 @@ func (db *DB) stageUpdatedRowViaPhysicalStorage(table *executor.Table, locator s
 	if err := storage.DeleteRowBySlot(dataPage, int(locator.SlotID)); err != nil {
 		return storage.RowLocator{}, wrapStorageError(err)
 	}
-	if err := db.refreshSpaceMapBucketForDataPage(table, pageID, staged, order); err != nil {
+	liveRows, err := storage.TablePageLiveRowCount(dataPage)
+	if err != nil {
+		return storage.RowLocator{}, wrapStorageError(err)
+	}
+	var reclaimedPageIDs []storage.PageID
+	if liveRows == 0 {
+		reclaimedPageIDs, err = db.removeOwnedDataPageFromPhysicalStorageState(table, pageID, staged, order)
+		if err != nil {
+			return storage.RowLocator{}, err
+		}
+	} else {
+		if err := db.refreshSpaceMapBucketForDataPage(table, pageID, staged, order); err != nil {
+			return storage.RowLocator{}, err
+		}
+	}
+	newLocator, err := db.insertRowIntoPhysicalStorageState(table, row, nextFreshID, staged, order)
+	if err != nil {
 		return storage.RowLocator{}, err
 	}
-	return db.insertRowIntoPhysicalStorageState(table, row, nextFreshID, staged, order)
+	if len(reclaimedPageIDs) != 0 {
+		freedPages, err := db.buildFreedPages(reclaimedPageIDs...)
+		if err != nil {
+			return storage.RowLocator{}, err
+		}
+		for _, freed := range freedPages {
+			stagePageImage(staged, order, freed.id, freed.data, freed.isNew)
+		}
+	}
+	return newLocator, nil
 }
 
 func (db *DB) refreshSpaceMapBucketForDataPage(table *executor.Table, dataPageID storage.PageID, staged map[storage.PageID]stagedPage, order *[]storage.PageID) error {
@@ -2190,6 +2215,108 @@ func (db *DB) refreshSpaceMapBucketForDataPage(table *executor.Table, dataPageID
 		spaceMapPageID = storage.PageID(nextPageID)
 	}
 	return newStorageError("corrupted space map page")
+}
+
+func (db *DB) removeOwnedDataPageFromPhysicalStorageState(table *executor.Table, dataPageID storage.PageID, staged map[storage.PageID]stagedPage, order *[]storage.PageID) ([]storage.PageID, error) {
+	if db == nil || table == nil {
+		return nil, ErrInvalidArgument
+	}
+	if table.TableHeaderPageID() == 0 || table.FirstSpaceMapPageID() == 0 || dataPageID == 0 {
+		return nil, newStorageError("corrupted header page")
+	}
+
+	headerPage, err := db.mutablePageImage(staged, order, table.TableHeaderPageID())
+	if err != nil {
+		return nil, err
+	}
+	if err := storage.ValidateTableHeaderPage(headerPage); err != nil {
+		return nil, wrapStorageError(err)
+	}
+
+	var prevSpaceMapPageID storage.PageID
+	currentSpaceMapPageID := table.FirstSpaceMapPageID()
+	for currentSpaceMapPageID != 0 {
+		spaceMapPage, err := db.mutablePageImage(staged, order, currentSpaceMapPageID)
+		if err != nil {
+			return nil, err
+		}
+		if err := storage.ValidateSpaceMapPage(spaceMapPage); err != nil {
+			return nil, wrapStorageError(err)
+		}
+		owningTableID, err := storage.SpaceMapOwningTableID(spaceMapPage)
+		if err != nil {
+			return nil, wrapStorageError(err)
+		}
+		if owningTableID != table.TableID {
+			return nil, newStorageError("corrupted space map page")
+		}
+		entryCount, err := storage.SpaceMapEntryCount(spaceMapPage)
+		if err != nil {
+			return nil, wrapStorageError(err)
+		}
+		for entryID := 0; entryID < entryCount; entryID++ {
+			entry, err := storage.SpaceMapPageEntry(spaceMapPage, entryID)
+			if err != nil {
+				return nil, wrapStorageError(err)
+			}
+			if entry.DataPageID != dataPageID {
+				continue
+			}
+			if err := storage.RemoveSpaceMapEntry(spaceMapPage, entryID); err != nil {
+				return nil, wrapStorageError(err)
+			}
+			newOwnedDataCount := table.OwnedDataPageCount() - 1
+			if err := storage.SetTableHeaderOwnedDataPageCount(headerPage, newOwnedDataCount); err != nil {
+				return nil, wrapStorageError(err)
+			}
+			table.SetPhysicalTableRootMeta(table.TableHeaderPageID(), table.TableStorageFormatVersion(), table.FirstSpaceMapPageID(), newOwnedDataCount, table.OwnedSpaceMapPageCount())
+
+			reclaimed := []storage.PageID{dataPageID}
+			newEntryCount, err := storage.SpaceMapEntryCount(spaceMapPage)
+			if err != nil {
+				return nil, wrapStorageError(err)
+			}
+			if newEntryCount == 0 {
+				nextPageID, err := storage.SpaceMapNextPageID(spaceMapPage)
+				if err != nil {
+					return nil, wrapStorageError(err)
+				}
+				if prevSpaceMapPageID == 0 {
+					if err := storage.SetTableHeaderFirstSpaceMapPageID(headerPage, nextPageID); err != nil {
+						return nil, wrapStorageError(err)
+					}
+					newFirst := storage.PageID(nextPageID)
+					newOwnedSpaceMapCount := table.OwnedSpaceMapPageCount() - 1
+					table.SetPhysicalTableRootMeta(table.TableHeaderPageID(), table.TableStorageFormatVersion(), newFirst, table.OwnedDataPageCount(), newOwnedSpaceMapCount)
+					if err := storage.SetTableHeaderOwnedSpaceMapPageCount(headerPage, newOwnedSpaceMapCount); err != nil {
+						return nil, wrapStorageError(err)
+					}
+				} else {
+					prevPage, err := db.mutablePageImage(staged, order, prevSpaceMapPageID)
+					if err != nil {
+						return nil, err
+					}
+					if err := storage.SetSpaceMapNextPageID(prevPage, nextPageID); err != nil {
+						return nil, wrapStorageError(err)
+					}
+					newOwnedSpaceMapCount := table.OwnedSpaceMapPageCount() - 1
+					table.SetPhysicalTableRootMeta(table.TableHeaderPageID(), table.TableStorageFormatVersion(), table.FirstSpaceMapPageID(), table.OwnedDataPageCount(), newOwnedSpaceMapCount)
+					if err := storage.SetTableHeaderOwnedSpaceMapPageCount(headerPage, newOwnedSpaceMapCount); err != nil {
+						return nil, wrapStorageError(err)
+					}
+				}
+				reclaimed = append(reclaimed, currentSpaceMapPageID)
+			}
+			return reclaimed, nil
+		}
+		nextPageID, err := storage.SpaceMapNextPageID(spaceMapPage)
+		if err != nil {
+			return nil, wrapStorageError(err)
+		}
+		prevSpaceMapPageID = currentSpaceMapPageID
+		currentSpaceMapPageID = storage.PageID(nextPageID)
+	}
+	return nil, newStorageError("corrupted space map page")
 }
 
 func (db *DB) applyStagedCatalogOnly(stagedTables map[string]*executor.Table) error {

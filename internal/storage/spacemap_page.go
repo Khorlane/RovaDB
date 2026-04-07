@@ -199,3 +199,22 @@ func UpdateSpaceMapEntry(page []byte, entryID int, entry SpaceMapEntry) error {
 	page[entryOffset+7] = 0
 	return FinalizePageImage(page)
 }
+
+func RemoveSpaceMapEntry(page []byte, entryID int) error {
+	if err := ValidateSpaceMapPage(page); err != nil {
+		return err
+	}
+	entryCount := int(binary.LittleEndian.Uint16(page[spaceMapBodyOffsetEntryCount : spaceMapBodyOffsetEntryCount+2]))
+	if entryID < 0 || entryID >= entryCount {
+		return errCorruptedSpaceMapPage
+	}
+	for i := entryID; i < entryCount-1; i++ {
+		dstOffset := spaceMapEntriesOffset + i*spaceMapEntrySize
+		srcOffset := spaceMapEntriesOffset + (i+1)*spaceMapEntrySize
+		copy(page[dstOffset:dstOffset+spaceMapEntrySize], page[srcOffset:srcOffset+spaceMapEntrySize])
+	}
+	lastOffset := spaceMapEntriesOffset + (entryCount-1)*spaceMapEntrySize
+	clear(page[lastOffset : lastOffset+spaceMapEntrySize])
+	binary.LittleEndian.PutUint16(page[spaceMapBodyOffsetEntryCount:spaceMapBodyOffsetEntryCount+2], uint16(entryCount-1))
+	return FinalizePageImage(page)
+}

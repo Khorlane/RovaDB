@@ -143,6 +143,10 @@ func TestExecAPIDropTableFreesTableAndIndexRootsIntoFreeList(t *testing.T) {
 	}
 	table := db.tables["users"]
 	tableRootPageID := table.RootPageID()
+	spaceMapPageIDs, dataPageIDs, err := committedTablePhysicalStorageInventory(db.pool, table)
+	if err != nil {
+		t.Fatalf("committedTablePhysicalStorageInventory() error = %v", err)
+	}
 	indexNames := []string{"idx_users_id", "idx_users_name"}
 	indexRootPageIDs := make([]storage.PageID, 0, len(indexNames))
 	for _, indexName := range indexNames {
@@ -170,7 +174,10 @@ func TestExecAPIDropTableFreesTableAndIndexRootsIntoFreeList(t *testing.T) {
 		t.Fatal("ReadDirectoryFreeListHead() = 0, want nonzero after drop")
 	}
 	chain := freeListChainForTest(t, pager, storage.PageID(head))
-	for _, pageID := range []storage.PageID{tableRootPageID, indexRootPageIDs[1], indexRootPageIDs[0], table.TableHeaderPageID()} {
+	wantPages := []storage.PageID{tableRootPageID, indexRootPageIDs[1], indexRootPageIDs[0], table.TableHeaderPageID()}
+	wantPages = append(wantPages, spaceMapPageIDs...)
+	wantPages = append(wantPages, dataPageIDs...)
+	for _, pageID := range wantPages {
 		if !containsPageID(chain, pageID) {
 			t.Fatalf("free list chain = %#v, want page %d present", chain, pageID)
 		}

@@ -66,6 +66,37 @@ func TestSpaceMapNextPageLinkageRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRemoveSpaceMapEntryCompactsRemainingEntries(t *testing.T) {
+	page := InitSpaceMapPage(40, 18)
+	for _, entry := range []SpaceMapEntry{
+		{DataPageID: 500, FreeSpaceBucket: SpaceMapBucketHigh},
+		{DataPageID: 501, FreeSpaceBucket: SpaceMapBucketMedium},
+		{DataPageID: 502, FreeSpaceBucket: SpaceMapBucketLow},
+	} {
+		if _, err := AppendSpaceMapEntry(page, entry); err != nil {
+			t.Fatalf("AppendSpaceMapEntry() error = %v", err)
+		}
+	}
+
+	if err := RemoveSpaceMapEntry(page, 1); err != nil {
+		t.Fatalf("RemoveSpaceMapEntry() error = %v", err)
+	}
+	entryCount, err := SpaceMapEntryCount(page)
+	if err != nil {
+		t.Fatalf("SpaceMapEntryCount() error = %v", err)
+	}
+	if entryCount != 2 {
+		t.Fatalf("SpaceMapEntryCount() = %d, want 2", entryCount)
+	}
+	entry, err := SpaceMapPageEntry(page, 1)
+	if err != nil {
+		t.Fatalf("SpaceMapPageEntry(1) error = %v", err)
+	}
+	if entry.DataPageID != 502 || entry.FreeSpaceBucket != SpaceMapBucketLow {
+		t.Fatalf("entry after removal = %#v, want DataPageID=502 bucket=Low", entry)
+	}
+}
+
 func TestValidateSpaceMapPageRejectsWrongType(t *testing.T) {
 	page := InitTableHeaderPage(34, 12)
 
