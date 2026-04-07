@@ -1,27 +1,24 @@
 # Road To V1
 
 This is a temporary development planning note for the remaining path to RovaDB
-V1 after the Physical Storage Layer milestone.
+V1 after the Physical Storage Layer and Physical Storage Polish milestones.
 
 It is intentionally high-level. It captures the major work buckets after the
 current docs-and-design stabilization phase.
 
 ## Status
 
-The next storage milestone has now been completed:
+The most recent storage milestones now completed are:
 
 - `v0.37.0-physical-storage-layer`
+- `v0.38.0-physical-storage-polish`
 
 Current intent:
 
 - keep docs and examples truthful about the implemented physical storage model
 - build the remaining V1-oriented hardening and product polish on top of the
-  completed Physical Storage Layer baseline
+  completed physical storage baseline
 - continue the remaining work in small explicit slices
-
-Next named milestone:
-
-- `v0.38.0-physical-storage-polish`
 
 ## V1 Objective
 
@@ -70,7 +67,7 @@ Primary target:
 
 - `v0.38.0-physical-storage-polish`
 
-Goal:
+Completed outcome:
 
 - harden reclaim and free-list truth for dropped tables, emptied pages, and
   ownership cleanup in the already-landed physical storage model
@@ -93,12 +90,12 @@ Non-goals:
 - no unrelated API growth
 - no broad refactors just for elegance
 
-Why this comes next:
+Why this mattered:
 
-- the `v0.37.0` physical storage model is in place and now needs polish-level
-  hardening around reclaim, mutation edges, and diagnostics
-- the remaining V1 path benefits more from storage confidence than from adding
-  new feature surface immediately
+- it turned the `v0.37.0` storage architecture into a better-verified and more
+  diagnosable runtime/storage baseline
+- it raised confidence around reclaim, mutation churn, reopen, WAL boundaries,
+  and physical ownership visibility without broadening the architecture
 
 ### 4. Final V1 Hardening and Product Polish
 
@@ -151,9 +148,9 @@ for `v1.0.0`.
 
 Current baseline:
 
-- `v0.37.x`
+- post-`v0.38.0-physical-storage-polish`
 
-Next milestone anchor:
+Most recently completed milestone anchor:
 
 - `v0.38.0-physical-storage-polish`
   - reclaim and free-list truth for dropped tables, emptied pages, and
@@ -163,7 +160,7 @@ Next milestone anchor:
   - diagnostics and consistency reporting for physical storage state
   - stale wording cleanup after `v0.37.0`
 
-Completed milestone anchor:
+Earlier completed milestone anchor:
 
 - `v0.37.0-physical-storage-layer`
   - `TableHeader` / `SpaceMap` / multi-page `Data` ownership model
