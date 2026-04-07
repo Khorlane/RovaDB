@@ -19,6 +19,10 @@ Current intent:
   completed Physical Storage Layer baseline
 - continue the remaining work in small explicit slices
 
+Next named milestone:
+
+- `v0.38.0-physical-storage-polish`
+
 ## V1 Objective
 
 RovaDB V1 should feel like a small but credible embedded SQL database for Go:
@@ -59,7 +63,43 @@ Why this mattered:
 - later lifecycle and hardening work should now build on this physical storage
   model rather than on temporary assumptions
 
-### 3. Final V1 Hardening and Product Polish
+### 3. Physical Storage Polish
+
+Primary target:
+
+- `v0.38.0-physical-storage-polish`
+
+Goal:
+
+- harden reclaim and free-list truth for dropped tables, emptied pages, and
+  ownership cleanup in the already-landed physical storage model
+- harden multi-page mutation behavior and index interaction around
+  `TableHeader` / `SpaceMap` / owned `Data` pages
+- increase crash, reopen, and WAL confidence around physical storage
+  transitions without redesigning the WAL architecture
+- improve diagnostics and consistency reporting for physical storage state
+- clean up stale wording that lags behind the completed `v0.37.0` milestone
+
+This is a stabilization milestone for the implemented storage model, not a new
+storage-architecture milestone.
+
+Non-goals:
+
+- no new storage architecture
+- no compatibility or migration work for pre-physstore formats
+- no planner or query feature expansion
+- no major WAL redesign
+- no unrelated API growth
+- no broad refactors just for elegance
+
+Why this comes next:
+
+- the `v0.37.0` physical storage model is in place and now needs polish-level
+  hardening around reclaim, mutation edges, and diagnostics
+- the remaining V1 path benefits more from storage confidence than from adding
+  new feature surface immediately
+
+### 4. Final V1 Hardening and Product Polish
 
 Goal:
 
@@ -114,13 +154,23 @@ Current baseline:
 
 Next milestone anchor:
 
+- `v0.38.0-physical-storage-polish`
+  - reclaim and free-list truth for dropped tables, emptied pages, and
+    ownership cleanup
+  - multi-page mutation and index interaction hardening
+  - crash, reopen, and WAL confidence around physical storage transitions
+  - diagnostics and consistency reporting for physical storage state
+  - stale wording cleanup after `v0.37.0`
+
+Completed milestone anchor:
+
 - `v0.37.0-physical-storage-layer`
   - `TableHeader` / `SpaceMap` / multi-page `Data` ownership model
   - multi-page table storage for normal runtime
   - storage, runtime, and recovery implications for the new model
 
-After that milestone lands, reassess the remaining V1 path intentionally rather
-than treating `v1.0.0` as an automatic next step.
+After `v0.38.0`, reassess the remaining V1 path intentionally rather than
+treating `v1.0.0` as an automatic next step.
 
 ## Temporary Nature
 

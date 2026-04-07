@@ -25,6 +25,7 @@ Status values:
 - [kg022] Engine `done` Realign `INT` semantics to 32-bit
 - [kg023] Engine `done` Enforce a bounded indexable TEXT size
 - [dx005] Physical Storage Layer milestone `done`
+- [dx006] Physical Storage Polish milestone
 - [dx001] Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc
 - [dx002] Explore planner usage for multi-column indexes
 - [dx003] Explore primary key as an explicit table-definition contract
@@ -156,6 +157,37 @@ Implemented architecture:
 Guiding doc:
 
 - `docs/dev/PHYSICAL_STORAGE_LAYER_design.md`
+
+### Physical Storage Polish milestone [dx006]
+
+Planned milestone:
+
+- `v0.38.0-physical-storage-polish`
+
+Planned scope:
+
+- reclaim and free-list truth for dropped tables, emptied pages, and ownership
+  cleanup
+- multi-page mutation and index interaction hardening on top of the completed
+  `TableHeader` / `SpaceMap` / owned-`Data` model
+- crash, reopen, and WAL confidence around physical storage transitions
+- diagnostics and consistency reporting for physical storage state
+- stale wording cleanup after the completed `v0.37.0` milestone
+
+Non-goals:
+
+- no new storage architecture
+- no compatibility or migration work for pre-physstore formats
+- no planner/query feature expansion
+- no major WAL redesign
+- no unrelated API growth
+- no broad refactors just for elegance
+
+Truthfulness:
+
+- this polish milestone is not implemented yet
+- it builds on the completed `v0.37.0-physical-storage-layer` baseline
+- it does not reintroduce support for pre-physstore table storage
 
 ### Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc [dx001]
 

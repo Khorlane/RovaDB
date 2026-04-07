@@ -18,6 +18,9 @@ The direction under active exploration is:
 The completed storage milestone is:
 - `v0.37.0-physical-storage-layer`
 
+The next named milestone is:
+- `v0.38.0-physical-storage-polish`
+
 That milestone is now implemented in the engine:
 - tables have authoritative `TableHeader` roots
 - `SpaceMap` pages enumerate owned `Data` pages
