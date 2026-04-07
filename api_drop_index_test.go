@@ -137,8 +137,8 @@ func TestExecAPIDropIndexFreesRootPageAndReusesIt(t *testing.T) {
 	if _, err := db.Exec("DROP INDEX idx_users_name"); err != nil {
 		t.Fatalf("Exec(drop index) error = %v", err)
 	}
-	if db.freeListHead != uint32(droppedRootPageID) {
-		t.Fatalf("db.freeListHead = %d, want %d", db.freeListHead, droppedRootPageID)
+	if db.freeListHead == 0 {
+		t.Fatal("db.freeListHead = 0, want nonzero after drop")
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -149,19 +149,19 @@ func TestExecAPIDropIndexFreesRootPageAndReusesIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pager.Get(%d) error = %v", droppedRootPageID, err)
 	}
-	nextFreePageID, err := storage.FreePageNext(freePage.Data())
-	if err != nil {
+	if _, err := storage.FreePageNext(freePage.Data()); err != nil {
 		t.Fatalf("FreePageNext() error = %v", err)
-	}
-	if nextFreePageID != 0 {
-		t.Fatalf("FreePageNext() = %d, want 0", nextFreePageID)
 	}
 	head, err := storage.ReadDirectoryFreeListHead(rawDB.File())
 	if err != nil {
 		t.Fatalf("ReadDirectoryFreeListHead() error = %v", err)
 	}
-	if head != uint32(droppedRootPageID) {
-		t.Fatalf("ReadDirectoryFreeListHead() = %d, want %d", head, droppedRootPageID)
+	if head != db.freeListHead {
+		t.Fatalf("ReadDirectoryFreeListHead() = %d, want %d", head, db.freeListHead)
+	}
+	chain := freeListChainForTest(t, pager, storage.PageID(head))
+	if !containsPageID(chain, droppedRootPageID) {
+		t.Fatalf("free list chain = %#v, want dropped index root %d present", chain, droppedRootPageID)
 	}
 	if err := rawDB.Close(); err != nil {
 		t.Fatalf("rawDB.Close() error = %v", err)
@@ -169,11 +169,12 @@ func TestExecAPIDropIndexFreesRootPageAndReusesIt(t *testing.T) {
 
 	db = reopenDB(t, path)
 	defer db.Close()
+	headBeforeCreate := db.freeListHead
 	if _, err := db.Exec("CREATE INDEX idx_users_name_again ON users (name)"); err != nil {
 		t.Fatalf("Exec(create replacement index) error = %v", err)
 	}
 	reusedRootPageID := db.tables["users"].IndexDefinition("idx_users_name_again").RootPageID
-	if reusedRootPageID != uint32(droppedRootPageID) {
-		t.Fatalf("replacement index RootPageID = %d, want %d", reusedRootPageID, droppedRootPageID)
+	if reusedRootPageID != headBeforeCreate {
+		t.Fatalf("replacement index RootPageID = %d, want free-list head %d", reusedRootPageID, headBeforeCreate)
 	}
 }

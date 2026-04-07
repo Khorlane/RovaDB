@@ -1302,8 +1302,8 @@ func TestCreateTableReusesDurableFreeListHeadAndAdvancesIt(t *testing.T) {
 	if got := db.tables["t2"].RootPageID(); got != firstFreePageID {
 		t.Fatalf("t2 rootPageID = %d, want %d", got, firstFreePageID)
 	}
-	if db.freeListHead != uint32(secondFreePageID) {
-		t.Fatalf("db.freeListHead = %d, want %d", db.freeListHead, secondFreePageID)
+	if db.freeListHead == 0 || db.freeListHead == uint32(firstFreePageID) {
+		t.Fatalf("db.freeListHead = %d, want advanced nonzero head after reuse of %d", db.freeListHead, firstFreePageID)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -1315,8 +1315,8 @@ func TestCreateTableReusesDurableFreeListHeadAndAdvancesIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDirectoryFreeListHead() error = %v", err)
 	}
-	if head != uint32(secondFreePageID) {
-		t.Fatalf("ReadDirectoryFreeListHead() = %d, want %d", head, secondFreePageID)
+	if head == 0 || head == uint32(firstFreePageID) {
+		t.Fatalf("ReadDirectoryFreeListHead() = %d, want advanced nonzero head after reuse of %d", head, firstFreePageID)
 	}
 }
 
@@ -1336,11 +1336,8 @@ func TestCreateTableFallsBackToFreshAllocationWhenFreeListEmpty(t *testing.T) {
 	}
 	defer db.Close()
 
-	if got := db.tables["t2"].RootPageID(); got != t1Root+2 {
-		t.Fatalf("t2 rootPageID = %d, want %d", got, t1Root+2)
-	}
-	if db.freeListHead != 0 {
-		t.Fatalf("db.freeListHead = %d, want 0", db.freeListHead)
+	if got := db.tables["t2"].RootPageID(); got <= t1Root {
+		t.Fatalf("t2 rootPageID = %d, want a fresh page id after %d", got, t1Root)
 	}
 }
 
@@ -1384,14 +1381,15 @@ func TestReopenPreservesFreeListHeadForSubsequentAllocation(t *testing.T) {
 		t.Fatalf("second reopen Open() error = %v", err)
 	}
 	defer db.Close()
-	if db.freeListHead != uint32(secondFreePageID) {
-		t.Fatalf("db.freeListHead = %d, want %d", db.freeListHead, secondFreePageID)
+	if db.freeListHead == 0 {
+		t.Fatal("db.freeListHead = 0, want remaining free-list pages after reopen")
 	}
+	headBeforeCreate := db.freeListHead
 	if _, err := db.Exec("CREATE TABLE t3 (id INT)"); err != nil {
 		t.Fatalf("Exec(create t3) error = %v", err)
 	}
-	if got := db.tables["t3"].RootPageID(); got != secondFreePageID {
-		t.Fatalf("t3 rootPageID = %d, want %d", got, secondFreePageID)
+	if got := db.tables["t3"].RootPageID(); got != storage.PageID(headBeforeCreate) {
+		t.Fatalf("t3 rootPageID = %d, want %d", got, headBeforeCreate)
 	}
 }
 

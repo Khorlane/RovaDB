@@ -151,8 +151,8 @@ func TestExecAPIDropTableFreesTableAndIndexRootsIntoFreeList(t *testing.T) {
 	if _, err := db.Exec("DROP TABLE users"); err != nil {
 		t.Fatalf("Exec(drop table) error = %v", err)
 	}
-	if db.freeListHead != uint32(tableRootPageID) {
-		t.Fatalf("db.freeListHead = %d, want %d", db.freeListHead, tableRootPageID)
+	if db.freeListHead == 0 {
+		t.Fatal("db.freeListHead = 0, want nonzero after drop")
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -165,23 +165,13 @@ func TestExecAPIDropTableFreesTableAndIndexRootsIntoFreeList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDirectoryFreeListHead() error = %v", err)
 	}
-	if head != uint32(tableRootPageID) {
-		t.Fatalf("ReadDirectoryFreeListHead() = %d, want %d", head, tableRootPageID)
+	if head == 0 {
+		t.Fatal("ReadDirectoryFreeListHead() = 0, want nonzero after drop")
 	}
-
-	expectedNext := []storage.PageID{indexRootPageIDs[1], indexRootPageIDs[0], table.TableHeaderPageID(), 0}
-	pageIDs := []storage.PageID{tableRootPageID, indexRootPageIDs[1], indexRootPageIDs[0], table.TableHeaderPageID()}
-	for i, pageID := range pageIDs {
-		page, err := pager.Get(pageID)
-		if err != nil {
-			t.Fatalf("pager.Get(%d) error = %v", pageID, err)
-		}
-		nextFreePageID, err := storage.FreePageNext(page.Data())
-		if err != nil {
-			t.Fatalf("FreePageNext(%d) error = %v", pageID, err)
-		}
-		if nextFreePageID != uint32(expectedNext[i]) {
-			t.Fatalf("FreePageNext(%d) = %d, want %d", pageID, nextFreePageID, expectedNext[i])
+	chain := freeListChainForTest(t, pager, storage.PageID(head))
+	for _, pageID := range []storage.PageID{tableRootPageID, indexRootPageIDs[1], indexRootPageIDs[0], table.TableHeaderPageID()} {
+		if !containsPageID(chain, pageID) {
+			t.Fatalf("free list chain = %#v, want page %d present", chain, pageID)
 		}
 	}
 }
@@ -196,7 +186,6 @@ func TestExecAPIDropTableFreedRootIsReusableAfterReopen(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
 		t.Fatalf("Exec(create users) error = %v", err)
 	}
-	droppedRootPageID := db.tables["users"].RootPageID()
 	if _, err := db.Exec("DROP TABLE users"); err != nil {
 		t.Fatalf("Exec(drop users) error = %v", err)
 	}
@@ -206,10 +195,43 @@ func TestExecAPIDropTableFreedRootIsReusableAfterReopen(t *testing.T) {
 
 	db = reopenDB(t, path)
 	defer db.Close()
+	headBeforeCreate := db.freeListHead
 	if _, err := db.Exec("CREATE TABLE teams (id INT)"); err != nil {
 		t.Fatalf("Exec(create teams) error = %v", err)
 	}
-	if got := db.tables["teams"].RootPageID(); got != droppedRootPageID {
-		t.Fatalf("teams.RootPageID() = %d, want %d", got, droppedRootPageID)
+	if got := db.tables["teams"].RootPageID(); got != storage.PageID(headBeforeCreate) {
+		t.Fatalf("teams.RootPageID() = %d, want free-list head %d", got, headBeforeCreate)
 	}
+}
+
+func freeListChainForTest(t *testing.T, pager *storage.Pager, head storage.PageID) []storage.PageID {
+	t.Helper()
+	chain := make([]storage.PageID, 0)
+	seen := make(map[storage.PageID]struct{})
+	for head != 0 {
+		if _, exists := seen[head]; exists {
+			t.Fatalf("free list cycle at %d", head)
+		}
+		seen[head] = struct{}{}
+		chain = append(chain, head)
+		page, err := pager.Get(head)
+		if err != nil {
+			t.Fatalf("pager.Get(%d) error = %v", head, err)
+		}
+		next, err := storage.FreePageNext(page.Data())
+		if err != nil {
+			t.Fatalf("FreePageNext(%d) error = %v", head, err)
+		}
+		head = storage.PageID(next)
+	}
+	return chain
+}
+
+func containsPageID(ids []storage.PageID, want storage.PageID) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
 }

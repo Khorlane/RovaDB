@@ -411,6 +411,44 @@ func TestFetchRowByLocatorFromIndexLeafSurvivesReopen(t *testing.T) {
 	}
 }
 
+func TestFetchRowByLocatorRejectsWrongOwnedDataPage(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT, name TEXT)",
+		"CREATE TABLE teams (id INT, name TEXT)",
+		"INSERT INTO users VALUES (1, 'alice')",
+		"INSERT INTO teams VALUES (7, 'ops')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	otherPageIDs, err := committedTableDataPageIDs(db.pool, db.tables["teams"])
+	if err != nil {
+		t.Fatalf("committedTableDataPageIDs(teams) error = %v", err)
+	}
+	if len(otherPageIDs) != 1 {
+		t.Fatalf("len(committedTableDataPageIDs(teams)) = %d, want 1", len(otherPageIDs))
+	}
+
+	_, err = db.fetchRowByLocator(db.tables["users"], storage.RowLocator{
+		PageID: uint32(otherPageIDs[0]),
+		SlotID: 0,
+	})
+	if err == nil {
+		t.Fatal("fetchRowByLocator() error = nil, want corruption error")
+	}
+	if err.Error() != "storage: corrupted table page" {
+		t.Fatalf("fetchRowByLocator() error = %q, want %q", err.Error(), "storage: corrupted table page")
+	}
+}
+
 func TestIndexedCountStarLookupSurvivesReopen(t *testing.T) {
 	path := testDBPath(t)
 

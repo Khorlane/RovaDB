@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"bytes"
 	"sort"
 
 	"github.com/Khorlane/RovaDB/internal/executor"
@@ -95,7 +94,10 @@ func (db *DB) ensureSystemCatalogTables(tables map[string]*executor.Table) (map[
 			Columns:   append([]parser.ColumnDef(nil), spec.columns...),
 			IndexDefs: nil,
 		}
+		tableHeaderPageID := nextFreshID
+		nextFreshID++
 		table.SetStorageMeta(rootPageID, 0)
+		table.SetPhysicalTableRootMeta(tableHeaderPageID, storage.CurrentTableStorageFormatVersion, 0, 0, 0)
 		tables[spec.name] = table
 		if isNew {
 			newPageIDs[rootPageID] = struct{}{}
@@ -106,7 +108,23 @@ func (db *DB) ensureSystemCatalogTables(tables map[string]*executor.Table) (map[
 	return newPageIDs, changed, nil
 }
 
-func (db *DB) rebuildSystemCatalogRows(tables map[string]*executor.Table, newPageIDs map[storage.PageID]struct{}) ([]stagedPage, bool, error) {
+func systemCatalogReservedNextFreshID(tables map[string]*executor.Table, nextFreshID storage.PageID) storage.PageID {
+	for _, spec := range systemCatalogTableSpecs() {
+		table := tables[spec.name]
+		if table == nil {
+			continue
+		}
+		if table.RootPageID() >= nextFreshID {
+			nextFreshID = table.RootPageID() + 1
+		}
+		if table.TableHeaderPageID() >= nextFreshID {
+			nextFreshID = table.TableHeaderPageID() + 1
+		}
+	}
+	return nextFreshID
+}
+
+func (db *DB) rebuildSystemCatalogRows(tables map[string]*executor.Table, newPageIDs map[storage.PageID]struct{}, startNextFreshID storage.PageID) ([]stagedPage, bool, error) {
 	if db == nil || db.pager == nil {
 		return nil, false, nil
 	}
@@ -125,35 +143,94 @@ func (db *DB) rebuildSystemCatalogRows(tables map[string]*executor.Table, newPag
 
 	pages := make([]stagedPage, 0, len(rowSets))
 	changed := false
+	nextFreshID := startNextFreshID
+	freedPhysicalPageIDs := make([]storage.PageID, 0)
+	combinedFreeListHead := db.freeListHead
 	for _, spec := range systemCatalogTableSpecs() {
 		table := tables[spec.name]
 		if table == nil || !table.IsSystem {
 			return nil, false, newStorageError("corrupted catalog page")
 		}
-		rows := cloneRows(rowSets[spec.name])
-		pageData, err := storage.BuildSlottedTablePageData(uint32(table.RootPageID()), rows)
-		if err != nil {
-			return nil, false, wrapStorageError(err)
+		if _, isNew := newPageIDs[table.RootPageID()]; isNew {
+			rootPageData, err := storage.BuildSlottedTablePageData(uint32(table.RootPageID()), nil)
+			if err != nil {
+				return nil, false, wrapStorageError(err)
+			}
+			pages = append(pages, stagedPage{
+				id:    table.RootPageID(),
+				data:  rootPageData,
+				isNew: true,
+			})
+			nextFreshID = nextFreshPageIDAfter(pages, nextFreshID)
 		}
-
-		currentPageData, err := db.pager.ReadPage(table.RootPageID())
-		if err != nil {
-			return nil, false, wrapStorageError(err)
+		rows := cloneRows(rowSets[spec.name])
+		oldPersistedRowCount := table.PersistedRowCount()
+		var committedRows [][]parser.Value
+		if _, isNew := newPageIDs[table.RootPageID()]; !isNew {
+			_, committedRows, err = loadCommittedTableRowsAndLocators(db.pool, table)
+			if err != nil {
+				return nil, false, err
+			}
+			spaceMapPageIDs, dataPageIDs, err := committedTablePhysicalStorageInventory(db.pool, table)
+			if err != nil {
+				return nil, false, err
+			}
+			freedPhysicalPageIDs = append(freedPhysicalPageIDs, spaceMapPageIDs...)
+			freedPhysicalPageIDs = append(freedPhysicalPageIDs, dataPageIDs...)
 		}
 		table.Rows = rows
 		table.SetStorageMeta(table.RootPageID(), uint32(len(rows)))
-		if !bytes.Equal(currentPageData, pageData) || table.PersistedRowCount() != uint32(len(rows)) {
+		db.freeListHead = 0
+		tablePages, _, err := db.stageTableRewriteViaPhysicalStorage(table, rows, true, nextFreshID, false)
+		if err != nil {
+			return nil, false, err
+		}
+		pages = append(pages, tablePages...)
+		nextFreshID = nextFreshPageIDAfter(pages, nextFreshID)
+		if !systemCatalogRowsEqual(committedRows, rows) || oldPersistedRowCount != uint32(len(rows)) {
 			changed = true
 		}
-		_, isNew := newPageIDs[table.RootPageID()]
-		pages = append(pages, stagedPage{
-			id:    table.RootPageID(),
-			data:  pageData,
-			isNew: isNew,
-		})
 	}
+	db.freeListHead = combinedFreeListHead
+	if len(freedPhysicalPageIDs) != 0 {
+		freedPages, err := db.buildFreedPages(freedPhysicalPageIDs...)
+		if err != nil {
+			return nil, false, err
+		}
+		pages = append(pages, freedPages...)
+	}
+	newPages := make([]stagedPage, 0, len(pages))
+	existingPages := make([]stagedPage, 0, len(pages))
+	for _, page := range pages {
+		if page.isNew {
+			newPages = append(newPages, page)
+			continue
+		}
+		existingPages = append(existingPages, page)
+	}
+	sort.Slice(newPages, func(i, j int) bool {
+		return newPages[i].id < newPages[j].id
+	})
+	pages = append(newPages, existingPages...)
 
 	return pages, changed, nil
+}
+
+func systemCatalogRowsEqual(a [][]parser.Value, b [][]parser.Value) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if len(a[i]) != len(b[i]) {
+			return false
+		}
+		for j := range a[i] {
+			if a[i][j] != b[i][j] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func buildSystemCatalogRows(tables map[string]*executor.Table) ([][]parser.Value, [][]parser.Value, [][]parser.Value, [][]parser.Value, error) {
