@@ -1634,9 +1634,9 @@ func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, t
 		return nil
 	}
 
-	// UPDATE/DELETE and any persisted row-content change currently use a full
-	// table root-page rewrite. This is the intentional fallback path when the
-	// planner/executor cannot use a narrower persistence strategy.
+	// DELETE and wider persisted row-content rewrites still use a full physical
+	// table rewrite through the committed TableHeader/SpaceMap/Data model when a
+	// narrower path is not in play.
 	table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
 	originalFreeListHead := db.freeListHead
 	pages, locators, err := db.stageTableRewriteViaPhysicalStorage(table, table.Rows, false, db.pager.NextPageID(), true)

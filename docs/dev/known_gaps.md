@@ -24,7 +24,7 @@ Status values:
 - [kg026] Engine `done` Make `DROP TABLE` executable and durable
 - [kg022] Engine `done` Realign `INT` semantics to 32-bit
 - [kg023] Engine `done` Enforce a bounded indexable TEXT size
-- [dx005] Explore and lock the Physical Storage Layer milestone
+- [dx005] Physical Storage Layer milestone `done`
 - [dx001] Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc
 - [dx002] Explore planner usage for multi-column indexes
 - [dx003] Explore primary key as an explicit table-definition contract
@@ -118,18 +118,22 @@ Resolved direction:
 
 ## Design Explorations
 
-### Explore and lock the Physical Storage Layer milestone [dx005]
+### `done` Physical Storage Layer milestone [dx005] `(commit: 54f7828)`
 
-Exploration scope:
+Resolved direction:
 
-- replace the current single-page table row-storage assumption with a durable
-  multi-page physical storage model
-- define the `TableHeader` / `SpaceMap` / `Data` ownership model clearly before
-  implementation expands storage behavior
-- make the next major storage milestone explicit as
-  `v0.37.0-physical-storage-layer`
+- tables now use a durable multi-page physical storage model
+- each table has an authoritative `TableHeader`
+- `SpaceMap` pages enumerate owned `Data` pages
+- normal inserts, reads, scans, and locator-based fetches operate on owned
+  `Data` pages
+- row-growth updates relocate through delete plus reinsert when the new version
+  no longer fits in place
+- open, reopen, and corruption detection strictly validate physical ownership
+  invariants with no backward-compatibility path for pre-physstore table
+  storage
 
-Locked direction so far:
+Implemented architecture:
 
 - one single database file with one global 4 KB page heap
 - exactly three physical page types:
@@ -148,12 +152,6 @@ Locked direction so far:
 - `SpaceMap` is authoritative for table-local `Data` page inventory and
   free-space classification
 - rows remain addressed by `PageID + SlotID`
-
-Implementation truthfulness:
-
-- this model is not implemented yet
-- current tables do not yet use `TableHeader` or `SpaceMap` pages
-- the current engine still has the one-page table-storage limitation
 
 Guiding doc:
 

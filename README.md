@@ -4,22 +4,27 @@ A small, idiomatic embedded SQL database for Go.
 
 RovaDB is a Go-first embedded relational database engine designed for clarity, portability, and long-term extensibility. It is intended to feel natural to Go developers, remain understandable to contributors, and grow without boxing itself into a dead-end architecture.
 
-> **Status:** Pre-release. The current `v0.36.x` line reflects a practical, durable baseline with a small public API, focused SQL support, explicit public transaction control through the Go API, and narrow index-only access for eligible query shapes.
+> **Status:** Pre-release. The current `v0.37.x` line reflects a practical, durable baseline with a small public API, focused SQL support, explicit public transaction control through the Go API, narrow index-only access for eligible query shapes, and the completed Physical Storage Layer milestone.
 
 ## In Progress
 
-Current engineering focus is the next major storage evolution beyond the current `v0.36.x` baseline.
+Current engineering focus is the post-Physical-Storage-Layer path beyond the current `v0.37.x` baseline.
 
 The direction under active exploration is:
-- moving from the current single-page table layout toward a fuller page-based storage engine
 - strengthening durability and recovery beyond the current rollback-journal model
 - expanding on-disk indexing and transaction foundations to support a more capable long-term engine
+- continuing to harden and extend the new `TableHeader` / `SpaceMap` / owned-`Data` page storage model
 
-The next named milestone for that work is:
+The completed storage milestone is:
 - `v0.37.0-physical-storage-layer`
 
-That milestone is currently a locked design target, not an implemented storage
-format. The current engine still uses its existing table-storage model today.
+That milestone is now implemented in the engine:
+- tables have authoritative `TableHeader` roots
+- `SpaceMap` pages enumerate owned `Data` pages
+- normal writes land on owned `Data` pages
+- normal reads and scans enumerate rows from owned `Data` pages
+- row-growth updates relocate through delete plus reinsert when they no longer fit in place
+- open and reopen strictly validate physical ownership invariants with no backward-compatibility path for pre-physstore table storage
 
 This work is about deepening storage and transaction internals while preserving RovaDB's existing goals around clarity, determinism, and a small stable public API.
 

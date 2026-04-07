@@ -1,26 +1,23 @@
 # Road To V1
 
 This is a temporary development planning note for the remaining path to RovaDB
-V1.
+V1 after the Physical Storage Layer milestone.
 
 It is intentionally high-level. It captures the major work buckets after the
 current docs-and-design stabilization phase.
 
 ## Status
 
-The docs-and-design stabilization phase now includes a locked next storage
-milestone:
+The next storage milestone has now been completed:
 
 - `v0.37.0-physical-storage-layer`
 
 Current intent:
 
-- keep the current engine truthful about the still-implemented single-page table
-  storage model
-- use the locked Physical Storage Layer design as the next storage/runtime
-  implementation anchor
-- then continue the remaining V1-oriented feature and hardening work in small
-  slices
+- keep docs and examples truthful about the implemented physical storage model
+- build the remaining V1-oriented hardening and product polish on top of the
+  completed Physical Storage Layer baseline
+- continue the remaining work in small explicit slices
 
 ## V1 Objective
 
@@ -43,25 +40,24 @@ Primary target:
 
 - `v0.37.0-physical-storage-layer`
 
-Goal:
+Implemented outcome:
 
-- implement the locked `TableHeader` / `SpaceMap` / `Data` storage model
-- remove the current single-page table storage limit
-- preserve truthful ownership and authority boundaries between CAT/DIR,
-  table-root physical metadata, and table-local free-space tracking
-- carry the storage/runtime/recovery implications through to a coherent durable
-  baseline
+- tables now use the locked `TableHeader` / `SpaceMap` / `Data` storage model
+- the old single-page table-storage limit is removed from normal runtime
+- writes, reads, scans, relocation-on-growth updates, reopen, and corruption
+  detection now follow one physical ownership model
+- CAT/DIR logical authority and physical table-root authority remain separated
 
 Guiding doc:
 
 - `docs/dev/PHYSICAL_STORAGE_LAYER_design.md`
 
-Why this comes next:
+Why this mattered:
 
-- it is the next major storage milestone after the current `v0.36.x` baseline
-- it addresses the current standout table-storage limitation directly
-- later lifecycle and hardening work should build on the intended physical
-  storage model rather than the temporary single-page assumption
+- it was the major storage milestone after the `v0.36.x` baseline
+- it removed the standout table-storage limitation directly
+- later lifecycle and hardening work should now build on this physical storage
+  model rather than on temporary assumptions
 
 ### 3. Final V1 Hardening and Product Polish
 
@@ -83,8 +79,7 @@ Reference note:
 
 The following should be complete before calling the line V1-ready:
 
-- Physical Storage Layer completed to replace the current single-page table
-  storage limit
+- Physical Storage Layer completed and documented as the current storage truth
 - reopen and recovery confidence across schema/index lifecycle operations
 
 ## Not Required For V1
@@ -115,13 +110,13 @@ for `v1.0.0`.
 
 Current baseline:
 
-- `v0.36.x`
+- `v0.37.x`
 
 Next milestone anchor:
 
 - `v0.37.0-physical-storage-layer`
   - `TableHeader` / `SpaceMap` / multi-page `Data` ownership model
-  - multi-page table storage beyond the current single-page table limit
+  - multi-page table storage for normal runtime
   - storage, runtime, and recovery implications for the new model
 
 After that milestone lands, reassess the remaining V1 path intentionally rather

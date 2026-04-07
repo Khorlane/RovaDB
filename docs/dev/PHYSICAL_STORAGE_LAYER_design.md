@@ -2,30 +2,27 @@
 
 ## Purpose
 
-This note locks the target architecture for the Physical Storage Layer milestone.
+This note locks the architecture for the Physical Storage Layer milestone and now also serves as the implemented-storage reference for that milestone.
 
-It is intentionally a design decision document, not an implementation document.
-It does not mean the model described here is already implemented in the current
-engine.
+It remains a design-decision document first, but the described storage model is now the current engine truth.
 
-## Current Implemented State
+## Implemented State
 
-Today, RovaDB already has:
+RovaDB currently has:
 
 - one single database file
 - a global `4096`-byte page size
 - page 0 as the durable database header / directory control page
 - CAT/DIR metadata persisted in page 0 or CAT/DIR overflow pages
 - durable page-backed indexes
+- authoritative `TableHeader` roots for tables
+- `SpaceMap` chains that enumerate table-owned `Data` pages
+- normal inserts, reads, scans, and row-growth updates routed through that physical model
+- strict open/reopen validation of physical ownership invariants
 
-Today, table row storage still has the important limiting assumption that one
-table's row storage is effectively rooted in a single table page. This note
-defines the architecture that should replace that limitation.
+## Locked Architecture
 
-## Locked Target Architecture
-
-The Physical Storage Layer milestone will keep one single database file backed
-by one global 4 KB page heap.
+The Physical Storage Layer milestone uses one single database file backed by one global 4 KB page heap.
 
 The physical page model is locked to exactly three physical page types:
 
@@ -105,24 +102,24 @@ The free-space classification buckets are locked to:
 - `Medium`
 - `High`
 
-The insert path is locked to be `SpaceMap`-driven. Inserts should consult the
-table's `SpaceMap` inventory and free-space classification rather than walking a
-linked list of `Data` pages looking for room.
+The insert path is `SpaceMap`-driven. Inserts consult the table's `SpaceMap`
+inventory and free-space classification rather than walking a linked list of
+`Data` pages looking for room.
 
 ## Mutation Model
 
-For the first implementation phase of this architecture, row-growth updates are
-locked to the simpler correctness-first rule:
+For the current implementation phase of this architecture, row-growth updates
+follow the simpler correctness-first rule:
 
 - if an update cannot fit in the current row location, it relocates through
   delete plus reinsert semantics
 
-This avoids prematurely locking in an in-place row-growth strategy before the
-multi-page storage model is proven correct.
+This keeps growth handling explicit and correct without introducing forwarding
+pointers, overflow fragments, or linked-row chains.
 
 ## Recovery And Durability Invariants
 
-The Physical Storage Layer milestone must preserve these core recovery
+The Physical Storage Layer milestone preserves these core recovery
 invariants:
 
 - no orphan owned pages
@@ -135,24 +132,20 @@ and corruption-detection paths.
 
 ## Byte Layout Still Intentionally Undefined
 
-This note intentionally does not yet define exact byte-level layouts for:
+This note intentionally does not serve as the byte-level format spec for:
 
-- `DatabaseHeader`
-- `TableHeader`
-- `SpaceMap`
-- `Data`
-- `SpaceMap` entry encoding
 - bucket thresholds
 - chain-pointer field positions
 - per-page counters
 - exact WAL/journal record shapes needed for this model
 
-Those details belong to later implementation slices once the architecture itself
-is stable and accepted.
+The engine now has concrete byte-level implementations for `TableHeader`,
+`SpaceMap`, owned `Data` pages, and their validations in code. This note still
+avoids duplicating those low-level definitions.
 
-## Non-Goals Of This Note
+## Historical Non-Goals
 
-This note does not claim that:
+These statements were true while the milestone was being landed, but they are no longer current:
 
 - `TableHeader` pages already exist in code
 - `SpaceMap` pages already exist in code
@@ -160,5 +153,5 @@ This note does not claim that:
 - current on-disk page-type enums already expose these new types
 - the multi-page table-storage implementation is already complete
 
-It only locks the target architecture so implementation slices can proceed
-without re-deciding the storage model.
+The milestone is now implemented; this note remains useful as the locked design
+summary behind that implementation.
