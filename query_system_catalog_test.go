@@ -1,6 +1,7 @@
 package rovadb
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/storage"
@@ -245,8 +246,8 @@ func TestQuerySystemCatalogTablesImmediatelyAfterUpgradeOpen(t *testing.T) {
 	if err == nil {
 		t.Fatal("upgrade Open() error = nil, want corrupted header page")
 	}
-	if err.Error() != "storage: corrupted header page" {
-		t.Fatalf("upgrade Open() error = %v, want %q", err, "storage: corrupted header page")
+	if !strings.Contains(err.Error(), "storage: corrupted header page:") || !strings.Contains(err.Error(), "orphan table-header page") {
+		t.Fatalf("upgrade Open() error = %v, want orphan table-header detail", err)
 	}
 }
 

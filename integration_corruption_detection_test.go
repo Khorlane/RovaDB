@@ -3,6 +3,7 @@ package rovadb
 import (
 	"encoding/binary"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/storage"
@@ -101,9 +102,7 @@ func TestCorruptedTablePageDetected(t *testing.T) {
 	if err == nil {
 		t.Fatal("Open() error = nil, want non-nil")
 	}
-	if err.Error() != "storage: corrupted table page" {
-		t.Fatalf("Open() error = %q, want %q", err.Error(), "storage: corrupted table page")
-	}
+	assertErrorContainsAll(t, err, "storage: corrupted table page:", `table "users"`, "data page", "wrong owning table id")
 }
 
 func TestCorruptedRowDataDetected(t *testing.T) {
@@ -235,9 +234,7 @@ func TestOpenRejectsWrongOwnedDataPageCountInTableHeader(t *testing.T) {
 	}
 
 	_, err = Open(path)
-	if err == nil || err.Error() != "storage: corrupted header page" {
-		t.Fatalf("Open() error = %v, want %q", err, "storage: corrupted header page")
-	}
+	assertErrorContainsAll(t, err, "storage: corrupted header page:", `table "users"`, "owned data page count mismatch")
 }
 
 func TestOpenRejectsWrongOwnedSpaceMapPageCountInTableHeader(t *testing.T) {
@@ -270,9 +267,7 @@ func TestOpenRejectsWrongOwnedSpaceMapPageCountInTableHeader(t *testing.T) {
 	}
 
 	_, err = Open(path)
-	if err == nil || err.Error() != "storage: corrupted header page" {
-		t.Fatalf("Open() error = %v, want %q", err, "storage: corrupted header page")
-	}
+	assertErrorContainsAll(t, err, "storage: corrupted header page:", `table "users"`, "owned space-map page count mismatch")
 }
 
 func TestOpenRejectsDuplicateDataPageIDsInSpaceMapInventory(t *testing.T) {
@@ -323,9 +318,7 @@ func TestOpenRejectsDuplicateDataPageIDsInSpaceMapInventory(t *testing.T) {
 	}
 
 	_, err = Open(path)
-	if err == nil || err.Error() != "storage: corrupted space map page" {
-		t.Fatalf("Open() error = %v, want %q", err, "storage: corrupted space map page")
-	}
+	assertErrorContainsAll(t, err, "storage: corrupted space map page:", `table "users"`, "duplicate data page")
 }
 
 func TestOpenRejectsSpaceMapEntryPointingAtWrongPageType(t *testing.T) {
@@ -363,9 +356,7 @@ func TestOpenRejectsSpaceMapEntryPointingAtWrongPageType(t *testing.T) {
 	}
 
 	_, err = Open(path)
-	if err == nil || err.Error() != "storage: corrupted table page" {
-		t.Fatalf("Open() error = %v, want %q", err, "storage: corrupted table page")
-	}
+	assertErrorContainsAll(t, err, "storage: corrupted table page:", `table "users"`, "data page", "wrong owning table id")
 }
 
 func TestOpenRejectsReferencedDataPageWithWrongOwningTableID(t *testing.T) {
@@ -401,9 +392,7 @@ func TestOpenRejectsReferencedDataPageWithWrongOwningTableID(t *testing.T) {
 	}
 
 	_, err = Open(path)
-	if err == nil || err.Error() != "storage: corrupted table page" {
-		t.Fatalf("Open() error = %v, want %q", err, "storage: corrupted table page")
-	}
+	assertErrorContainsAll(t, err, "storage: corrupted table page:", `table "users"`, "data page", "wrong owning table id")
 }
 
 func TestOpenRejectsBrokenSpaceMapChain(t *testing.T) {
@@ -452,9 +441,7 @@ func TestOpenRejectsBrokenSpaceMapChain(t *testing.T) {
 	}
 
 	_, err = Open(path)
-	if err == nil || err.Error() != "storage: corrupted space map page" {
-		t.Fatalf("Open() error = %v, want %q", err, "storage: corrupted space map page")
-	}
+	assertErrorContainsAll(t, err, "storage: corrupted space map page:", `table "users"`, "space-map chain revisits page")
 }
 
 func TestOpenRejectsOrphanOwnedDataPage(t *testing.T) {
@@ -483,9 +470,7 @@ func TestOpenRejectsOrphanOwnedDataPage(t *testing.T) {
 	}
 
 	_, err = Open(path)
-	if err == nil || err.Error() != "storage: corrupted table page" {
-		t.Fatalf("Open() error = %v, want %q", err, "storage: corrupted table page")
-	}
+	assertErrorContainsAll(t, err, "storage: corrupted table page:", "orphan owned data page", "claims table id")
 }
 
 func closeAndOpenRawWithoutWAL(t *testing.T, path string, db *DB) (*storage.DBFile, *storage.Pager) {
@@ -500,4 +485,16 @@ func closeAndOpenRawWithoutWAL(t *testing.T, path string, db *DB) (*storage.DBFi
 		t.Fatalf("Remove(WALPath) error = %v", err)
 	}
 	return openRawStorage(t, path)
+}
+
+func assertErrorContainsAll(t *testing.T, err error, want ...string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("error = nil, want non-nil")
+	}
+	for _, part := range want {
+		if !strings.Contains(err.Error(), part) {
+			t.Fatalf("error %q missing %q", err.Error(), part)
+		}
+	}
 }

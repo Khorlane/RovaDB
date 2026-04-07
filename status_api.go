@@ -23,10 +23,13 @@ type EngineStatus struct {
 
 // EngineCheckResult summarizes a small read-only consistency check.
 type EngineCheckResult struct {
-	OK                bool
-	CheckedTableRoots int
-	CheckedIndexRoots int
-	FreeListHead      uint32
+	OK                   bool
+	CheckedTableRoots    int
+	CheckedTableHeaders  int
+	CheckedIndexRoots    int
+	CheckedSpaceMapPages int
+	CheckedDataPages     int
+	FreeListHead         uint32
 }
 
 // EnginePageUsage summarizes physical page usage by validated page type.
@@ -43,10 +46,19 @@ type EnginePageUsage struct {
 
 // EngineTableInfo is a compact logical table inventory entry.
 type EngineTableInfo struct {
-	TableID    uint32
-	TableName  string
-	RootPageID uint32
-	IndexCount int
+	TableID                 uint32
+	TableName               string
+	RootPageID              uint32
+	TableHeaderPageID       uint32
+	FirstSpaceMapPageID     uint32
+	OwnedSpaceMapPages      uint32
+	EnumeratedSpaceMapPages uint32
+	OwnedDataPages          uint32
+	EnumeratedDataPages     uint32
+	PhysicalMetaPresent     bool
+	PhysicalMetaValid       bool
+	PhysicalInventoryMatch  bool
+	IndexCount              int
 }
 
 // EngineIndexInfo is a compact logical index inventory entry.
@@ -86,7 +98,10 @@ func (s EngineSnapshot) String() string {
 	b.WriteString("Consistency\n")
 	fmt.Fprintf(&b, "OK: %t\n", s.Check.OK)
 	fmt.Fprintf(&b, "Checked table roots: %d\n", s.Check.CheckedTableRoots)
-	fmt.Fprintf(&b, "Checked index roots: %d\n\n", s.Check.CheckedIndexRoots)
+	fmt.Fprintf(&b, "Checked table headers: %d\n", s.Check.CheckedTableHeaders)
+	fmt.Fprintf(&b, "Checked index roots: %d\n", s.Check.CheckedIndexRoots)
+	fmt.Fprintf(&b, "Checked space map pages: %d\n", s.Check.CheckedSpaceMapPages)
+	fmt.Fprintf(&b, "Checked data pages: %d\n\n", s.Check.CheckedDataPages)
 
 	b.WriteString("Page Usage\n")
 	fmt.Fprintf(&b, "Total: %d\n", s.PageUsage.TotalPages)
@@ -101,7 +116,25 @@ func (s EngineSnapshot) String() string {
 	b.WriteString("Schema Inventory\n")
 	b.WriteString("Tables:\n")
 	for _, table := range s.Inventory.Tables {
-		fmt.Fprintf(&b, "- %s (id=%d, root=%d, indexes=%d)\n", table.TableName, table.TableID, table.RootPageID, table.IndexCount)
+		physicalState := "missing"
+		if table.PhysicalMetaPresent && table.PhysicalMetaValid && table.PhysicalInventoryMatch {
+			physicalState = "ok"
+		} else if table.PhysicalMetaPresent {
+			physicalState = "mismatch"
+		}
+		fmt.Fprintf(&b, "- %s (id=%d, root=%d, header=%d, first_space_map=%d, space_maps=%d/%d, data_pages=%d/%d, physical=%s, indexes=%d)\n",
+			table.TableName,
+			table.TableID,
+			table.RootPageID,
+			table.TableHeaderPageID,
+			table.FirstSpaceMapPageID,
+			table.OwnedSpaceMapPages,
+			table.EnumeratedSpaceMapPages,
+			table.OwnedDataPages,
+			table.EnumeratedDataPages,
+			physicalState,
+			table.IndexCount,
+		)
 	}
 	b.WriteString("Indexes:\n")
 	for _, index := range s.Inventory.Indexes {
@@ -183,6 +216,14 @@ func (db *DB) CheckEngineConsistency() (EngineCheckResult, error) {
 			return result, wrapStorageError(err)
 		}
 		result.CheckedTableRoots++
+		result.CheckedTableHeaders++
+
+		spaceMapPageIDs, dataPageIDs, err := committedTablePhysicalStorageInventory(db.pool, table)
+		if err != nil {
+			return result, err
+		}
+		result.CheckedSpaceMapPages += len(spaceMapPageIDs)
+		result.CheckedDataPages += len(dataPageIDs)
 
 		for _, indexDef := range table.IndexDefs {
 			if indexDef.IndexID == 0 || indexDef.RootPageID == 0 {
@@ -275,11 +316,53 @@ func (db *DB) SchemaInventory() (EngineSchemaInventory, error) {
 		if table == nil || table.IsSystem {
 			continue
 		}
+		physicalMetaPresent := table.TableHeaderPageID() != 0
+		physicalMetaValid := false
+		if physicalMetaPresent {
+			headerPageData, err := readCommittedPageData(db.pool, table.TableHeaderPageID())
+			if err != nil {
+				return inventory, wrapStorageError(err)
+			}
+			if err := storage.ValidateTableHeaderPage(headerPageData); err != nil {
+				return inventory, wrapStorageError(err)
+			}
+			headerTableID, err := storage.TableHeaderTableID(headerPageData)
+			if err != nil {
+				return inventory, wrapStorageError(err)
+			}
+			physicalMetaValid = headerTableID == table.TableID
+		}
+		var enumeratedSpaceMapPages uint32
+		var enumeratedDataPages uint32
+		physicalInventoryMatch := false
+		if table.FirstSpaceMapPageID() == 0 {
+			physicalInventoryMatch = physicalMetaPresent && physicalMetaValid && table.OwnedSpaceMapPageCount() == 0 && table.OwnedDataPageCount() == 0
+		} else {
+			spaceMapPageIDs, dataPageIDs, err := committedTablePhysicalStorageInventory(db.pool, table)
+			if err != nil {
+				return inventory, err
+			}
+			enumeratedSpaceMapPages = uint32(len(spaceMapPageIDs))
+			enumeratedDataPages = uint32(len(dataPageIDs))
+			physicalInventoryMatch = physicalMetaPresent &&
+				physicalMetaValid &&
+				table.OwnedSpaceMapPageCount() == enumeratedSpaceMapPages &&
+				table.OwnedDataPageCount() == enumeratedDataPages
+		}
 		inventory.Tables = append(inventory.Tables, EngineTableInfo{
-			TableID:    table.TableID,
-			TableName:  table.Name,
-			RootPageID: uint32(table.RootPageID()),
-			IndexCount: len(table.IndexDefs),
+			TableID:                 table.TableID,
+			TableName:               table.Name,
+			RootPageID:              uint32(table.RootPageID()),
+			TableHeaderPageID:       uint32(table.TableHeaderPageID()),
+			FirstSpaceMapPageID:     uint32(table.FirstSpaceMapPageID()),
+			OwnedSpaceMapPages:      table.OwnedSpaceMapPageCount(),
+			EnumeratedSpaceMapPages: enumeratedSpaceMapPages,
+			OwnedDataPages:          table.OwnedDataPageCount(),
+			EnumeratedDataPages:     enumeratedDataPages,
+			PhysicalMetaPresent:     physicalMetaPresent,
+			PhysicalMetaValid:       physicalMetaValid,
+			PhysicalInventoryMatch:  physicalInventoryMatch,
+			IndexCount:              len(table.IndexDefs),
 		})
 		for _, indexDef := range table.IndexDefs {
 			inventory.Indexes = append(inventory.Indexes, EngineIndexInfo{

@@ -3927,7 +3927,7 @@ func loadPhysicalTableRoots(pool *bufferpool.BufferPool, tables map[string]*exec
 			continue
 		case storage.DirectoryRootMappingObjectTableHeader:
 			if _, exists := headerMappings[mapping.ObjectID]; exists {
-				return wrapStorageError(newStorageError("corrupted header page"))
+				return wrapStorageError(newPhysicalStorageDiagnosticError("corrupted header page", "duplicate table-header mapping for table id %d", mapping.ObjectID))
 			}
 			headerMappings[mapping.ObjectID] = storage.PageID(mapping.RootPageID)
 		case storage.DirectoryRootMappingObjectIndex:
@@ -3943,21 +3943,21 @@ func loadPhysicalTableRoots(pool *bufferpool.BufferPool, tables map[string]*exec
 		}
 		headerPageID, ok := headerMappings[table.TableID]
 		if !ok || headerPageID == 0 {
-			return wrapStorageError(newStorageError("corrupted header page"))
+			return wrapStorageError(newTablePhysicalStorageError(table, "corrupted header page", "missing table-header mapping"))
 		}
 		pageData, err := readCommittedPageData(pool, headerPageID)
 		if err != nil {
 			return wrapStorageError(err)
 		}
 		if err := storage.ValidateTableHeaderPage(pageData); err != nil {
-			return wrapStorageError(err)
+			return wrapStorageError(newTablePhysicalStorageError(table, "corrupted header page", "header page %d is invalid", headerPageID))
 		}
 		tableID, err := storage.TableHeaderTableID(pageData)
 		if err != nil {
-			return wrapStorageError(err)
+			return wrapStorageError(newTablePhysicalStorageError(table, "corrupted header page", "header page %d has unreadable owning table id", headerPageID))
 		}
 		if tableID != table.TableID {
-			return wrapStorageError(newStorageError("corrupted header page"))
+			return wrapStorageError(newTablePhysicalStorageError(table, "corrupted header page", "header page %d claims table id %d", headerPageID, tableID))
 		}
 		storageVersion, err := storage.TableHeaderStorageFormatVersion(pageData)
 		if err != nil {
@@ -3979,7 +3979,13 @@ func loadPhysicalTableRoots(pool *bufferpool.BufferPool, tables map[string]*exec
 		delete(headerMappings, table.TableID)
 	}
 	if len(headerMappings) != 0 {
-		return wrapStorageError(newStorageError("corrupted header page"))
+		tableIDs := make([]int, 0, len(headerMappings))
+		for tableID := range headerMappings {
+			tableIDs = append(tableIDs, int(tableID))
+		}
+		sort.Ints(tableIDs)
+		tableID := uint32(tableIDs[0])
+		return wrapStorageError(newPhysicalStorageDiagnosticError("corrupted header page", "orphan table-header mapping for table id %d points to page %d", tableID, headerMappings[tableID]))
 	}
 	return nil
 }
@@ -4158,7 +4164,7 @@ func committedTablePhysicalStorageInventory(pool *bufferpool.BufferPool, table *
 		return nil, nil, nil
 	}
 	if pool == nil {
-		return nil, nil, newStorageError("corrupted space map page")
+		return nil, nil, newTablePhysicalStorageError(table, "corrupted space map page", "buffer pool unavailable for physical inventory")
 	}
 
 	seenSpaceMaps := make(map[storage.PageID]struct{})
@@ -4168,7 +4174,7 @@ func committedTablePhysicalStorageInventory(pool *bufferpool.BufferPool, table *
 	nextSpaceMapID := table.FirstSpaceMapPageID()
 	for nextSpaceMapID != 0 {
 		if _, exists := seenSpaceMaps[nextSpaceMapID]; exists {
-			return nil, nil, newStorageError("corrupted space map page")
+			return nil, nil, newTablePhysicalStorageError(table, "corrupted space map page", "space-map chain revisits page %d", nextSpaceMapID)
 		}
 		seenSpaceMaps[nextSpaceMapID] = struct{}{}
 		spaceMapPageIDs = append(spaceMapPageIDs, nextSpaceMapID)
@@ -4178,17 +4184,17 @@ func committedTablePhysicalStorageInventory(pool *bufferpool.BufferPool, table *
 			return nil, nil, wrapStorageError(err)
 		}
 		if pageData == nil {
-			return nil, nil, newStorageError("corrupted space map page")
+			return nil, nil, newTablePhysicalStorageError(table, "corrupted space map page", "space-map page %d is missing", nextSpaceMapID)
 		}
 		if err := storage.ValidateSpaceMapPage(pageData); err != nil {
-			return nil, nil, wrapStorageError(err)
+			return nil, nil, wrapStorageError(newTablePhysicalStorageError(table, "corrupted space map page", "space-map page %d is invalid", nextSpaceMapID))
 		}
 		owningTableID, err := storage.SpaceMapOwningTableID(pageData)
 		if err != nil {
-			return nil, nil, wrapStorageError(err)
+			return nil, nil, wrapStorageError(newTablePhysicalStorageError(table, "corrupted space map page", "space-map page %d has unreadable owning table id", nextSpaceMapID))
 		}
 		if owningTableID != table.TableID {
-			return nil, nil, newStorageError("corrupted space map page")
+			return nil, nil, newTablePhysicalStorageError(table, "corrupted space map page", "space-map page %d claims table id %d", nextSpaceMapID, owningTableID)
 		}
 		entryCount, err := storage.SpaceMapEntryCount(pageData)
 		if err != nil {
@@ -4200,17 +4206,17 @@ func committedTablePhysicalStorageInventory(pool *bufferpool.BufferPool, table *
 				return nil, nil, wrapStorageError(err)
 			}
 			if _, exists := seenDataPages[entry.DataPageID]; exists {
-				return nil, nil, newStorageError("corrupted space map page")
+				return nil, nil, newTablePhysicalStorageError(table, "corrupted space map page", "duplicate data page %d in space-map inventory", entry.DataPageID)
 			}
 			dataPageData, err := readCommittedPageData(pool, entry.DataPageID)
 			if err != nil {
 				return nil, nil, wrapStorageError(err)
 			}
 			if dataPageData == nil {
-				return nil, nil, newStorageError("corrupted table page")
+				return nil, nil, newTablePhysicalStorageError(table, "corrupted table page", "space-map inventory references missing data page %d", entry.DataPageID)
 			}
 			if err := storage.ValidateOwnedDataPage(dataPageData, table.TableID); err != nil {
-				return nil, nil, wrapStorageError(err)
+				return nil, nil, wrapStorageError(newTablePhysicalStorageError(table, "corrupted table page", "data page %d is invalid or has the wrong owning table id", entry.DataPageID))
 			}
 			seenDataPages[entry.DataPageID] = struct{}{}
 			dataPageIDs = append(dataPageIDs, entry.DataPageID)
@@ -4222,10 +4228,10 @@ func committedTablePhysicalStorageInventory(pool *bufferpool.BufferPool, table *
 		nextSpaceMapID = storage.PageID(nextPageID)
 	}
 	if uint32(len(spaceMapPageIDs)) != table.OwnedSpaceMapPageCount() {
-		return nil, nil, newStorageError("corrupted header page")
+		return nil, nil, newTablePhysicalStorageError(table, "corrupted header page", "owned space-map page count mismatch: header=%d inventory=%d", table.OwnedSpaceMapPageCount(), len(spaceMapPageIDs))
 	}
 	if uint32(len(dataPageIDs)) != table.OwnedDataPageCount() {
-		return nil, nil, newStorageError("corrupted header page")
+		return nil, nil, newTablePhysicalStorageError(table, "corrupted header page", "owned data page count mismatch: header=%d inventory=%d", table.OwnedDataPageCount(), len(dataPageIDs))
 	}
 	return spaceMapPageIDs, dataPageIDs, nil
 }
@@ -4253,13 +4259,13 @@ func validateCommittedPhysicalTableStorage(pool *bufferpool.BufferPool, pager *s
 			legacyRootPages[table.RootPageID()] = struct{}{}
 		}
 		if table.TableHeaderPageID() == 0 {
-			return wrapStorageError(newStorageError("corrupted header page"))
+			return wrapStorageError(newTablePhysicalStorageError(table, "corrupted header page", "missing table-header root metadata"))
 		}
 		if _, free := freePages[table.TableHeaderPageID()]; free {
-			return wrapStorageError(newStorageError("corrupted header page"))
+			return wrapStorageError(newTablePhysicalStorageError(table, "corrupted header page", "header page %d is also present in the free list", table.TableHeaderPageID()))
 		}
 		if existingOwner, exists := headerOwners[table.TableHeaderPageID()]; exists && existingOwner != table.TableID {
-			return wrapStorageError(newStorageError("corrupted header page"))
+			return wrapStorageError(newTablePhysicalStorageError(table, "corrupted header page", "header page %d is already owned by table id %d", table.TableHeaderPageID(), existingOwner))
 		}
 		headerOwners[table.TableHeaderPageID()] = table.TableID
 
@@ -4268,14 +4274,14 @@ func validateCommittedPhysicalTableStorage(pool *bufferpool.BufferPool, pager *s
 			return wrapStorageError(err)
 		}
 		if err := storage.ValidateTableHeaderPage(headerPageData); err != nil {
-			return wrapStorageError(err)
+			return wrapStorageError(newTablePhysicalStorageError(table, "corrupted header page", "header page %d is invalid", table.TableHeaderPageID()))
 		}
 		headerTableID, err := storage.TableHeaderTableID(headerPageData)
 		if err != nil {
-			return wrapStorageError(err)
+			return wrapStorageError(newTablePhysicalStorageError(table, "corrupted header page", "header page %d has unreadable owning table id", table.TableHeaderPageID()))
 		}
 		if headerTableID != table.TableID {
-			return wrapStorageError(newStorageError("corrupted header page"))
+			return wrapStorageError(newTablePhysicalStorageError(table, "corrupted header page", "header page %d claims table id %d", table.TableHeaderPageID(), headerTableID))
 		}
 
 		firstSpaceMapPageID := table.FirstSpaceMapPageID()
@@ -4283,10 +4289,10 @@ func validateCommittedPhysicalTableStorage(pool *bufferpool.BufferPool, pager *s
 		ownedSpaceMapPages := table.OwnedSpaceMapPageCount()
 		if firstSpaceMapPageID == 0 {
 			if ownedDataPages != 0 || ownedSpaceMapPages != 0 {
-				return wrapStorageError(newStorageError("corrupted header page"))
+				return wrapStorageError(newTablePhysicalStorageError(table, "corrupted header page", "header reports owned pages without a first space-map root"))
 			}
 		} else if ownedSpaceMapPages == 0 {
-			return wrapStorageError(newStorageError("corrupted header page"))
+			return wrapStorageError(newTablePhysicalStorageError(table, "corrupted header page", "header references first space-map page %d but reports zero owned space-map pages", firstSpaceMapPageID))
 		}
 
 		spaceMapPageIDs, dataPageIDs, err := committedTablePhysicalStorageInventory(pool, table)
@@ -4295,19 +4301,19 @@ func validateCommittedPhysicalTableStorage(pool *bufferpool.BufferPool, pager *s
 		}
 		for _, pageID := range spaceMapPageIDs {
 			if _, free := freePages[pageID]; free {
-				return wrapStorageError(newStorageError("corrupted space map page"))
+				return wrapStorageError(newTablePhysicalStorageError(table, "corrupted space map page", "space-map page %d is also present in the free list", pageID))
 			}
 			if existingOwner, exists := spaceMapOwners[pageID]; exists && existingOwner != table.TableID {
-				return wrapStorageError(newStorageError("corrupted space map page"))
+				return wrapStorageError(newTablePhysicalStorageError(table, "corrupted space map page", "space-map page %d is already owned by table id %d", pageID, existingOwner))
 			}
 			spaceMapOwners[pageID] = table.TableID
 		}
 		for _, pageID := range dataPageIDs {
 			if _, free := freePages[pageID]; free {
-				return wrapStorageError(newStorageError("corrupted table page"))
+				return wrapStorageError(newTablePhysicalStorageError(table, "corrupted table page", "data page %d is also present in the free list", pageID))
 			}
 			if existingOwner, exists := dataPageOwners[pageID]; exists && existingOwner != table.TableID {
-				return wrapStorageError(newStorageError("corrupted table page"))
+				return wrapStorageError(newTablePhysicalStorageError(table, "corrupted table page", "data page %d is already owned by table id %d", pageID, existingOwner))
 			}
 			dataPageOwners[pageID] = table.TableID
 		}
@@ -4337,14 +4343,14 @@ func validateCommittedPhysicalTableStorage(pool *bufferpool.BufferPool, pager *s
 				continue
 			}
 			if pageID == 0 {
-				return wrapStorageError(newStorageError("corrupted header page"))
+				return wrapStorageError(newPhysicalStorageDiagnosticError("corrupted header page", "page 0 cannot be a table-header page"))
 			}
 			if _, ok := headerOwners[pageID]; !ok {
-				return wrapStorageError(newStorageError("corrupted header page"))
+				return wrapStorageError(newPhysicalStorageDiagnosticError("corrupted header page", "orphan table-header page %d is not referenced by any table", pageID))
 			}
 		case storage.PageTypeSpaceMap:
 			if _, ok := spaceMapOwners[pageID]; !ok {
-				return wrapStorageError(newStorageError("corrupted space map page"))
+				return wrapStorageError(newPhysicalStorageDiagnosticError("corrupted space map page", "orphan space-map page %d is not referenced by any table", pageID))
 			}
 		case storage.PageTypeTable:
 			owningTableID, err := storage.TablePageOwningTableID(pageData)
@@ -4355,11 +4361,30 @@ func validateCommittedPhysicalTableStorage(pool *bufferpool.BufferPool, pager *s
 				continue
 			}
 			if owner, ok := dataPageOwners[pageID]; !ok || owner != owningTableID {
-				return wrapStorageError(newStorageError("corrupted table page"))
+				return wrapStorageError(newPhysicalStorageDiagnosticError("corrupted table page", "orphan owned data page %d claims table id %d", pageID, owningTableID))
 			}
 		}
 	}
 	return nil
+}
+
+func physicalTableDiagnosticLabel(table *executor.Table) string {
+	if table == nil {
+		return "table <nil>"
+	}
+	if table.Name == "" {
+		return fmt.Sprintf("table id=%d", table.TableID)
+	}
+	return fmt.Sprintf("table %q (id=%d)", table.Name, table.TableID)
+}
+
+func newPhysicalStorageDiagnosticError(pageFamily string, format string, args ...any) error {
+	return newStorageError(fmt.Sprintf("%s: %s", pageFamily, fmt.Sprintf(format, args...)))
+}
+
+func newTablePhysicalStorageError(table *executor.Table, pageFamily string, format string, args ...any) error {
+	detailArgs := append([]any{physicalTableDiagnosticLabel(table)}, args...)
+	return newPhysicalStorageDiagnosticError(pageFamily, "%s "+format, detailArgs...)
 }
 
 func committedFreePageSet(pool *bufferpool.BufferPool, head storage.PageID) (map[storage.PageID]struct{}, error) {

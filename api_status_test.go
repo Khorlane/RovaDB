@@ -146,8 +146,17 @@ func TestCheckEngineConsistencyOnFreshDB(t *testing.T) {
 	if result.CheckedTableRoots != 0 {
 		t.Fatalf("CheckEngineConsistency().CheckedTableRoots = %d, want 0", result.CheckedTableRoots)
 	}
+	if result.CheckedTableHeaders != 0 {
+		t.Fatalf("CheckEngineConsistency().CheckedTableHeaders = %d, want 0", result.CheckedTableHeaders)
+	}
 	if result.CheckedIndexRoots != 0 {
 		t.Fatalf("CheckEngineConsistency().CheckedIndexRoots = %d, want 0", result.CheckedIndexRoots)
+	}
+	if result.CheckedSpaceMapPages != 0 {
+		t.Fatalf("CheckEngineConsistency().CheckedSpaceMapPages = %d, want 0", result.CheckedSpaceMapPages)
+	}
+	if result.CheckedDataPages != 0 {
+		t.Fatalf("CheckEngineConsistency().CheckedDataPages = %d, want 0", result.CheckedDataPages)
 	}
 	if result.FreeListHead != 0 {
 		t.Fatalf("CheckEngineConsistency().FreeListHead = %d, want 0", result.FreeListHead)
@@ -182,8 +191,62 @@ func TestCheckEngineConsistencyTracksUserRootsOnly(t *testing.T) {
 	if result.CheckedTableRoots != 1 {
 		t.Fatalf("CheckEngineConsistency().CheckedTableRoots = %d, want 1", result.CheckedTableRoots)
 	}
+	if result.CheckedTableHeaders != 1 {
+		t.Fatalf("CheckEngineConsistency().CheckedTableHeaders = %d, want 1", result.CheckedTableHeaders)
+	}
 	if result.CheckedIndexRoots != 1 {
 		t.Fatalf("CheckEngineConsistency().CheckedIndexRoots = %d, want 1", result.CheckedIndexRoots)
+	}
+	if result.CheckedSpaceMapPages != 0 {
+		t.Fatalf("CheckEngineConsistency().CheckedSpaceMapPages = %d, want 0", result.CheckedSpaceMapPages)
+	}
+	if result.CheckedDataPages != 0 {
+		t.Fatalf("CheckEngineConsistency().CheckedDataPages = %d, want 0", result.CheckedDataPages)
+	}
+}
+
+func TestCheckEngineConsistencyTracksOwnedPhysicalPages(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, note TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	for id := 1; id <= 24; id++ {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", id, strings.Repeat("payload-", 110)); err != nil {
+			t.Fatalf("Exec(insert %d) error = %v", id, err)
+		}
+	}
+
+	table := db.tables["users"]
+	spaceMapPageIDs, dataPageIDs, err := committedTablePhysicalStorageInventory(db.pool, table)
+	if err != nil {
+		t.Fatalf("committedTablePhysicalStorageInventory() error = %v", err)
+	}
+
+	result, err := db.CheckEngineConsistency()
+	if err != nil {
+		t.Fatalf("CheckEngineConsistency() error = %v", err)
+	}
+	if !result.OK {
+		t.Fatal("CheckEngineConsistency().OK = false, want true")
+	}
+	if result.CheckedTableRoots != 1 {
+		t.Fatalf("CheckEngineConsistency().CheckedTableRoots = %d, want 1", result.CheckedTableRoots)
+	}
+	if result.CheckedTableHeaders != 1 {
+		t.Fatalf("CheckEngineConsistency().CheckedTableHeaders = %d, want 1", result.CheckedTableHeaders)
+	}
+	if result.CheckedSpaceMapPages != len(spaceMapPageIDs) {
+		t.Fatalf("CheckEngineConsistency().CheckedSpaceMapPages = %d, want %d", result.CheckedSpaceMapPages, len(spaceMapPageIDs))
+	}
+	if result.CheckedDataPages != len(dataPageIDs) {
+		t.Fatalf("CheckEngineConsistency().CheckedDataPages = %d, want %d", result.CheckedDataPages, len(dataPageIDs))
 	}
 }
 
@@ -508,13 +571,71 @@ func TestSchemaInventoryIncludesUserTablesAndIndexes(t *testing.T) {
 	}
 
 	tableInfo := inventory.Tables[0]
-	if tableInfo.TableID != users.TableID || tableInfo.TableName != "users" || tableInfo.RootPageID != uint32(users.RootPageID()) || tableInfo.IndexCount != 1 {
+	if tableInfo.TableID != users.TableID ||
+		tableInfo.TableName != "users" ||
+		tableInfo.RootPageID != uint32(users.RootPageID()) ||
+		tableInfo.TableHeaderPageID != uint32(users.TableHeaderPageID()) ||
+		tableInfo.FirstSpaceMapPageID != 0 ||
+		tableInfo.OwnedSpaceMapPages != 0 ||
+		tableInfo.EnumeratedSpaceMapPages != 0 ||
+		tableInfo.OwnedDataPages != 0 ||
+		tableInfo.EnumeratedDataPages != 0 ||
+		!tableInfo.PhysicalMetaPresent ||
+		!tableInfo.PhysicalMetaValid ||
+		!tableInfo.PhysicalInventoryMatch ||
+		tableInfo.IndexCount != 1 {
 		t.Fatalf("SchemaInventory().Tables[0] = %#v, want users metadata", tableInfo)
 	}
 
 	indexInfo := inventory.Indexes[0]
 	if indexInfo.IndexID != indexDef.IndexID || indexInfo.TableName != "users" || indexInfo.IndexName != "idx_users_name" || indexInfo.RootPageID != indexDef.RootPageID || !indexInfo.IsUnique {
 		t.Fatalf("SchemaInventory().Indexes[0] = %#v, want idx_users_name metadata", indexInfo)
+	}
+}
+
+func TestSchemaInventoryIncludesPhysicalStorageCountsForOwnedPages(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, note TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	for id := 1; id <= 24; id++ {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", id, strings.Repeat("payload-", 110)); err != nil {
+			t.Fatalf("Exec(insert %d) error = %v", id, err)
+		}
+	}
+
+	users := db.tables["users"]
+	spaceMapPageIDs, dataPageIDs, err := committedTablePhysicalStorageInventory(db.pool, users)
+	if err != nil {
+		t.Fatalf("committedTablePhysicalStorageInventory() error = %v", err)
+	}
+
+	inventory, err := db.SchemaInventory()
+	if err != nil {
+		t.Fatalf("SchemaInventory() error = %v", err)
+	}
+	if len(inventory.Tables) != 1 {
+		t.Fatalf("len(SchemaInventory().Tables) = %d, want 1", len(inventory.Tables))
+	}
+
+	tableInfo := inventory.Tables[0]
+	if tableInfo.TableHeaderPageID != uint32(users.TableHeaderPageID()) ||
+		tableInfo.FirstSpaceMapPageID != uint32(users.FirstSpaceMapPageID()) ||
+		tableInfo.OwnedSpaceMapPages != users.OwnedSpaceMapPageCount() ||
+		tableInfo.EnumeratedSpaceMapPages != uint32(len(spaceMapPageIDs)) ||
+		tableInfo.OwnedDataPages != users.OwnedDataPageCount() ||
+		tableInfo.EnumeratedDataPages != uint32(len(dataPageIDs)) ||
+		!tableInfo.PhysicalMetaPresent ||
+		!tableInfo.PhysicalMetaValid ||
+		!tableInfo.PhysicalInventoryMatch {
+		t.Fatalf("SchemaInventory().Tables[0] = %#v, want physical storage counts from users table", tableInfo)
 	}
 }
 
@@ -755,7 +876,10 @@ func TestEngineSnapshotStringOnFreshDBIsStable(t *testing.T) {
 		"Consistency\n" +
 		"OK: true\n" +
 		"Checked table roots: 0\n" +
-		"Checked index roots: 0\n\n" +
+		"Checked table headers: 0\n" +
+		"Checked index roots: 0\n" +
+		"Checked space map pages: 0\n" +
+		"Checked data pages: 0\n\n" +
 		"Page Usage\n" +
 		"Total: 9\n" +
 		"Header: 4\n" +
@@ -803,6 +927,11 @@ func TestEngineSnapshotStringIncludesSchemaDetails(t *testing.T) {
 		"\nPage Usage\n",
 		"\nSchema Inventory\n",
 		"Tables:\n- users (id=",
+		"header=",
+		"first_space_map=",
+		"space_maps=",
+		"data_pages=",
+		"physical=ok",
 		"Indexes:\n- users.idx_users_name (id=",
 	} {
 		if !strings.Contains(formatted, want) {

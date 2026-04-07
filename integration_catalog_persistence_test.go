@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
@@ -358,8 +359,8 @@ func TestOpenBootstrapsMissingInternalSystemCatalogTablesOnCurrentFormatDB(t *te
 	if err == nil {
 		t.Fatal("reopen Open() error = nil, want corrupted header page")
 	}
-	if err.Error() != "storage: corrupted header page" {
-		t.Fatalf("reopen Open() error = %v, want %q", err, "storage: corrupted header page")
+	if !strings.Contains(err.Error(), "storage: corrupted header page:") || !strings.Contains(err.Error(), "orphan table-header page") {
+		t.Fatalf("reopen Open() error = %v, want orphan table-header detail", err)
 	}
 }
 
@@ -554,8 +555,8 @@ func TestOpenRebuildsSystemCatalogRowsForCurrentFormatDBMissingSystemTables(t *t
 	if err == nil {
 		t.Fatal("reopen Open() error = nil, want corrupted header page")
 	}
-	if err.Error() != "storage: corrupted header page" {
-		t.Fatalf("reopen Open() error = %v, want %q", err, "storage: corrupted header page")
+	if !strings.Contains(err.Error(), "storage: corrupted header page:") || !strings.Contains(err.Error(), "orphan table-header page") {
+		t.Fatalf("reopen Open() error = %v, want orphan table-header detail", err)
 	}
 }
 
