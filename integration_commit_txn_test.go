@@ -1240,7 +1240,7 @@ func TestSuccessfulCommitPersistsDirectoryCheckpointMetadata(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE t (id INT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	const wantCheckpointPageCount = 6
+	const wantCheckpointPageCount = 7
 	if db.lastCheckpointLSN == 0 {
 		t.Fatal("db.lastCheckpointLSN = 0, want non-zero after checkpointed commit")
 	}

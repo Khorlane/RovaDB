@@ -1336,8 +1336,8 @@ func TestCreateTableFallsBackToFreshAllocationWhenFreeListEmpty(t *testing.T) {
 	}
 	defer db.Close()
 
-	if got := db.tables["t2"].RootPageID(); got != t1Root+1 {
-		t.Fatalf("t2 rootPageID = %d, want %d", got, t1Root+1)
+	if got := db.tables["t2"].RootPageID(); got != t1Root+2 {
+		t.Fatalf("t2 rootPageID = %d, want %d", got, t1Root+2)
 	}
 	if db.freeListHead != 0 {
 		t.Fatalf("db.freeListHead = %d, want 0", db.freeListHead)

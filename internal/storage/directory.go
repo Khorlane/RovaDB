@@ -29,6 +29,7 @@ const (
 const (
 	DirectoryRootMappingObjectTable uint8 = 1 + iota
 	DirectoryRootMappingObjectIndex
+	DirectoryRootMappingObjectTableHeader
 )
 
 const (
@@ -295,6 +296,7 @@ func ValidateDirectoryControlState(file *os.File, state DirectoryControlState) e
 	}
 
 	seenTableIDMappings := make(map[uint32]struct{}, len(state.RootIDMappings))
+	seenTableHeaderMappings := make(map[uint32]struct{}, len(state.RootIDMappings))
 	seenIndexIDMappings := make(map[uint32]struct{}, len(state.RootIDMappings))
 	for _, mapping := range state.RootIDMappings {
 		if mapping.ObjectID == 0 || mapping.RootPageID == 0 {
@@ -319,6 +321,21 @@ func ValidateDirectoryControlState(file *os.File, state DirectoryControlState) e
 				return errCorruptedDirectoryPage
 			}
 			seenTableIDMappings[mapping.ObjectID] = struct{}{}
+		case DirectoryRootMappingObjectTableHeader:
+			if err := ValidateTableHeaderPage(page); err != nil {
+				return err
+			}
+			tableID, err := TableHeaderTableID(page)
+			if err != nil {
+				return err
+			}
+			if tableID != mapping.ObjectID {
+				return errCorruptedHeaderPage
+			}
+			if _, exists := seenTableHeaderMappings[mapping.ObjectID]; exists {
+				return errCorruptedDirectoryPage
+			}
+			seenTableHeaderMappings[mapping.ObjectID] = struct{}{}
 		case DirectoryRootMappingObjectIndex:
 			if IsValidPageType(pageType) && pageType != PageTypeIndexLeaf && pageType != PageTypeIndexInternal {
 				return errCorruptedIndexPage
@@ -465,6 +482,8 @@ func ApplyDirectoryRootIDMappings(cat *CatalogData, mappings []DirectoryRootIDMa
 				return nil, errCorruptedDirectoryPage
 			}
 			tableMappings[mapping.ObjectID] = mapping.RootPageID
+		case DirectoryRootMappingObjectTableHeader:
+			continue
 		case DirectoryRootMappingObjectIndex:
 			if _, exists := indexMappings[mapping.ObjectID]; exists {
 				return nil, errCorruptedDirectoryPage
@@ -695,7 +714,7 @@ func directoryRootIDMappings(page []byte) ([]DirectoryRootIDMapping, error) {
 			return nil, errCorruptedDirectoryPage
 		}
 		switch objectType {
-		case DirectoryRootMappingObjectTable, DirectoryRootMappingObjectIndex:
+		case DirectoryRootMappingObjectTable, DirectoryRootMappingObjectIndex, DirectoryRootMappingObjectTableHeader:
 		default:
 			return nil, errCorruptedDirectoryPage
 		}
@@ -722,7 +741,7 @@ func encodeDirectoryRootIDMappings(mappings []DirectoryRootIDMapping) ([]byte, e
 			return nil, errCorruptedDirectoryPage
 		}
 		switch mapping.ObjectType {
-		case DirectoryRootMappingObjectTable, DirectoryRootMappingObjectIndex:
+		case DirectoryRootMappingObjectTable, DirectoryRootMappingObjectIndex, DirectoryRootMappingObjectTableHeader:
 		default:
 			return nil, errCorruptedDirectoryPage
 		}
@@ -765,7 +784,7 @@ func rewriteDirectoryCheckpointMetadata(page []byte, meta DirectoryCheckpointMet
 	binary.LittleEndian.PutUint64(page[offset:offset+8], meta.LastCheckpointLSN)
 	binary.LittleEndian.PutUint32(page[offset+8:offset+12], meta.LastCheckpointPageCount)
 	binary.LittleEndian.PutUint32(page[offset+12:offset+16], meta.ReservedCheckpoint)
-	return nil
+	return FinalizePageImage(page)
 }
 
 func directoryCheckpointOffset(page []byte) (int, error) {
@@ -915,8 +934,7 @@ func validateDirectoryPageImage(page []byte) error {
 	if err := ValidateDirectoryPage(page); err != nil {
 		return err
 	}
-	storedChecksum := binary.LittleEndian.Uint32(page[pageHeaderOffsetChecksum : pageHeaderOffsetChecksum+4])
-	if storedChecksum != 0 && storedChecksum != pageChecksum(page) {
+	if err := validateStoredPageChecksum(page); err != nil {
 		return errCorruptedDirectoryPage
 	}
 	return nil

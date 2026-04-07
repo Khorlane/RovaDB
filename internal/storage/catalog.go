@@ -270,6 +270,7 @@ func SaveCatalog(pager *Pager, cat *CatalogData) error {
 	currentMode := DirectoryCATDIRStorageModeEmbedded
 	currentOverflowHead := PageID(0)
 	currentOverflowCount := uint32(0)
+	rootIDMappings := BuildDirectoryRootIDMappings(cat)
 	if ValidateDirectoryPage(page.Data()) == nil {
 		freeListHead, err = DirectoryFreeListHead(page.Data())
 		if err != nil {
@@ -294,9 +295,14 @@ func SaveCatalog(pager *Pager, cat *CatalogData) error {
 				return err
 			}
 		}
+		existingMappings, err := directoryRootIDMappings(page.Data())
+		if err != nil {
+			return err
+		}
+		rootIDMappings = mergePreservedTableHeaderMappings(cat, rootIDMappings, existingMappings)
 	}
 	allocator := newCatalogOverflowAllocator(pager, &freeListHead)
-	plan, err := PrepareCatalogWritePlan(cat, currentMode, currentOverflowHead, currentOverflowCount, pager, CurrentDBFormatVersion, &freeListHead, checkpointMeta, allocator.Allocate)
+	plan, err := PrepareCatalogWritePlanWithRootMappings(cat, rootIDMappings, currentMode, currentOverflowHead, currentOverflowCount, pager, CurrentDBFormatVersion, &freeListHead, checkpointMeta, allocator.Allocate)
 	if err != nil {
 		return err
 	}
@@ -306,6 +312,29 @@ func SaveCatalog(pager *Pager, cat *CatalogData) error {
 	// Catalog mutation requires explicit dirty marking; later flush eligibility
 	// is driven by dirty tracking rather than implicit full flushes.
 	return nil
+}
+
+func mergePreservedTableHeaderMappings(cat *CatalogData, rootIDMappings []DirectoryRootIDMapping, existingMappings []DirectoryRootIDMapping) []DirectoryRootIDMapping {
+	if len(existingMappings) == 0 {
+		return rootIDMappings
+	}
+	tableIDs := make(map[uint32]struct{}, len(cat.Tables))
+	for _, table := range cat.Tables {
+		if table.TableID != 0 {
+			tableIDs[table.TableID] = struct{}{}
+		}
+	}
+	merged := append([]DirectoryRootIDMapping(nil), rootIDMappings...)
+	for _, mapping := range existingMappings {
+		if mapping.ObjectType != DirectoryRootMappingObjectTableHeader {
+			continue
+		}
+		if _, ok := tableIDs[mapping.ObjectID]; !ok {
+			continue
+		}
+		merged = append(merged, mapping)
+	}
+	return merged
 }
 
 // BuildCatalogPageData encodes the catalog into a full embedded directory page image.
@@ -470,10 +499,13 @@ func appendCatalogIndex(buf []byte, index CatalogIndex, columns []CatalogColumn)
 }
 
 func PrepareCatalogWritePlan(cat *CatalogData, currentMode uint32, currentOverflowHead PageID, currentOverflowPageCount uint32, reader PageReader, formatVersion uint32, freeListHead *uint32, checkpointMeta DirectoryCheckpointMetadata, allocate CatalogOverflowPageAllocator) (*CatalogWritePlan, error) {
+	return PrepareCatalogWritePlanWithRootMappings(cat, BuildDirectoryRootIDMappings(cat), currentMode, currentOverflowHead, currentOverflowPageCount, reader, formatVersion, freeListHead, checkpointMeta, allocate)
+}
+
+func PrepareCatalogWritePlanWithRootMappings(cat *CatalogData, rootIDMappings []DirectoryRootIDMapping, currentMode uint32, currentOverflowHead PageID, currentOverflowPageCount uint32, reader PageReader, formatVersion uint32, freeListHead *uint32, checkpointMeta DirectoryCheckpointMetadata, allocate CatalogOverflowPageAllocator) (*CatalogWritePlan, error) {
 	if freeListHead == nil {
 		return nil, errCorruptedDirectoryPage
 	}
-	rootIDMappings := BuildDirectoryRootIDMappings(cat)
 	rootIDPayload, err := encodeDirectoryRootIDMappings(rootIDMappings)
 	if err != nil {
 		return nil, err

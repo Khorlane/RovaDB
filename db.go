@@ -220,6 +220,11 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
+	if err := loadPhysicalTableRoots(pool, tables, rootIDMappings); err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, err
+	}
 	db := &DB{
 		path:                    path,
 		file:                    file,
@@ -871,6 +876,7 @@ func cloneSelectTableMeta(table *executor.Table) *executor.Table {
 		IndexDefs: cloneIndexDefs(table.IndexDefs),
 	}
 	cloned.SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
+	cloned.SetPhysicalTableRootMeta(table.TableHeaderPageID(), table.TableStorageFormatVersion(), table.FirstSpaceMapPageID(), table.OwnedDataPageCount(), table.OwnedSpaceMapPageCount())
 	return cloned
 }
 
@@ -925,6 +931,7 @@ func (db *DB) tablesForSelect(plan *planner.SelectPlan) (map[string]*executor.Ta
 			IndexDefs: cloneIndexDefs(table.IndexDefs),
 		}
 		execTables[table.Name].SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
+		execTables[table.Name].SetPhysicalTableRootMeta(table.TableHeaderPageID(), table.TableStorageFormatVersion(), table.FirstSpaceMapPageID(), table.OwnedDataPageCount(), table.OwnedSpaceMapPageCount())
 	}
 	return execTables, nil
 }
@@ -1595,22 +1602,34 @@ func (db *DB) applyStagedCreate(stagedTables map[string]*executor.Table, tableNa
 		table.TableID = nextTableID(stagedTables)
 	}
 
-	rootPageID, isNew, err := db.allocatePageID()
+	nextFreshID := db.pager.NextPageID()
+	rootPageID, isNew, err := db.allocatePageIDFrom(&nextFreshID)
 	if err != nil {
 		return err
 	}
 	table.SetStorageMeta(rootPageID, 0)
+	tableHeaderPageID := nextFreshID
+	nextFreshID++
+	table.SetPhysicalTableRootMeta(tableHeaderPageID, storage.CurrentTableStorageFormatVersion, 0, 0, 0)
 
 	rootPageData, err := storage.BuildSlottedTablePageData(uint32(rootPageID), nil)
 	if err != nil {
 		return wrapStorageError(err)
 	}
+	tableHeaderPageData := storage.InitTableHeaderPage(uint32(tableHeaderPageID), table.TableID)
 
-	if err := db.stageSchemaState(stagedTables, []stagedPage{{
-		id:    rootPageID,
-		data:  rootPageData,
-		isNew: isNew,
-	}}); err != nil {
+	if err := db.stageSchemaState(stagedTables, []stagedPage{
+		{
+			id:    rootPageID,
+			data:  rootPageData,
+			isNew: isNew,
+		},
+		{
+			id:    tableHeaderPageID,
+			data:  tableHeaderPageData,
+			isNew: true,
+		},
+	}); err != nil {
 		return err
 	}
 	return nil
@@ -1847,12 +1866,18 @@ func (db *DB) stageSchemaState(stagedTables map[string]*executor.Table, pages []
 		return nil
 	}
 
+	nextFreshID := nextFreshPageIDAfter(pages, db.pager.NextPageID())
+	tableHeaderPages, err := db.ensureTableHeaderRoots(stagedTables, nextFreshID)
+	if err != nil {
+		return err
+	}
 	systemPages, _, err := db.rebuildSystemCatalogRows(stagedTables, nil)
 	if err != nil {
 		return err
 	}
-	allPages := make([]stagedPage, 0, len(pages)+len(systemPages))
+	allPages := make([]stagedPage, 0, len(pages)+len(tableHeaderPages)+len(systemPages))
 	allPages = append(allPages, pages...)
+	allPages = append(allPages, tableHeaderPages...)
 	allPages = append(allPages, systemPages...)
 
 	catalogWrite, err := db.buildCatalogPageData(stagedTables, allPages)
@@ -1860,6 +1885,44 @@ func (db *DB) stageSchemaState(stagedTables map[string]*executor.Table, pages []
 		return wrapStorageError(err)
 	}
 	return db.stageDirtyState(catalogWrite, allPages)
+}
+
+func (db *DB) ensureTableHeaderRoots(stagedTables map[string]*executor.Table, nextFreshID storage.PageID) ([]stagedPage, error) {
+	if db == nil || db.pager == nil {
+		return nil, nil
+	}
+
+	tableNames := make([]string, 0, len(stagedTables))
+	for name, table := range stagedTables {
+		if table == nil {
+			continue
+		}
+		tableNames = append(tableNames, name)
+	}
+	sort.Strings(tableNames)
+
+	pages := make([]stagedPage, 0)
+	for _, tableName := range tableNames {
+		table := stagedTables[tableName]
+		if table == nil {
+			continue
+		}
+		if table.TableID == 0 {
+			table.TableID = nextTableID(stagedTables)
+		}
+		if table.TableHeaderPageID() != 0 {
+			continue
+		}
+		tableHeaderPageID := nextFreshID
+		nextFreshID++
+		table.SetPhysicalTableRootMeta(tableHeaderPageID, storage.CurrentTableStorageFormatVersion, 0, 0, 0)
+		pages = append(pages, stagedPage{
+			id:    tableHeaderPageID,
+			data:  storage.InitTableHeaderPage(uint32(tableHeaderPageID), table.TableID),
+			isNew: true,
+		})
+	}
+	return pages, nil
 }
 
 func (db *DB) buildCatalogPageData(stagedTables map[string]*executor.Table, pages []stagedPage) (*storage.CatalogWritePlan, error) {
@@ -1916,7 +1979,7 @@ func (db *DB) buildCatalogPageData(stagedTables map[string]*executor.Table, page
 		freeListHead = allocator.FreePage.HeadPageID
 		return storage.PageID(allocated), !reused, nil
 	}
-	return storage.PrepareCatalogWritePlan(catalogFromTables(stagedTables), currentMode, currentOverflowHead, currentOverflowCount, db.pager, storage.CurrentDBFormatVersion, &freeListHead, storage.DirectoryCheckpointMetadata{
+	return storage.PrepareCatalogWritePlanWithRootMappings(catalogFromTables(stagedTables), directoryRootMappingsFromTables(stagedTables), currentMode, currentOverflowHead, currentOverflowCount, db.pager, storage.CurrentDBFormatVersion, &freeListHead, storage.DirectoryCheckpointMetadata{
 		LastCheckpointLSN:       db.lastCheckpointLSN,
 		LastCheckpointPageCount: db.lastCheckpointPageCount,
 	}, allocateOverflowPage)
@@ -1927,13 +1990,22 @@ func (db *DB) persistCatalogState(stagedTables map[string]*executor.Table, pages
 		return nil
 	}
 
-	catalogWrite, err := db.buildCatalogPageData(stagedTables, pages)
+	nextFreshID := nextFreshPageIDAfter(pages, db.pager.NextPageID())
+	tableHeaderPages, err := db.ensureTableHeaderRoots(stagedTables, nextFreshID)
+	if err != nil {
+		return err
+	}
+	allPages := make([]stagedPage, 0, len(pages)+len(tableHeaderPages))
+	allPages = append(allPages, pages...)
+	allPages = append(allPages, tableHeaderPages...)
+
+	catalogWrite, err := db.buildCatalogPageData(stagedTables, allPages)
 	if err != nil {
 		return wrapStorageError(err)
 	}
 
-	stagedPages := make([]stagedPage, 0, len(pages)+len(catalogWrite.OverflowPages)+len(catalogWrite.ReclaimedPages)+1)
-	stagedPages = append(stagedPages, pages...)
+	stagedPages := make([]stagedPage, 0, len(allPages)+len(catalogWrite.OverflowPages)+len(catalogWrite.ReclaimedPages)+1)
+	stagedPages = append(stagedPages, allPages...)
 	for _, overflowPage := range catalogWrite.OverflowPages {
 		stagedPages = append(stagedPages, stagedPage{
 			id:    overflowPage.PageID,
@@ -2056,6 +2128,15 @@ func (db *DB) allocatePageID() (storage.PageID, bool, error) {
 	}
 	nextFreshID := db.pager.NextPageID()
 	return db.allocatePageIDFrom(&nextFreshID)
+}
+
+func nextFreshPageIDAfter(pages []stagedPage, nextFreshID storage.PageID) storage.PageID {
+	for _, staged := range pages {
+		if staged.isNew && staged.id >= nextFreshID {
+			nextFreshID = staged.id + 1
+		}
+	}
+	return nextFreshID
 }
 
 func (db *DB) allocatePageIDFrom(nextFreshID *storage.PageID) (storage.PageID, bool, error) {
@@ -2314,6 +2395,7 @@ func cloneTable(table *executor.Table) *executor.Table {
 		IndexDefs: cloneIndexDefs(table.IndexDefs),
 	}
 	cloned.SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
+	cloned.SetPhysicalTableRootMeta(table.TableHeaderPageID(), table.TableStorageFormatVersion(), table.FirstSpaceMapPageID(), table.OwnedDataPageCount(), table.OwnedSpaceMapPageCount())
 	return cloned
 }
 
@@ -2963,6 +3045,56 @@ func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
 	return catalog
 }
 
+func directoryRootMappingsFromTables(tables map[string]*executor.Table) []storage.DirectoryRootIDMapping {
+	names := make([]string, 0, len(tables))
+	for name := range tables {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	mappings := make([]storage.DirectoryRootIDMapping, 0, len(names)*3)
+	for _, name := range names {
+		table := tables[name]
+		if table == nil || table.TableID == 0 {
+			continue
+		}
+		if table.RootPageID() != 0 {
+			mappings = append(mappings, storage.DirectoryRootIDMapping{
+				ObjectType: storage.DirectoryRootMappingObjectTable,
+				ObjectID:   table.TableID,
+				RootPageID: uint32(table.RootPageID()),
+			})
+		}
+		if table.TableHeaderPageID() != 0 {
+			mappings = append(mappings, storage.DirectoryRootIDMapping{
+				ObjectType: storage.DirectoryRootMappingObjectTableHeader,
+				ObjectID:   table.TableID,
+				RootPageID: uint32(table.TableHeaderPageID()),
+			})
+		}
+
+		indexNames := make([]string, 0, len(table.IndexDefs))
+		indexByName := make(map[string]storage.CatalogIndex, len(table.IndexDefs))
+		for _, indexDef := range table.IndexDefs {
+			indexNames = append(indexNames, indexDef.Name)
+			indexByName[indexDef.Name] = indexDef
+		}
+		sort.Strings(indexNames)
+		for _, indexName := range indexNames {
+			indexDef := indexByName[indexName]
+			if indexDef.IndexID == 0 || indexDef.RootPageID == 0 {
+				continue
+			}
+			mappings = append(mappings, storage.DirectoryRootIDMapping{
+				ObjectType: storage.DirectoryRootMappingObjectIndex,
+				ObjectID:   indexDef.IndexID,
+				RootPageID: indexDef.RootPageID,
+			})
+		}
+	}
+	return mappings
+}
+
 func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table, error) {
 	tables := make(map[string]*executor.Table)
 	if catalog == nil {
@@ -3165,7 +3297,10 @@ func droppedTableRootPageIDs(tables map[string]*executor.Table, tableName string
 	}
 	sort.Strings(indexNames)
 
-	pageIDs := make([]storage.PageID, 0, len(indexNames)+1)
+	pageIDs := make([]storage.PageID, 0, len(indexNames)+2)
+	if table.TableHeaderPageID() != 0 {
+		pageIDs = append(pageIDs, table.TableHeaderPageID())
+	}
 	for _, indexName := range indexNames {
 		pageIDs = append(pageIDs, indexRoots[indexName])
 	}
@@ -3173,6 +3308,75 @@ func droppedTableRootPageIDs(tables map[string]*executor.Table, tableName string
 		pageIDs = append(pageIDs, table.RootPageID())
 	}
 	return pageIDs
+}
+
+func loadPhysicalTableRoots(pool *bufferpool.BufferPool, tables map[string]*executor.Table, mappings []storage.DirectoryRootIDMapping) error {
+	if pool == nil {
+		return ErrInvalidArgument
+	}
+
+	headerMappings := make(map[uint32]storage.PageID, len(mappings))
+	for _, mapping := range mappings {
+		switch mapping.ObjectType {
+		case storage.DirectoryRootMappingObjectTable:
+			continue
+		case storage.DirectoryRootMappingObjectTableHeader:
+			if _, exists := headerMappings[mapping.ObjectID]; exists {
+				return wrapStorageError(newStorageError("corrupted header page"))
+			}
+			headerMappings[mapping.ObjectID] = storage.PageID(mapping.RootPageID)
+		case storage.DirectoryRootMappingObjectIndex:
+			continue
+		default:
+			return wrapStorageError(newStorageError("corrupted directory page"))
+		}
+	}
+
+	for _, table := range tables {
+		if table == nil || table.TableID == 0 {
+			continue
+		}
+		headerPageID, ok := headerMappings[table.TableID]
+		if !ok || headerPageID == 0 {
+			return wrapStorageError(newStorageError("corrupted header page"))
+		}
+		pageData, err := readCommittedPageData(pool, headerPageID)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		if err := storage.ValidateTableHeaderPage(pageData); err != nil {
+			return wrapStorageError(err)
+		}
+		tableID, err := storage.TableHeaderTableID(pageData)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		if tableID != table.TableID {
+			return wrapStorageError(newStorageError("corrupted header page"))
+		}
+		storageVersion, err := storage.TableHeaderStorageFormatVersion(pageData)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		firstSpaceMapPageID, err := storage.TableHeaderFirstSpaceMapPageID(pageData)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		ownedDataPages, err := storage.TableHeaderOwnedDataPageCount(pageData)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		ownedSpaceMapPages, err := storage.TableHeaderOwnedSpaceMapPageCount(pageData)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		table.SetPhysicalTableRootMeta(headerPageID, storageVersion, storage.PageID(firstSpaceMapPageID), ownedDataPages, ownedSpaceMapPages)
+		delete(headerMappings, table.TableID)
+	}
+	if len(headerMappings) != 0 {
+		return wrapStorageError(newStorageError("corrupted header page"))
+	}
+	return nil
 }
 
 type pagerPageLoader struct {

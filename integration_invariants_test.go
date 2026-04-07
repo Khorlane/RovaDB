@@ -37,9 +37,10 @@ func TestOpenRejectsExactStorageRowCountMismatch(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveCatalog() error = %v", err)
 	}
-	if err := pager.Flush(); err != nil {
-		t.Fatalf("pager.Flush() error = %v", err)
-	}
+	persistStrictPhysicalMetaForTests(t, dbFile.File(), pager, []strictTablePhysicalMetaForTest{{
+		tableID:       1,
+		rowRootPageID: rootPage.ID(),
+	}})
 
 	_, err = Open(path)
 	if err == nil {

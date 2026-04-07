@@ -169,8 +169,8 @@ func TestExecAPIDropTableFreesTableAndIndexRootsIntoFreeList(t *testing.T) {
 		t.Fatalf("ReadDirectoryFreeListHead() = %d, want %d", head, tableRootPageID)
 	}
 
-	expectedNext := []storage.PageID{indexRootPageIDs[1], indexRootPageIDs[0], 0}
-	pageIDs := []storage.PageID{tableRootPageID, indexRootPageIDs[1], indexRootPageIDs[0]}
+	expectedNext := []storage.PageID{indexRootPageIDs[1], indexRootPageIDs[0], table.TableHeaderPageID(), 0}
+	pageIDs := []storage.PageID{tableRootPageID, indexRootPageIDs[1], indexRootPageIDs[0], table.TableHeaderPageID()}
 	for i, pageID := range pageIDs {
 		page, err := pager.Get(pageID)
 		if err != nil {

@@ -319,17 +319,20 @@ func TestPageUsageOnFreshDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PageUsage() error = %v", err)
 	}
-	if usage.TotalPages != 5 {
-		t.Fatalf("PageUsage().TotalPages = %d, want 5", usage.TotalPages)
+	if usage.TotalPages != 9 {
+		t.Fatalf("PageUsage().TotalPages = %d, want 9", usage.TotalPages)
 	}
 	if usage.DirectoryPages != 1 {
 		t.Fatalf("PageUsage().DirectoryPages = %d, want 1", usage.DirectoryPages)
 	}
+	if usage.HeaderPages != 4 {
+		t.Fatalf("PageUsage().HeaderPages = %d, want 4 system table header pages", usage.HeaderPages)
+	}
 	if usage.TablePages != 4 {
 		t.Fatalf("PageUsage().TablePages = %d, want 4 system table pages", usage.TablePages)
 	}
-	if usage.IndexLeafPages != 0 || usage.IndexInternalPages != 0 || usage.FreePages != 0 {
-		t.Fatalf("PageUsage() = %#v, want only directory + system table pages", usage)
+	if usage.SpaceMapPages != 0 || usage.IndexLeafPages != 0 || usage.IndexInternalPages != 0 || usage.FreePages != 0 {
+		t.Fatalf("PageUsage() = %#v, want only directory + system table/header pages", usage)
 	}
 }
 
@@ -756,7 +759,9 @@ func TestEngineSnapshotStringOnFreshDBIsStable(t *testing.T) {
 		"Checked table roots: 0\n" +
 		"Checked index roots: 0\n\n" +
 		"Page Usage\n" +
-		"Total: 5\n" +
+		"Total: 9\n" +
+		"Header: 4\n" +
+		"Space map: 0\n" +
 		"Table: 4\n" +
 		"Index leaf: 0\n" +
 		"Index internal: 0\n" +

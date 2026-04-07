@@ -26,6 +26,11 @@ type Table struct {
 	IndexDefs         []storage.CatalogIndex
 	rootPageID        storage.PageID
 	persistedRowCount uint32
+	tableHeaderPageID storage.PageID
+	tableStorageFmt   uint32
+	firstSpaceMapID   storage.PageID
+	ownedDataPages    uint32
+	ownedSpaceMaps    uint32
 }
 
 // SetStorageMeta records the persisted storage metadata for a table.
@@ -51,6 +56,53 @@ func (t *Table) PersistedRowCount() uint32 {
 		return 0
 	}
 	return t.persistedRowCount
+}
+
+// SetPhysicalTableRootMeta records authoritative durable physical table-root metadata.
+func (t *Table) SetPhysicalTableRootMeta(tableHeaderPageID storage.PageID, storageFormatVersion uint32, firstSpaceMapPageID storage.PageID, ownedDataPages uint32, ownedSpaceMapPages uint32) {
+	if t == nil {
+		return
+	}
+	t.tableHeaderPageID = tableHeaderPageID
+	t.tableStorageFmt = storageFormatVersion
+	t.firstSpaceMapID = firstSpaceMapPageID
+	t.ownedDataPages = ownedDataPages
+	t.ownedSpaceMaps = ownedSpaceMapPages
+}
+
+func (t *Table) TableHeaderPageID() storage.PageID {
+	if t == nil {
+		return 0
+	}
+	return t.tableHeaderPageID
+}
+
+func (t *Table) TableStorageFormatVersion() uint32 {
+	if t == nil {
+		return 0
+	}
+	return t.tableStorageFmt
+}
+
+func (t *Table) FirstSpaceMapPageID() storage.PageID {
+	if t == nil {
+		return 0
+	}
+	return t.firstSpaceMapID
+}
+
+func (t *Table) OwnedDataPageCount() uint32 {
+	if t == nil {
+		return 0
+	}
+	return t.ownedDataPages
+}
+
+func (t *Table) OwnedSpaceMapPageCount() uint32 {
+	if t == nil {
+		return 0
+	}
+	return t.ownedSpaceMaps
 }
 
 // Execute handles the tiny Stage 1 write statement set.

@@ -32,6 +32,8 @@ type EngineCheckResult struct {
 // EnginePageUsage summarizes physical page usage by validated page type.
 type EnginePageUsage struct {
 	TotalPages         int
+	HeaderPages        int
+	SpaceMapPages      int
 	TablePages         int
 	IndexLeafPages     int
 	IndexInternalPages int
@@ -88,6 +90,8 @@ func (s EngineSnapshot) String() string {
 
 	b.WriteString("Page Usage\n")
 	fmt.Fprintf(&b, "Total: %d\n", s.PageUsage.TotalPages)
+	fmt.Fprintf(&b, "Header: %d\n", s.PageUsage.HeaderPages)
+	fmt.Fprintf(&b, "Space map: %d\n", s.PageUsage.SpaceMapPages)
 	fmt.Fprintf(&b, "Table: %d\n", s.PageUsage.TablePages)
 	fmt.Fprintf(&b, "Index leaf: %d\n", s.PageUsage.IndexLeafPages)
 	fmt.Fprintf(&b, "Index internal: %d\n", s.PageUsage.IndexInternalPages)
@@ -180,6 +184,16 @@ func (db *DB) CheckEngineConsistency() (EngineCheckResult, error) {
 		if _, err := db.scanTableRows(table); err != nil {
 			return result, err
 		}
+		if table.TableHeaderPageID() == 0 {
+			return result, wrapStorageError(newStorageError("corrupted header page"))
+		}
+		headerPageData, err := readCommittedPageData(db.pool, table.TableHeaderPageID())
+		if err != nil {
+			return result, wrapStorageError(err)
+		}
+		if err := storage.ValidateTableHeaderPage(headerPageData); err != nil {
+			return result, wrapStorageError(err)
+		}
 		result.CheckedTableRoots++
 
 		for _, indexDef := range table.IndexDefs {
@@ -231,6 +245,10 @@ func (db *DB) PageUsage() (EnginePageUsage, error) {
 			return usage, wrapStorageError(err)
 		}
 		switch pageTypeOf(pageData) {
+		case storage.PageTypeHeader:
+			usage.HeaderPages++
+		case storage.PageTypeSpaceMap:
+			usage.SpaceMapPages++
 		case storage.PageTypeTable:
 			usage.TablePages++
 		case storage.PageTypeIndexLeaf:
