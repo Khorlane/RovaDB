@@ -1427,13 +1427,12 @@ func TestCreateTableFailsOnMalformedFreePageLinkage(t *testing.T) {
 	}
 
 	db, err = Open(path)
-	if err != nil {
-		t.Fatalf("reopen Open() error = %v", err)
+	if err == nil {
+		defer db.Close()
+		t.Fatal("reopen Open() error = nil, want malformed free page failure")
 	}
-	defer db.Close()
-
-	if _, err := db.Exec("CREATE TABLE t2 (id INT)"); err == nil {
-		t.Fatal("Exec(create t2) error = nil, want malformed free page failure")
+	if err.Error() != "storage: corrupted page header" {
+		t.Fatalf("reopen Open() error = %v, want %q", err, "storage: corrupted page header")
 	}
 }
 

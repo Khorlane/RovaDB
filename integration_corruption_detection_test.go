@@ -156,8 +156,8 @@ func TestCorruptedRowDataDetected(t *testing.T) {
 	if err == nil {
 		t.Fatal("Open() error = nil, want non-nil")
 	}
-	if err.Error() != "storage: corrupted row data" {
-		t.Fatalf("Open() error = %q, want %q", err.Error(), "storage: corrupted row data")
+	if err.Error() != "storage: corrupted table page" {
+		t.Fatalf("Open() error = %q, want %q", err.Error(), "storage: corrupted table page")
 	}
 }
 
@@ -203,4 +203,301 @@ func corruptedIndexCatalogBytes(_ uint32) []byte {
 	buf = appendStringLE(buf, "missing")
 	buf = append(buf, 0)
 	return buf
+}
+
+func TestOpenRejectsWrongOwnedDataPageCountInTableHeader(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	headerPageID := db.tables["users"].TableHeaderPageID()
+	rawDB, pager := closeAndOpenRawWithoutWAL(t, path, db)
+	defer rawDB.Close()
+
+	headerPage, err := pager.Get(headerPageID)
+	if err != nil {
+		t.Fatalf("pager.Get(header) error = %v", err)
+	}
+	if err := storage.SetTableHeaderOwnedDataPageCount(headerPage.Data(), 2); err != nil {
+		t.Fatalf("SetTableHeaderOwnedDataPageCount() error = %v", err)
+	}
+	pager.MarkDirty(headerPage)
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	_, err = Open(path)
+	if err == nil || err.Error() != "storage: corrupted header page" {
+		t.Fatalf("Open() error = %v, want %q", err, "storage: corrupted header page")
+	}
+}
+
+func TestOpenRejectsWrongOwnedSpaceMapPageCountInTableHeader(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	headerPageID := db.tables["users"].TableHeaderPageID()
+	rawDB, pager := closeAndOpenRawWithoutWAL(t, path, db)
+	defer rawDB.Close()
+
+	headerPage, err := pager.Get(headerPageID)
+	if err != nil {
+		t.Fatalf("pager.Get(header) error = %v", err)
+	}
+	if err := storage.SetTableHeaderOwnedSpaceMapPageCount(headerPage.Data(), 2); err != nil {
+		t.Fatalf("SetTableHeaderOwnedSpaceMapPageCount() error = %v", err)
+	}
+	pager.MarkDirty(headerPage)
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	_, err = Open(path)
+	if err == nil || err.Error() != "storage: corrupted header page" {
+		t.Fatalf("Open() error = %v, want %q", err, "storage: corrupted header page")
+	}
+}
+
+func TestOpenRejectsDuplicateDataPageIDsInSpaceMapInventory(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	table := db.tables["users"]
+	spaceMapPageID := table.FirstSpaceMapPageID()
+	dataPageIDs, err := committedTableDataPageIDs(db.pool, table)
+	if err != nil {
+		t.Fatalf("committedTableDataPageIDs() error = %v", err)
+	}
+	headerPageID := table.TableHeaderPageID()
+	rawDB, pager := closeAndOpenRawWithoutWAL(t, path, db)
+	defer rawDB.Close()
+
+	headerPage, err := pager.Get(headerPageID)
+	if err != nil {
+		t.Fatalf("pager.Get(header) error = %v", err)
+	}
+	if err := storage.SetTableHeaderOwnedDataPageCount(headerPage.Data(), 2); err != nil {
+		t.Fatalf("SetTableHeaderOwnedDataPageCount() error = %v", err)
+	}
+	pager.MarkDirty(headerPage)
+
+	spaceMapPage, err := pager.Get(spaceMapPageID)
+	if err != nil {
+		t.Fatalf("pager.Get(space map) error = %v", err)
+	}
+	if _, err := storage.AppendSpaceMapEntry(spaceMapPage.Data(), storage.SpaceMapEntry{
+		DataPageID:      dataPageIDs[0],
+		FreeSpaceBucket: storage.SpaceMapBucketHigh,
+	}); err != nil {
+		t.Fatalf("AppendSpaceMapEntry() error = %v", err)
+	}
+	pager.MarkDirty(spaceMapPage)
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	_, err = Open(path)
+	if err == nil || err.Error() != "storage: corrupted space map page" {
+		t.Fatalf("Open() error = %v, want %q", err, "storage: corrupted space map page")
+	}
+}
+
+func TestOpenRejectsSpaceMapEntryPointingAtWrongPageType(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	table := db.tables["users"]
+	rawDB, pager := closeAndOpenRawWithoutWAL(t, path, db)
+	defer rawDB.Close()
+
+	spaceMapPage, err := pager.Get(table.FirstSpaceMapPageID())
+	if err != nil {
+		t.Fatalf("pager.Get(space map) error = %v", err)
+	}
+	entry, err := storage.SpaceMapPageEntry(spaceMapPage.Data(), 0)
+	if err != nil {
+		t.Fatalf("SpaceMapPageEntry() error = %v", err)
+	}
+	entry.DataPageID = table.TableHeaderPageID()
+	if err := storage.UpdateSpaceMapEntry(spaceMapPage.Data(), 0, entry); err != nil {
+		t.Fatalf("UpdateSpaceMapEntry() error = %v", err)
+	}
+	pager.MarkDirty(spaceMapPage)
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	_, err = Open(path)
+	if err == nil || err.Error() != "storage: corrupted table page" {
+		t.Fatalf("Open() error = %v, want %q", err, "storage: corrupted table page")
+	}
+}
+
+func TestOpenRejectsReferencedDataPageWithWrongOwningTableID(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	table := db.tables["users"]
+	dataPageIDs, err := committedTableDataPageIDs(db.pool, table)
+	if err != nil {
+		t.Fatalf("committedTableDataPageIDs() error = %v", err)
+	}
+	rawDB, pager := closeAndOpenRawWithoutWAL(t, path, db)
+	defer rawDB.Close()
+
+	dataPage, err := pager.Get(dataPageIDs[0])
+	if err != nil {
+		t.Fatalf("pager.Get(data) error = %v", err)
+	}
+	clear(dataPage.Data())
+	copy(dataPage.Data(), storage.InitOwnedDataPage(uint32(dataPageIDs[0]), table.TableID+99))
+	pager.MarkDirty(dataPage)
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	_, err = Open(path)
+	if err == nil || err.Error() != "storage: corrupted table page" {
+		t.Fatalf("Open() error = %v, want %q", err, "storage: corrupted table page")
+	}
+}
+
+func TestOpenRejectsBrokenSpaceMapChain(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	table := db.tables["users"]
+	rawDB, pager := closeAndOpenRawWithoutWAL(t, path, db)
+	defer rawDB.Close()
+
+	secondSpaceMap := pager.NewPage()
+	clear(secondSpaceMap.Data())
+	copy(secondSpaceMap.Data(), storage.InitSpaceMapPage(uint32(secondSpaceMap.ID()), table.TableID))
+
+	firstPage, err := pager.Get(table.FirstSpaceMapPageID())
+	if err != nil {
+		t.Fatalf("pager.Get(first space map) error = %v", err)
+	}
+	if err := storage.SetSpaceMapNextPageID(firstPage.Data(), uint32(secondSpaceMap.ID())); err != nil {
+		t.Fatalf("SetSpaceMapNextPageID(first) error = %v", err)
+	}
+	if err := storage.SetSpaceMapNextPageID(secondSpaceMap.Data(), uint32(firstPage.ID())); err != nil {
+		t.Fatalf("SetSpaceMapNextPageID(second) error = %v", err)
+	}
+	headerPage, err := pager.Get(table.TableHeaderPageID())
+	if err != nil {
+		t.Fatalf("pager.Get(header) error = %v", err)
+	}
+	if err := storage.SetTableHeaderOwnedSpaceMapPageCount(headerPage.Data(), 2); err != nil {
+		t.Fatalf("SetTableHeaderOwnedSpaceMapPageCount() error = %v", err)
+	}
+	pager.MarkDirty(firstPage)
+	pager.MarkDirty(secondSpaceMap)
+	pager.MarkDirty(headerPage)
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	_, err = Open(path)
+	if err == nil || err.Error() != "storage: corrupted space map page" {
+		t.Fatalf("Open() error = %v, want %q", err, "storage: corrupted space map page")
+	}
+}
+
+func TestOpenRejectsOrphanOwnedDataPage(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	table := db.tables["users"]
+	rawDB, pager := closeAndOpenRawWithoutWAL(t, path, db)
+	defer rawDB.Close()
+
+	orphan := pager.NewPage()
+	clear(orphan.Data())
+	copy(orphan.Data(), storage.InitOwnedDataPage(uint32(orphan.ID()), table.TableID))
+	pager.MarkDirty(orphan)
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	_, err = Open(path)
+	if err == nil || err.Error() != "storage: corrupted table page" {
+		t.Fatalf("Open() error = %v, want %q", err, "storage: corrupted table page")
+	}
+}
+
+func closeAndOpenRawWithoutWAL(t *testing.T, path string, db *DB) (*storage.DBFile, *storage.Pager) {
+	t.Helper()
+	if db == nil {
+		t.Fatal("closeAndOpenRawWithoutWAL() requires open db")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if err := os.Remove(storage.WALPath(path)); err != nil {
+		t.Fatalf("Remove(WALPath) error = %v", err)
+	}
+	return openRawStorage(t, path)
 }

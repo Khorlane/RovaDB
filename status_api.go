@@ -148,20 +148,8 @@ func (db *DB) CheckEngineConsistency() (EngineCheckResult, error) {
 	result := EngineCheckResult{
 		FreeListHead: db.freeListHead,
 	}
-	if db.freeListHead != 0 {
-		pageData, err := readCommittedPageData(db.pool, storage.PageID(db.freeListHead))
-		if err != nil {
-			return result, wrapStorageError(err)
-		}
-		if err := storage.ValidatePageImage(pageData); err != nil {
-			return result, wrapStorageError(err)
-		}
-		if pageTypeOf(pageData) != storage.PageTypeFreePage {
-			return result, wrapStorageError(newStorageError("corrupted free page"))
-		}
-		if _, err := storage.FreePageNext(pageData); err != nil {
-			return result, wrapStorageError(err)
-		}
+	if err := validateCommittedPhysicalTableStorage(db.pool, db.pager, db.tables, db.freeListHead); err != nil {
+		return result, err
 	}
 
 	for _, table := range db.tables {

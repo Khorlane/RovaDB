@@ -233,6 +233,7 @@ func TestQuerySystemCatalogTablesImmediatelyAfterUpgradeOpen(t *testing.T) {
 	if err := storage.SaveCatalog(pager, catalog); err != nil {
 		t.Fatalf("SaveCatalog() error = %v", err)
 	}
+	rewriteDirectoryRootMappingsForCatalogTables(t, rawDB.File(), catalog)
 	if err := pager.FlushDirty(); err != nil {
 		t.Fatalf("pager.FlushDirty() error = %v", err)
 	}
@@ -240,13 +241,13 @@ func TestQuerySystemCatalogTablesImmediatelyAfterUpgradeOpen(t *testing.T) {
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
 
-	db, err = Open(path)
-	if err != nil {
-		t.Fatalf("upgrade Open() error = %v", err)
+	_, err = Open(path)
+	if err == nil {
+		t.Fatal("upgrade Open() error = nil, want corrupted header page")
 	}
-	defer db.Close()
-
-	assertSystemCatalogQuerySnapshot(t, db, []string{"users"}, []string{"id", "name"}, []string{"idx_users_name"}, []string{"name"})
+	if err.Error() != "storage: corrupted header page" {
+		t.Fatalf("upgrade Open() error = %v, want %q", err, "storage: corrupted header page")
+	}
 }
 
 func TestQuerySystemCatalogRepeatedReopenDoesNotDuplicateRows(t *testing.T) {

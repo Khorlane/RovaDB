@@ -425,12 +425,12 @@ func TestPageUsageFailsOnMalformedPage(t *testing.T) {
 	}
 
 	db, err = Open(path)
-	if err != nil {
-		t.Fatalf("reopen Open() error = %v", err)
+	if err == nil {
+		defer db.Close()
+		t.Fatal("reopen Open() error = nil, want malformed page failure")
 	}
-	defer db.Close()
-	if _, err := db.PageUsage(); err == nil {
-		t.Fatal("PageUsage() error = nil, want malformed page failure")
+	if err.Error() != "storage: corrupted page header" {
+		t.Fatalf("reopen Open() error = %v, want %q", err, "storage: corrupted page header")
 	}
 }
 

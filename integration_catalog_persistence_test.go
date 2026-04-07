@@ -346,6 +346,7 @@ func TestOpenBootstrapsMissingInternalSystemCatalogTablesOnCurrentFormatDB(t *te
 	if err := storage.SaveCatalog(pager, catalog); err != nil {
 		t.Fatalf("SaveCatalog() error = %v", err)
 	}
+	rewriteDirectoryRootMappingsForCatalogTables(t, rawDB.File(), catalog)
 	if err := pager.FlushDirty(); err != nil {
 		t.Fatalf("pager.FlushDirty() error = %v", err)
 	}
@@ -353,34 +354,12 @@ func TestOpenBootstrapsMissingInternalSystemCatalogTablesOnCurrentFormatDB(t *te
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
 
-	db, err = Open(path)
-	if err != nil {
-		t.Fatalf("reopen Open() error = %v", err)
+	_, err = Open(path)
+	if err == nil {
+		t.Fatal("reopen Open() error = nil, want corrupted header page")
 	}
-	defer db.Close()
-
-	gotNames := make([]string, 0, 4)
-	for _, name := range []string{
-		systemTableTables,
-		systemTableColumns,
-		systemTableIndexes,
-		systemTableIndexColumns,
-	} {
-		table := db.tables[name]
-		if table == nil {
-			t.Fatalf("db.tables[%q] = nil", name)
-		}
-		if !table.IsSystem {
-			t.Fatalf("db.tables[%q].IsSystem = false, want true", name)
-		}
-		if table.TableID == 0 || table.RootPageID() == 0 {
-			t.Fatalf("db.tables[%q] has zero durable identifiers: tableID=%d rootPageID=%d", name, table.TableID, table.RootPageID())
-		}
-		gotNames = append(gotNames, name)
-	}
-	sort.Strings(gotNames)
-	if len(gotNames) != 4 {
-		t.Fatalf("bootstrapped system table count = %d, want 4", len(gotNames))
+	if err.Error() != "storage: corrupted header page" {
+		t.Fatalf("reopen Open() error = %v, want %q", err, "storage: corrupted header page")
 	}
 }
 
@@ -542,8 +521,6 @@ func TestOpenRebuildsSystemCatalogRowsForCurrentFormatDBMissingSystemTables(t *t
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
-	userTableID := db.tables["users"].TableID
-	indexID := db.tables["users"].IndexDefinition("idx_users_name").IndexID
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
@@ -565,6 +542,7 @@ func TestOpenRebuildsSystemCatalogRowsForCurrentFormatDBMissingSystemTables(t *t
 	if err := storage.SaveCatalog(pager, catalog); err != nil {
 		t.Fatalf("SaveCatalog() error = %v", err)
 	}
+	rewriteDirectoryRootMappingsForCatalogTables(t, rawDB.File(), catalog)
 	if err := pager.FlushDirty(); err != nil {
 		t.Fatalf("pager.FlushDirty() error = %v", err)
 	}
@@ -572,21 +550,13 @@ func TestOpenRebuildsSystemCatalogRowsForCurrentFormatDBMissingSystemTables(t *t
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
 
-	db, err = Open(path)
-	if err != nil {
-		t.Fatalf("reopen Open() error = %v", err)
+	_, err = Open(path)
+	if err == nil {
+		t.Fatal("reopen Open() error = nil, want corrupted header page")
 	}
-	defer db.Close()
-
-	assertSystemCatalogRows(t, db,
-		[][]any{{int64(userTableID), "users"}},
-		[][]any{
-			{int64(userTableID), "id", parser.ColumnTypeInt, int64(1)},
-			{int64(userTableID), "name", parser.ColumnTypeText, int64(2)},
-		},
-		[][]any{{int64(indexID), "idx_users_name", int64(userTableID), false}},
-		[][]any{{int64(indexID), "name", int64(1)}},
-	)
+	if err.Error() != "storage: corrupted header page" {
+		t.Fatalf("reopen Open() error = %v, want %q", err, "storage: corrupted header page")
+	}
 }
 
 func assertSystemCatalogRows(t *testing.T, db *DB, wantTables, wantColumns, wantIndexes, wantIndexColumns [][]any) {
@@ -700,6 +670,46 @@ func catalogWithDirectoryRootsForSave(t *testing.T, file *os.File, catalog *stor
 		t.Fatalf("ApplyDirectoryRootIDMappings() error = %v", err)
 	}
 	return applied
+}
+
+func rewriteDirectoryRootMappingsForCatalogTables(t *testing.T, file *os.File, catalog *storage.CatalogData) {
+	t.Helper()
+	if file == nil || catalog == nil {
+		t.Fatal("rewriteDirectoryRootMappingsForCatalogTables() requires file and catalog")
+	}
+	tableIDs := make(map[uint32]struct{}, len(catalog.Tables))
+	indexIDs := make(map[uint32]struct{})
+	for _, table := range catalog.Tables {
+		if table.TableID != 0 {
+			tableIDs[table.TableID] = struct{}{}
+		}
+		for _, index := range table.Indexes {
+			if index.IndexID != 0 {
+				indexIDs[index.IndexID] = struct{}{}
+			}
+		}
+	}
+
+	idMappings, err := storage.ReadDirectoryRootIDMappings(file)
+	if err != nil {
+		t.Fatalf("ReadDirectoryRootIDMappings() error = %v", err)
+	}
+	filtered := make([]storage.DirectoryRootIDMapping, 0, len(idMappings))
+	for _, mapping := range idMappings {
+		switch mapping.ObjectType {
+		case storage.DirectoryRootMappingObjectTable, storage.DirectoryRootMappingObjectTableHeader:
+			if _, ok := tableIDs[mapping.ObjectID]; ok {
+				filtered = append(filtered, mapping)
+			}
+		case storage.DirectoryRootMappingObjectIndex:
+			if _, ok := indexIDs[mapping.ObjectID]; ok {
+				filtered = append(filtered, mapping)
+			}
+		}
+	}
+	if err := storage.WriteDirectoryRootIDMappings(file, filtered); err != nil {
+		t.Fatalf("WriteDirectoryRootIDMappings() error = %v", err)
+	}
 }
 
 type currentCatalogTableForTest struct {

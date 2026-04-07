@@ -246,6 +246,11 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
+	if err := validateCommittedPhysicalTableStorage(pool, pager, tables, freeListHead); err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, err
+	}
 	if err := loadPersistedRows(pool, tables); err != nil {
 		_ = pager.Close()
 		_ = file.Close()
@@ -4070,6 +4075,16 @@ func committedTablePhysicalStorageInventory(pool *bufferpool.BufferPool, table *
 			if _, exists := seenDataPages[entry.DataPageID]; exists {
 				return nil, nil, newStorageError("corrupted space map page")
 			}
+			dataPageData, err := readCommittedPageData(pool, entry.DataPageID)
+			if err != nil {
+				return nil, nil, wrapStorageError(err)
+			}
+			if dataPageData == nil {
+				return nil, nil, newStorageError("corrupted table page")
+			}
+			if err := storage.ValidateOwnedDataPage(dataPageData, table.TableID); err != nil {
+				return nil, nil, wrapStorageError(err)
+			}
 			seenDataPages[entry.DataPageID] = struct{}{}
 			dataPageIDs = append(dataPageIDs, entry.DataPageID)
 		}
@@ -4086,6 +4101,167 @@ func committedTablePhysicalStorageInventory(pool *bufferpool.BufferPool, table *
 		return nil, nil, newStorageError("corrupted header page")
 	}
 	return spaceMapPageIDs, dataPageIDs, nil
+}
+
+func validateCommittedPhysicalTableStorage(pool *bufferpool.BufferPool, pager *storage.Pager, tables map[string]*executor.Table, freeListHead uint32) error {
+	if pool == nil || pager == nil {
+		return ErrInvalidArgument
+	}
+
+	freePages, err := committedFreePageSet(pool, storage.PageID(freeListHead))
+	if err != nil {
+		return err
+	}
+
+	headerOwners := make(map[storage.PageID]uint32)
+	spaceMapOwners := make(map[storage.PageID]uint32)
+	dataPageOwners := make(map[storage.PageID]uint32)
+	legacyRootPages := make(map[storage.PageID]struct{})
+
+	for _, table := range tables {
+		if table == nil || table.TableID == 0 {
+			continue
+		}
+		if table.RootPageID() != 0 {
+			legacyRootPages[table.RootPageID()] = struct{}{}
+		}
+		if table.TableHeaderPageID() == 0 {
+			return wrapStorageError(newStorageError("corrupted header page"))
+		}
+		if _, free := freePages[table.TableHeaderPageID()]; free {
+			return wrapStorageError(newStorageError("corrupted header page"))
+		}
+		if existingOwner, exists := headerOwners[table.TableHeaderPageID()]; exists && existingOwner != table.TableID {
+			return wrapStorageError(newStorageError("corrupted header page"))
+		}
+		headerOwners[table.TableHeaderPageID()] = table.TableID
+
+		headerPageData, err := readCommittedPageData(pool, table.TableHeaderPageID())
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		if err := storage.ValidateTableHeaderPage(headerPageData); err != nil {
+			return wrapStorageError(err)
+		}
+		headerTableID, err := storage.TableHeaderTableID(headerPageData)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		if headerTableID != table.TableID {
+			return wrapStorageError(newStorageError("corrupted header page"))
+		}
+
+		firstSpaceMapPageID := table.FirstSpaceMapPageID()
+		ownedDataPages := table.OwnedDataPageCount()
+		ownedSpaceMapPages := table.OwnedSpaceMapPageCount()
+		if firstSpaceMapPageID == 0 {
+			if ownedDataPages != 0 || ownedSpaceMapPages != 0 {
+				return wrapStorageError(newStorageError("corrupted header page"))
+			}
+		} else if ownedSpaceMapPages == 0 {
+			return wrapStorageError(newStorageError("corrupted header page"))
+		}
+
+		spaceMapPageIDs, dataPageIDs, err := committedTablePhysicalStorageInventory(pool, table)
+		if err != nil {
+			return err
+		}
+		for _, pageID := range spaceMapPageIDs {
+			if _, free := freePages[pageID]; free {
+				return wrapStorageError(newStorageError("corrupted space map page"))
+			}
+			if existingOwner, exists := spaceMapOwners[pageID]; exists && existingOwner != table.TableID {
+				return wrapStorageError(newStorageError("corrupted space map page"))
+			}
+			spaceMapOwners[pageID] = table.TableID
+		}
+		for _, pageID := range dataPageIDs {
+			if _, free := freePages[pageID]; free {
+				return wrapStorageError(newStorageError("corrupted table page"))
+			}
+			if existingOwner, exists := dataPageOwners[pageID]; exists && existingOwner != table.TableID {
+				return wrapStorageError(newStorageError("corrupted table page"))
+			}
+			dataPageOwners[pageID] = table.TableID
+		}
+	}
+
+	for pageID := storage.PageID(0); pageID < pager.NextPageID(); pageID++ {
+		pageData, err := readCommittedPageData(pool, pageID)
+		if err != nil {
+			return wrapStorageError(err)
+		}
+		if pageData == nil {
+			return wrapStorageError(newStorageError("corrupted page header"))
+		}
+		if err := storage.ValidatePageImage(pageData); err != nil {
+			if _, legacyRoot := legacyRootPages[pageID]; legacyRoot {
+				continue
+			}
+			return wrapStorageError(err)
+		}
+		switch pageTypeOf(pageData) {
+		case storage.PageTypeHeader:
+			role, err := storage.HeaderPageRoleValue(pageData)
+			if err != nil {
+				return wrapStorageError(err)
+			}
+			if role != storage.HeaderPageRoleTable {
+				continue
+			}
+			if pageID == 0 {
+				return wrapStorageError(newStorageError("corrupted header page"))
+			}
+			if _, ok := headerOwners[pageID]; !ok {
+				return wrapStorageError(newStorageError("corrupted header page"))
+			}
+		case storage.PageTypeSpaceMap:
+			if _, ok := spaceMapOwners[pageID]; !ok {
+				return wrapStorageError(newStorageError("corrupted space map page"))
+			}
+		case storage.PageTypeTable:
+			owningTableID, err := storage.TablePageOwningTableID(pageData)
+			if err != nil {
+				return wrapStorageError(err)
+			}
+			if owningTableID == 0 {
+				continue
+			}
+			if owner, ok := dataPageOwners[pageID]; !ok || owner != owningTableID {
+				return wrapStorageError(newStorageError("corrupted table page"))
+			}
+		}
+	}
+	return nil
+}
+
+func committedFreePageSet(pool *bufferpool.BufferPool, head storage.PageID) (map[storage.PageID]struct{}, error) {
+	freePages := make(map[storage.PageID]struct{})
+	for head != 0 {
+		if _, exists := freePages[head]; exists {
+			return nil, wrapStorageError(newStorageError("corrupted free page"))
+		}
+		pageData, err := readCommittedPageData(pool, head)
+		if err != nil {
+			return nil, wrapStorageError(err)
+		}
+		if pageData == nil {
+			return nil, wrapStorageError(newStorageError("corrupted free page"))
+		}
+		if err := storage.ValidatePageImage(pageData); err != nil {
+			return nil, wrapStorageError(err)
+		}
+		if pageTypeOf(pageData) != storage.PageTypeFreePage {
+			return nil, wrapStorageError(newStorageError("corrupted free page"))
+		}
+		next, err := storage.FreePageNext(pageData)
+		if err != nil {
+			return nil, wrapStorageError(err)
+		}
+		freePages[head] = struct{}{}
+		head = storage.PageID(next)
+	}
+	return freePages, nil
 }
 
 func decodePersistedTableRows(pageData []byte, columns []parser.ColumnDef) ([][]parser.Value, error) {

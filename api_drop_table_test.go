@@ -1,6 +1,7 @@
 package rovadb
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/storage"
@@ -204,6 +205,40 @@ func TestExecAPIDropTableFreedRootIsReusableAfterReopen(t *testing.T) {
 	}
 }
 
+func TestExecAPIDropTableReopenLeavesNoGhostPhysicalOwnership(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create users) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	droppedTableID := db.tables["users"].TableID
+	if _, err := db.Exec("DROP TABLE users"); err != nil {
+		t.Fatalf("Exec(drop users) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+	if _, ok := db.tables["users"]; ok {
+		t.Fatalf("reopened db.tables[users] still present: %#v", db.tables["users"])
+	}
+	if _, err := db.CheckEngineConsistency(); err != nil {
+		t.Fatalf("CheckEngineConsistency() error = %v", err)
+	}
+	if ghost := findPhysicalOwnershipPageForTableID(t, db, droppedTableID); ghost != 0 {
+		t.Fatalf("found ghost physical ownership for dropped table id %d on page %d", droppedTableID, ghost)
+	}
+}
+
 func freeListChainForTest(t *testing.T, pager *storage.Pager, head storage.PageID) []storage.PageID {
 	t.Helper()
 	chain := make([]storage.PageID, 0)
@@ -234,4 +269,54 @@ func containsPageID(ids []storage.PageID, want storage.PageID) bool {
 		}
 	}
 	return false
+}
+
+func findPhysicalOwnershipPageForTableID(t *testing.T, db *DB, tableID uint32) storage.PageID {
+	t.Helper()
+	if db == nil || db.pool == nil || db.pager == nil {
+		t.Fatal("findPhysicalOwnershipPageForTableID() requires open db")
+	}
+	for pageID := storage.PageID(0); pageID < db.pager.NextPageID(); pageID++ {
+		pageData, err := readCommittedPageData(db.pool, pageID)
+		if err != nil {
+			t.Fatalf("readCommittedPageData(%d) error = %v", pageID, err)
+		}
+		if err := storage.ValidatePageImage(pageData); err != nil {
+			t.Fatalf("ValidatePageImage(%d) error = %v", pageID, err)
+		}
+		switch storage.PageType(binary.LittleEndian.Uint16(pageData[4:6])) {
+		case storage.PageTypeHeader:
+			role, err := storage.HeaderPageRoleValue(pageData)
+			if err != nil {
+				t.Fatalf("HeaderPageRoleValue(%d) error = %v", pageID, err)
+			}
+			if role != storage.HeaderPageRoleTable {
+				continue
+			}
+			owner, err := storage.TableHeaderTableID(pageData)
+			if err != nil {
+				t.Fatalf("TableHeaderTableID(%d) error = %v", pageID, err)
+			}
+			if owner == tableID {
+				return pageID
+			}
+		case storage.PageTypeSpaceMap:
+			owner, err := storage.SpaceMapOwningTableID(pageData)
+			if err != nil {
+				t.Fatalf("SpaceMapOwningTableID(%d) error = %v", pageID, err)
+			}
+			if owner == tableID {
+				return pageID
+			}
+		case storage.PageTypeTable:
+			owner, err := storage.TablePageOwningTableID(pageData)
+			if err != nil {
+				t.Fatalf("TablePageOwningTableID(%d) error = %v", pageID, err)
+			}
+			if owner == tableID {
+				return pageID
+			}
+		}
+	}
+	return 0
 }

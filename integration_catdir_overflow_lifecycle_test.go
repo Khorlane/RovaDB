@@ -91,7 +91,11 @@ func TestCATDIRDualModeLifecycleAcrossReopens(t *testing.T) {
 		t.Fatalf("overflow digest after reopen = %q, want %q", overflowDigestReopen, overflowDigest)
 	}
 
-	if err := db.persistCatalogState(cloneTables(baselineTables), nil); err != nil {
+	freedPages, err := db.buildFreedPages(stagedPageIDsForTest(largePages)...)
+	if err != nil {
+		t.Fatalf("buildFreedPages(demote baseline) error = %v", err)
+	}
+	if err := db.persistCatalogState(cloneTables(baselineTables), freedPages); err != nil {
 		t.Fatalf("persistCatalogState(demote baseline) error = %v", err)
 	}
 	if err := db.Close(); err != nil {
@@ -203,6 +207,8 @@ func buildSyntheticCATDIRTablesForTest(db *DB, baselineTables map[string]*execut
 	for i := 0; i < tableCount; i++ {
 		rootPageID := nextRootPageID
 		nextRootPageID++
+		tableHeaderPageID := nextRootPageID
+		nextRootPageID++
 		tableName := fmt.Sprintf("%s_table_%03d_%s", prefix, i, strings.Repeat("x", 32))
 		columns := make([]parser.ColumnDef, 0, 41)
 		columns = append(columns, parser.ColumnDef{
@@ -218,6 +224,11 @@ func buildSyntheticCATDIRTablesForTest(db *DB, baselineTables map[string]*execut
 		stagedPages = append(stagedPages, stagedPage{
 			id:    rootPageID,
 			data:  storage.InitializeTablePage(uint32(rootPageID)),
+			isNew: true,
+		})
+		stagedPages = append(stagedPages, stagedPage{
+			id:    tableHeaderPageID,
+			data:  storage.InitTableHeaderPage(uint32(tableHeaderPageID), nextTableID),
 			isNew: true,
 		})
 		indexDefs := make([]storage.CatalogIndex, 0, len(columns)-1)
@@ -244,6 +255,7 @@ func buildSyntheticCATDIRTablesForTest(db *DB, baselineTables map[string]*execut
 			IndexDefs: indexDefs,
 		}
 		table.SetStorageMeta(rootPageID, 0)
+		table.SetPhysicalTableRootMeta(tableHeaderPageID, storage.CurrentTableStorageFormatVersion, 0, 0, 0)
 		stagedTables[tableName] = table
 		nextTableID++
 	}
@@ -315,6 +327,7 @@ func rewriteSyntheticCATDIRTablesForTest(current map[string]*executor.Table, pre
 			IndexDefs: indexDefs,
 		}
 		updated.SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
+		updated.SetPhysicalTableRootMeta(table.TableHeaderPageID(), table.TableStorageFormatVersion(), table.FirstSpaceMapPageID(), table.OwnedDataPageCount(), table.OwnedSpaceMapPageCount())
 		rewritten[updated.Name] = updated
 	}
 	return rewritten
@@ -354,6 +367,14 @@ func readCATDIRStateForPath(t *testing.T, path string) (mode uint32, head uint32
 		t.Fatalf("DirectoryFreeListHead() error = %v", err)
 	}
 	return mode, head, count, freeListHead
+}
+
+func stagedPageIDsForTest(pages []stagedPage) []storage.PageID {
+	ids := make([]storage.PageID, 0, len(pages))
+	for _, page := range pages {
+		ids = append(ids, page.id)
+	}
+	return ids
 }
 
 func readCATDIROverflowChainIDsForPath(t *testing.T, path string, head uint32, count uint32) []storage.PageID {
