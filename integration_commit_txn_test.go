@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/bufferpool"
@@ -935,6 +936,250 @@ func TestWALResetFailureAfterCheckpointSurfacesErrorAndLeavesStateCorrect(t *tes
 	db = reopenDB(t, path)
 	defer db.Close()
 	assertSelectTextRows(t, db, "SELECT name FROM users", "beth")
+}
+
+func TestCheckpointFailureAfterBootstrapInsertReopensWithPhysicalStorage(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+
+	beforeRecords, err := storage.ReadWALRecords(path)
+	if err != nil {
+		t.Fatalf("ReadWALRecords(before) error = %v", err)
+	}
+
+	db.afterDatabaseSyncHook = func() error {
+		return errors.New("checkpoint failed after WAL durability")
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err == nil {
+		t.Fatal("Exec(insert) error = nil, want checkpoint failure")
+	}
+	db.afterDatabaseSyncHook = nil
+
+	afterRecords, err := storage.ReadWALRecords(path)
+	if err != nil {
+		t.Fatalf("ReadWALRecords(after) error = %v", err)
+	}
+	if len(afterRecords) <= len(beforeRecords) {
+		t.Fatalf("len(ReadWALRecords(after)) = %d, want > %d", len(afterRecords), len(beforeRecords))
+	}
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal(`db.tables["users"] = nil`)
+	}
+	if table.TableHeaderPageID() == 0 {
+		t.Fatal("TableHeaderPageID() = 0, want durable physical root")
+	}
+	if table.FirstSpaceMapPageID() == 0 {
+		t.Fatal("FirstSpaceMapPageID() = 0, want first insert bootstrap to allocate SpaceMap")
+	}
+	if table.OwnedSpaceMapPageCount() != 1 {
+		t.Fatalf("OwnedSpaceMapPageCount() = %d, want 1", table.OwnedSpaceMapPageCount())
+	}
+	if table.OwnedDataPageCount() != 1 {
+		t.Fatalf("OwnedDataPageCount() = %d, want 1", table.OwnedDataPageCount())
+	}
+	verifyPhysicalTableInventoryMatchesMetadata(t, db, "users")
+	if _, err := db.CheckEngineConsistency(); err != nil {
+		t.Fatalf("CheckEngineConsistency() error = %v", err)
+	}
+	assertSelectIntRows(t, db, "SELECT id FROM users WHERE name = 'alice'", 1)
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	verifyPhysicalTableInventoryMatchesMetadata(t, db, "users")
+	if _, err := db.CheckEngineConsistency(); err != nil {
+		t.Fatalf("CheckEngineConsistency() after reopen error = %v", err)
+	}
+	assertSelectIntRows(t, db, "SELECT id FROM users WHERE name = 'alice'", 1)
+}
+
+func TestCheckpointFailureAfterRelocationReopensWithCurrentIndexLocator(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, note TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	for id := 1; id <= 18; id++ {
+		name := "filler"
+		if id == 1 {
+			name = "alice"
+		}
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", id, name, strings.Repeat("seed-", 100)); err != nil {
+			t.Fatalf("Exec(insert %d) error = %v", id, err)
+		}
+	}
+
+	before := committedLocatorsByIDForTest(t, db, "users")
+	oldLocator := before[1]
+	bigNote := strings.Repeat("grown-row-", 220)
+
+	db.afterDatabaseSyncHook = func() error {
+		return errors.New("checkpoint failed after WAL durability")
+	}
+	if _, err := db.Exec("UPDATE users SET note = ? WHERE id = 1", bigNote); err == nil {
+		t.Fatal("Exec(relocating update) error = nil, want checkpoint failure")
+	}
+	db.afterDatabaseSyncHook = nil
+
+	after := committedLocatorsByIDForTest(t, db, "users")
+	newLocator := after[1]
+	if newLocator == oldLocator {
+		t.Fatalf("locator after relocation = %#v, want different from %#v", newLocator, oldLocator)
+	}
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal(`db.tables["users"] = nil`)
+	}
+	if _, err := db.fetchRowByLocator(table, oldLocator); err == nil {
+		t.Fatal("fetchRowByLocator(old locator) error = nil, want explicit failure")
+	}
+	row, err := db.fetchRowByLocator(table, newLocator)
+	if err != nil {
+		t.Fatalf("fetchRowByLocator(new locator) error = %v", err)
+	}
+	if got := row[2]; got != parser.StringValue(bigNote) {
+		t.Fatalf("updated note = %#v, want %#v", got, parser.StringValue(bigNote))
+	}
+	verifyPhysicalTableInventoryMatchesMetadata(t, db, "users")
+	if _, err := db.CheckEngineConsistency(); err != nil {
+		t.Fatalf("CheckEngineConsistency() error = %v", err)
+	}
+	assertSelectIntRows(t, db, "SELECT id FROM users WHERE name = 'alice'", 1)
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	reopenedLocators := committedLocatorsByIDForTest(t, db, "users")
+	if reopenedLocators[1] != newLocator {
+		t.Fatalf("reopened locator = %#v, want %#v", reopenedLocators[1], newLocator)
+	}
+	verifyPhysicalTableInventoryMatchesMetadata(t, db, "users")
+	if _, err := db.CheckEngineConsistency(); err != nil {
+		t.Fatalf("CheckEngineConsistency() after reopen error = %v", err)
+	}
+	assertSelectTextRows(t, db, "SELECT note FROM users WHERE name = 'alice'", bigNote)
+}
+
+func TestCheckpointFailureAfterDropTableReopensWithFreedPhysicalPages(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, note TEXT)"); err != nil {
+		t.Fatalf("Exec(create table) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	for id := 1; id <= 20; id++ {
+		name := "bulk"
+		if id == 7 {
+			name = "alice"
+		}
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", id, name, strings.Repeat("payload-", 110)); err != nil {
+			t.Fatalf("Exec(insert %d) error = %v", id, err)
+		}
+	}
+
+	droppedPages := droppedTableRootPageIDs(db.pool, db.tables, "users")
+	if len(droppedPages) < 4 {
+		t.Fatalf("len(droppedPages) = %d, want at least header/index/spacemap/data pages", len(droppedPages))
+	}
+
+	beforeRecords, err := storage.ReadWALRecords(path)
+	if err != nil {
+		t.Fatalf("ReadWALRecords(before) error = %v", err)
+	}
+
+	db.afterDatabaseSyncHook = func() error {
+		return errors.New("checkpoint failed after WAL durability")
+	}
+	if _, err := db.Exec("DROP TABLE users"); err == nil {
+		t.Fatal("Exec(drop table) error = nil, want checkpoint failure")
+	}
+	db.afterDatabaseSyncHook = nil
+
+	afterRecords, err := storage.ReadWALRecords(path)
+	if err != nil {
+		t.Fatalf("ReadWALRecords(after) error = %v", err)
+	}
+	if len(afterRecords) <= len(beforeRecords) {
+		t.Fatalf("len(ReadWALRecords(after)) = %d, want > %d", len(afterRecords), len(beforeRecords))
+	}
+
+	rows, err := db.Query("SELECT * FROM users")
+	if err != nil {
+		t.Fatalf("Query(dropped table) error = %v", err)
+	}
+	if rows.Next() {
+		t.Fatal("rows.Next() on dropped table = true, want no rows and table-not-found error")
+	}
+	if rows.Err() == nil || rows.Err().Error() != "execution: table not found: users" {
+		t.Fatalf("rows.Err() after drop = %v, want %q", rows.Err(), "execution: table not found: users")
+	}
+	rows.Close()
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	rows, err = db.Query("SELECT * FROM users")
+	if err != nil {
+		t.Fatalf("Query(reopen dropped table) error = %v", err)
+	}
+	if rows.Next() {
+		t.Fatal("rows.Next() on reopened dropped table = true, want no rows and table-not-found error")
+	}
+	if rows.Err() == nil || rows.Err().Error() != "execution: table not found: users" {
+		t.Fatalf("rows.Err() after reopen drop = %v, want %q", rows.Err(), "execution: table not found: users")
+	}
+	rows.Close()
+
+	rawDB, pager := openRawStorage(t, path)
+	defer rawDB.Close()
+	head, err := storage.ReadDirectoryFreeListHead(rawDB.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryFreeListHead() error = %v", err)
+	}
+	chain := freeListChainForTest(t, pager, storage.PageID(head))
+	for _, pageID := range droppedPages {
+		if !containsPageID(chain, pageID) {
+			t.Fatalf("free list chain = %#v, want dropped page %d present", chain, pageID)
+		}
+	}
 }
 
 func TestRollbackRestoresDirtyPages(t *testing.T) {

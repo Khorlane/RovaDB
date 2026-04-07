@@ -2,6 +2,7 @@ package rovadb
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -563,6 +564,64 @@ func TestTxRollbackDiscardsLifecycleStateAcrossCloseAndReopen(t *testing.T) {
 	}
 }
 
+func TestTxCommitPersistsMultiPagePhysicalStorageAcrossReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, note TEXT)"); err != nil {
+		t.Fatalf("DB.Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
+		t.Fatalf("DB.Exec(create index) error = %v", err)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	for id := 1; id <= 24; id++ {
+		name := "bulk"
+		if id == 7 {
+			name = "alice"
+		}
+		if _, err := tx.Exec("INSERT INTO users VALUES (?, ?, ?)", id, name, strings.Repeat("payload-", 110)); err != nil {
+			t.Fatalf("Tx.Exec(insert %d) error = %v", id, err)
+		}
+	}
+	if _, err := tx.Exec("UPDATE users SET note = ? WHERE id = 7", strings.Repeat("grown-", 220)); err != nil {
+		t.Fatalf("Tx.Exec(update relocate) error = %v", err)
+	}
+	if _, err := tx.Exec("DELETE FROM users WHERE id = 6"); err != nil {
+		t.Fatalf("Tx.Exec(delete) error = %v", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	verifyPhysicalTableInventoryMatchesMetadata(t, db, "users")
+	if _, err := db.CheckEngineConsistency(); err != nil {
+		t.Fatalf("CheckEngineConsistency() error = %v", err)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	assertRowsIntSequenceFromDB(t, db, "SELECT id FROM users WHERE name = 'alice' ORDER BY id", 7)
+	assertRowsIntSequenceFromDB(t, db, "SELECT id FROM users WHERE name = 'bulk' ORDER BY id",
+		1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24)
+	verifyPhysicalTableInventoryMatchesMetadata(t, db, "users")
+	if _, err := db.CheckEngineConsistency(); err != nil {
+		t.Fatalf("CheckEngineConsistency() after reopen error = %v", err)
+	}
+}
+
 type userRow struct {
 	id   int
 	name string
@@ -600,4 +659,15 @@ func assertUserRows(t *testing.T, q queryer, sql string, want ...userRow) {
 			t.Fatalf("row %d = %#v, want %#v (rows = %#v)", i, got[i], want[i], got)
 		}
 	}
+}
+
+func assertRowsIntSequenceFromDB(t *testing.T, db *DB, sql string, want ...int) {
+	t.Helper()
+
+	rows, err := db.Query(sql)
+	if err != nil {
+		t.Fatalf("Query(%q) error = %v", sql, err)
+	}
+	defer rows.Close()
+	assertRowsIntSequence(t, rows, want...)
 }
