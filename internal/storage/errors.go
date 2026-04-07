@@ -11,6 +11,7 @@ var (
 	errCorruptedWALHeader       = dberr.NewStorage("corrupted wal header")
 	errCorruptedWALFrame        = dberr.NewStorage("corrupted wal frame")
 	errCorruptedPageHeader      = dberr.NewStorage("corrupted page header")
+	errCorruptedHeaderPage      = dberr.NewStorage("corrupted header page")
 	errCorruptedDirectoryPage   = dberr.NewStorage("corrupted directory page")
 	errUnsupportedDirectoryPage = dberr.NewStorage("unsupported directory mapping format")
 	errCorruptedCatalogPage     = dberr.NewStorage("corrupted catalog page")
@@ -19,6 +20,7 @@ var (
 	errMalformedCATDIROverflow  = dberr.NewStorage("malformed CAT/DIR overflow chain")
 	errUnsupportedCatalogPage   = dberr.NewStorage("unsupported catalog payload version")
 	errCorruptedTablePage       = dberr.NewStorage("corrupted table page")
+	errCorruptedSpaceMapPage    = dberr.NewStorage("corrupted space map page")
 	errCorruptedIndexPage       = dberr.NewStorage("corrupted index page")
 	errCorruptedRowData         = dberr.NewStorage("corrupted row data")
 	errCorruptedIndexMetadata   = dberr.NewStorage("corrupted index metadata")
@@ -26,6 +28,7 @@ var (
 	errCatalogTooLarge            = dberr.NewStorage("catalog too large")
 	errCATDIRExceedsEmbeddedWrite = dberr.NewStorage("catalog metadata exceeds embedded page-0 capacity")
 	errTablePageFull              = errors.New("storage: table page full")
+	errSpaceMapPageFull           = dberr.NewStorage("space map page full")
 	errIndexPageFull              = dberr.NewStorage("index page full")
 	errInvalidRowData             = errCorruptedRowData
 )

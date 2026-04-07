@@ -30,6 +30,24 @@ const (
 	PageTypeCatalogOverflow
 )
 
+const (
+	PageTypeHeader   PageType = 64
+	PageTypeSpaceMap PageType = 65
+)
+
+// PageTypeData is the physical-family name for the existing slotted table data
+// page format. It intentionally aliases the current table page type so normal
+// table runtime behavior and on-disk compatibility remain unchanged.
+const PageTypeData PageType = PageTypeTable
+
+// HeaderPageRole identifies the logical role stored within a physical Header page.
+type HeaderPageRole uint16
+
+const (
+	HeaderPageRoleDatabase HeaderPageRole = 1 + iota
+	HeaderPageRoleTable
+)
+
 // Page is a fixed-size in-memory page buffer. Dirty/original tracking is used
 // to stage autocommit writes and to restore pre-commit page bytes on rollback.
 type Page struct {
@@ -99,7 +117,28 @@ func pageOffset(id PageID) int64 {
 
 func IsValidPageType(pageType PageType) bool {
 	switch pageType {
-	case PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal, PageTypeFreePage, PageTypeDirectory, PageTypeCatalogOverflow:
+	case PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal, PageTypeFreePage, PageTypeDirectory, PageTypeCatalogOverflow, PageTypeHeader, PageTypeSpaceMap:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsHeaderPageType(pageType PageType) bool {
+	return pageType == PageTypeHeader
+}
+
+func IsSpaceMapPageType(pageType PageType) bool {
+	return pageType == PageTypeSpaceMap
+}
+
+func IsDataPageType(pageType PageType) bool {
+	return pageType == PageTypeData
+}
+
+func IsValidHeaderPageRole(role HeaderPageRole) bool {
+	switch role {
+	case HeaderPageRoleDatabase, HeaderPageRoleTable:
 		return true
 	default:
 		return false
@@ -173,6 +212,16 @@ func ValidatePageImage(page []byte) error {
 			return errCorruptedTablePage
 		}
 		return validateSlottedTablePage(page)
+	case PageTypeHeader:
+		if err := validateStoredPageChecksum(page); err != nil {
+			return errCorruptedHeaderPage
+		}
+		return ValidateHeaderPage(page)
+	case PageTypeSpaceMap:
+		if err := validateStoredPageChecksum(page); err != nil {
+			return errCorruptedSpaceMapPage
+		}
+		return ValidateSpaceMapPage(page)
 	case PageTypeIndexLeaf, PageTypeIndexInternal:
 		if err := validateStoredPageChecksum(page); err != nil {
 			return errCorruptedIndexPage
@@ -204,7 +253,7 @@ func validateStampedPageHeader(page []byte) error {
 		return errCorruptedPageHeader
 	}
 	pageID := binary.LittleEndian.Uint32(page[pageHeaderOffsetPageID : pageHeaderOffsetPageID+4])
-	if pageID == 0 {
+	if pageID == 0 && pageType != PageTypeDirectory && pageType != PageTypeHeader {
 		return errCorruptedPageHeader
 	}
 	return nil
@@ -219,7 +268,7 @@ func validateChecksumPageHeader(page []byte) error {
 		return errCorruptedPageHeader
 	}
 	pageID := binary.LittleEndian.Uint32(page[pageHeaderOffsetPageID : pageHeaderOffsetPageID+4])
-	if pageID == 0 && pageType != PageTypeDirectory {
+	if pageID == 0 && pageType != PageTypeDirectory && pageType != PageTypeHeader {
 		return errCorruptedPageHeader
 	}
 	return nil

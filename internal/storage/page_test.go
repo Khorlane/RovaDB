@@ -47,7 +47,7 @@ func TestPageOffset(t *testing.T) {
 }
 
 func TestIsValidPageType(t *testing.T) {
-	valid := []PageType{PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal, PageTypeFreePage, PageTypeDirectory, PageTypeCatalogOverflow}
+	valid := []PageType{PageTypeTable, PageTypeIndexLeaf, PageTypeIndexInternal, PageTypeFreePage, PageTypeDirectory, PageTypeCatalogOverflow, PageTypeHeader, PageTypeSpaceMap}
 	for _, pageType := range valid {
 		if !IsValidPageType(pageType) {
 			t.Fatalf("IsValidPageType(%d) = false, want true", pageType)
@@ -151,6 +151,39 @@ func TestIndexPageTypeHelpers(t *testing.T) {
 	}
 }
 
+func TestPhysicalPageFamilyHelpers(t *testing.T) {
+	if !IsHeaderPageType(PageTypeHeader) {
+		t.Fatal("IsHeaderPageType(PageTypeHeader) = false, want true")
+	}
+	if IsHeaderPageType(PageTypeTable) {
+		t.Fatal("IsHeaderPageType(PageTypeTable) = true, want false")
+	}
+	if !IsSpaceMapPageType(PageTypeSpaceMap) {
+		t.Fatal("IsSpaceMapPageType(PageTypeSpaceMap) = false, want true")
+	}
+	if IsSpaceMapPageType(PageTypeDirectory) {
+		t.Fatal("IsSpaceMapPageType(PageTypeDirectory) = true, want false")
+	}
+	if !IsDataPageType(PageTypeData) {
+		t.Fatal("IsDataPageType(PageTypeData) = false, want true")
+	}
+	if !IsDataPageType(PageTypeTable) {
+		t.Fatal("IsDataPageType(PageTypeTable) = false, want true")
+	}
+}
+
+func TestHeaderPageRoleHelpers(t *testing.T) {
+	if !IsValidHeaderPageRole(HeaderPageRoleDatabase) {
+		t.Fatal("IsValidHeaderPageRole(HeaderPageRoleDatabase) = false, want true")
+	}
+	if !IsValidHeaderPageRole(HeaderPageRoleTable) {
+		t.Fatal("IsValidHeaderPageRole(HeaderPageRoleTable) = false, want true")
+	}
+	if IsValidHeaderPageRole(HeaderPageRole(99)) {
+		t.Fatal("IsValidHeaderPageRole(99) = true, want false")
+	}
+}
+
 func TestPageLSNAndChecksumHelpers(t *testing.T) {
 	page := InitializeTablePage(7)
 
@@ -239,6 +272,16 @@ func TestFinalizePageImageStampsValidIndexFreeAndDirectoryPages(t *testing.T) {
 	}
 	if err := ValidatePageImage(overflowPage); err != nil {
 		t.Fatalf("ValidatePageImage(overflow) error = %v", err)
+	}
+
+	headerPage := InitTableHeaderPage(6, 3)
+	if err := ValidatePageImage(headerPage); err != nil {
+		t.Fatalf("ValidatePageImage(header) error = %v", err)
+	}
+
+	spaceMapPage := InitSpaceMapPage(7, 3)
+	if err := ValidatePageImage(spaceMapPage); err != nil {
+		t.Fatalf("ValidatePageImage(spaceMap) error = %v", err)
 	}
 }
 
