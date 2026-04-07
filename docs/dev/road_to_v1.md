@@ -1,17 +1,26 @@
 # Road To V1
 
-This is a temporary development planning note for the remaining path to RovaDB V1.
+This is a temporary development planning note for the remaining path to RovaDB
+V1.
 
-It is intentionally high-level. It captures the major work buckets after the current docs-and-design stabilization phase.
+It is intentionally high-level. It captures the major work buckets after the
+current docs-and-design stabilization phase.
 
 ## Status
 
-Step 1, docs and design stabilization, is close to complete but not fully closed yet.
+The docs-and-design stabilization phase now includes a locked next storage
+milestone:
+
+- `v0.37.0-physical-storage-layer`
 
 Current intent:
 
-- finish tightening the core docs and design notes
-- then use this document to guide implementation sequencing for the remaining V1 work
+- keep the current engine truthful about the still-implemented single-page table
+  storage model
+- use the locked Physical Storage Layer design as the next storage/runtime
+  implementation anchor
+- then continue the remaining V1-oriented feature and hardening work in small
+  slices
 
 ## V1 Objective
 
@@ -28,107 +37,33 @@ V1 does not require broad SQL coverage. It does require that the supported surfa
 
 ## Remaining Path
 
-### 2. Correct `INT` Semantics
+### 2. Physical Storage Layer
 
 Primary target:
 
-- complete `kg022`
+- `v0.37.0-physical-storage-layer`
 
 Goal:
 
-- realign public `INT` behavior to signed 32-bit semantics
-- make parser, runtime, storage, comparison, and API behavior consistent
-- leave light groundwork for future `SMALLINT` and `BIGINT`
+- implement the locked `TableHeader` / `SpaceMap` / `Data` storage model
+- remove the current single-page table storage limit
+- preserve truthful ownership and authority boundaries between CAT/DIR,
+  table-root physical metadata, and table-local free-space tracking
+- carry the storage/runtime/recovery implications through to a coherent durable
+  baseline
 
 Guiding doc:
 
-- `docs/dev/INTEGER_design.md`
+- `docs/dev/PHYSICAL_STORAGE_LAYER_design.md`
 
-Why this comes early:
+Why this comes next:
 
-- it is a foundational semantic correction
-- later work should build on the intended public type contract, not the accidental current one
+- it is the next major storage milestone after the current `v0.36.x` baseline
+- it addresses the current standout table-storage limitation directly
+- later lifecycle and hardening work should build on the intended physical
+  storage model rather than the temporary single-page assumption
 
-### 3. Make `CREATE INDEX` Real
-
-Primary target:
-
-- complete `kg024`
-
-Goal:
-
-- make `CREATE INDEX` and `CREATE UNIQUE INDEX` executable and durable
-- persist the full SQL-visible index definition
-- enforce created indexes correctly on later writes
-
-Guiding doc:
-
-- `docs/dev/CREATE_INDEX_design.md`
-
-Why this matters:
-
-- indexes must become real schema objects, not parser-only placeholders
-
-### 4. Make `DROP INDEX` Real
-
-Primary target:
-
-- complete `kg025`
-
-Goal:
-
-- make `DROP INDEX` executable and durable
-- allow users to remove mistaken indexes cleanly
-- keep runtime, catalog, and planner state consistent after removal
-
-Guiding doc:
-
-- `docs/dev/SCHEMA_LIFECYCLE_design.md`
-
-Why this follows `CREATE INDEX`:
-
-- practical index lifecycle requires both creation and removal
-
-### 5. Make `DROP TABLE` Real
-
-Primary target:
-
-- complete `kg026`
-
-Goal:
-
-- make `DROP TABLE` executable and durable
-- remove dependent indexes correctly
-- preserve reopen and recovery correctness
-
-Guiding doc:
-
-- `docs/dev/SCHEMA_LIFECYCLE_design.md`
-
-Why this matters:
-
-- practical schema lifecycle requires users to revise mistaken tables without abandoning the database
-
-### 6. Enforce Bounded Indexed `TEXT`
-
-Primary target:
-
-- complete `kg023`
-
-Goal:
-
-- define and enforce the bounded indexed `TEXT` rule once executable indexes exist
-- keep the index implementation predictable and intentionally bounded
-
-Guiding doc:
-
-- `docs/dev/known_gaps.md`
-
-Why this comes after executable indexes:
-
-- it is a real follow-on enforcement rule for public index support
-
-### 7. Final V1 Hardening and Product Polish
+### 3. Final V1 Hardening and Product Polish
 
 Goal:
 
@@ -148,11 +83,8 @@ Reference note:
 
 The following should be complete before calling the line V1-ready:
 
-- `INT` semantics corrected
-- executable durable `CREATE INDEX`
-- executable durable `DROP INDEX`
-- executable durable `DROP TABLE`
-- bounded indexed `TEXT` enforcement
+- Physical Storage Layer completed to replace the current single-page table
+  storage limit
 - reopen and recovery confidence across schema/index lifecycle operations
 
 ## Not Required For V1
@@ -178,18 +110,22 @@ The following are intentionally not required for the initial V1 target:
 
 ## Rough Version Plan
 
-Use `v0.x.0` milestone releases until the project is intentionally judged ready for `v1.0.0`.
+Use `v0.x.0` milestone releases until the project is intentionally judged ready
+for `v1.0.0`.
 
 Current baseline:
 
-- `v0.16.x`
+- `v0.36.x`
 
-Compressed milestone plan:
+Next milestone anchor:
 
-- `v0.16.0` if needed
-  - final hardening, reopen/recovery confidence, docs/examples/CLI alignment, and polish before `v1.0.0` consideration
+- `v0.37.0-physical-storage-layer`
+  - `TableHeader` / `SpaceMap` / multi-page `Data` ownership model
+  - multi-page table storage beyond the current single-page table limit
+  - storage, runtime, and recovery implications for the new model
 
-After the above milestones are complete, reassess intentionally for `v1.0.0` rather than treating it as an automatic next step.
+After that milestone lands, reassess the remaining V1 path intentionally rather
+than treating `v1.0.0` as an automatic next step.
 
 ## Temporary Nature
 

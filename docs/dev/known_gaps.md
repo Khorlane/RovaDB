@@ -24,6 +24,7 @@ Status values:
 - [kg026] Engine `done` Make `DROP TABLE` executable and durable
 - [kg022] Engine `done` Realign `INT` semantics to 32-bit
 - [kg023] Engine `done` Enforce a bounded indexable TEXT size
+- [dx005] Explore and lock the Physical Storage Layer milestone
 - [dx001] Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc
 - [dx002] Explore planner usage for multi-column indexes
 - [dx003] Explore primary key as an explicit table-definition contract
@@ -116,6 +117,47 @@ Resolved direction:
   - `execution: indexed TEXT column value exceeds 512-byte limit`
 
 ## Design Explorations
+
+### Explore and lock the Physical Storage Layer milestone [dx005]
+
+Exploration scope:
+
+- replace the current single-page table row-storage assumption with a durable
+  multi-page physical storage model
+- define the `TableHeader` / `SpaceMap` / `Data` ownership model clearly before
+  implementation expands storage behavior
+- make the next major storage milestone explicit as
+  `v0.37.0-physical-storage-layer`
+
+Locked direction so far:
+
+- one single database file with one global 4 KB page heap
+- exactly three physical page types:
+  - `Header`
+  - `SpaceMap`
+  - `Data`
+- `Header` has two logical roles:
+  - `DatabaseHeader`
+  - `TableHeader`
+- page 0 remains the `DatabaseHeader`
+- each table owns one `TableHeader`, its own `SpaceMap` pages, and its own
+  `Data` pages
+- ownership is logical and metadata-driven rather than physically contiguous
+- CAT/DIR remains authoritative for logical metadata
+- `TableHeader` is authoritative for physical table root metadata
+- `SpaceMap` is authoritative for table-local `Data` page inventory and
+  free-space classification
+- rows remain addressed by `PageID + SlotID`
+
+Implementation truthfulness:
+
+- this model is not implemented yet
+- current tables do not yet use `TableHeader` or `SpaceMap` pages
+- the current engine still has the one-page table-storage limitation
+
+Guiding doc:
+
+- `docs/dev/PHYSICAL_STORAGE_LAYER_design.md`
 
 ### Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc [dx001]
 

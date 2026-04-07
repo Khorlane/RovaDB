@@ -15,6 +15,12 @@ The direction under active exploration is:
 - strengthening durability and recovery beyond the current rollback-journal model
 - expanding on-disk indexing and transaction foundations to support a more capable long-term engine
 
+The next named milestone for that work is:
+- `v0.37.0-physical-storage-layer`
+
+That milestone is currently a locked design target, not an implemented storage
+format. The current engine still uses its existing table-storage model today.
+
 This work is about deepening storage and transaction internals while preserving RovaDB's existing goals around clarity, determinism, and a small stable public API.
 
 ## Quick Start
