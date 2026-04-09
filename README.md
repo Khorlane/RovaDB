@@ -1,34 +1,42 @@
-# RovaDB
+# RovaDB [www.rovadb.org](https://www.rovadb.org)
 
-A small, idiomatic embedded SQL database for Go.
+A pure Go embedded SQL database for local applications.
 
-RovaDB is a Go-first embedded relational database engine designed for clarity, portability, and long-term extensibility. It is intended to feel natural to Go developers, remain understandable to contributors, and grow without boxing itself into a dead-end architecture.
+RovaDB is a small relational database engine for Go that aims to be practical, readable, and easy to embed. It is built for single-process applications that want SQL, predictable behavior, and a Go-native implementation without CGO.
 
-> **Status:** Pre-release. The current repo state reflects a practical, durable baseline with a small public API, focused SQL support, explicit public transaction control through the Go API, narrow index-only access for eligible query shapes, the completed Physical Storage Layer milestone, and the completed Physical Storage Polish milestone work.
+## Why RovaDB
 
-## Current State
+- embedded relational database for Go
+- pure Go implementation
+- no CGO dependency
+- small, stable public API
+- readable engine internals
+- practical SQL support for local apps and tools
 
-Current engineering focus is the post-physical-storage-polish path beyond the current storage baseline.
+## Good Fit For
 
-The direction under active exploration is:
-- strengthening durability and recovery beyond the current rollback-journal model
-- expanding on-disk indexing and transaction foundations to support a more capable long-term engine
-- continuing to harden and extend the new `TableHeader` / `SpaceMap` / owned-`Data` page storage model
+- local Go applications that need embedded relational storage
+- tools, utilities, and prototypes that want SQL instead of ad hoc file formats
+- developers who want a Go-native embedded database with understandable internals
+- contributors who want to work on a real database engine without a massive codebase
 
-The completed storage milestones are:
-- `v0.37.0-physical-storage-layer`
-- `v0.38.0-physical-storage-polish`
+## Not Aimed At
 
-The current engine storage truth is:
-- tables have authoritative `TableHeader` roots
-- `SpaceMap` pages enumerate owned `Data` pages
-- normal writes land on owned `Data` pages
-- normal reads and scans enumerate rows from owned `Data` pages
-- row-growth updates relocate through delete plus reinsert when they no longer fit in place
-- open and reopen strictly validate physical ownership invariants with no backward-compatibility path for pre-physstore table storage
-- diagnostics and consistency reporting expose per-table physical ownership metadata and inventory truth
+- client/server deployments
+- distributed systems
+- full SQL compatibility
+- advanced query optimization workloads
+- replacing mature database servers on breadth or raw performance
 
-This work is about deepening storage and transaction internals while preserving RovaDB's existing goals around clarity, determinism, and a small stable public API.
+## Why RovaDB Instead of SQLite or Key-Value Stores?
+
+Choose RovaDB when you want an embedded relational database that feels native in Go and you care about understandable internals, explicit scope, and a small public API.
+
+Compared with SQLite, RovaDB is not trying to match the full breadth, ecosystem maturity, or performance profile of a long-established engine. Its appeal is different: pure Go implementation, no CGO dependency, a smaller surface area, and a codebase that is easier to study and evolve in Go-first projects.
+
+Compared with key-value stores and simple embedded persistence libraries, RovaDB gives you a relational model, SQL queries, joins, ordering, aggregates, catalog visibility, and a more familiar mental model for structured application data.
+
+> **Status:** Pre-release. RovaDB already provides a practical baseline with a small public API, focused SQL support, explicit transaction control through the Go API, and completed physical storage foundation/polish milestones.
 
 ## Quick Start
 
@@ -81,6 +89,33 @@ rovadb> SELECT a.cust_nbr AS customer_number, a.name, a.city, b.order_nbr, b.ite
 ```
 
 If you want to embed RovaDB in a Go program instead, see `examples/basic_usage/main.go`.
+
+## Current State
+
+Current engineering focus is the post-physical-storage-polish path beyond the current storage baseline.
+
+The direction under active exploration is:
+
+- strengthening durability and recovery beyond the current rollback-journal model
+- expanding on-disk indexing and transaction foundations to support a more capable long-term engine
+- continuing to harden and extend the new `TableHeader` / `SpaceMap` / owned-`Data` page storage model
+
+The completed storage milestones are:
+
+- `v0.37.0-physical-storage-layer`
+- `v0.38.0-physical-storage-polish`
+
+The current engine storage truth is:
+
+- tables have authoritative `TableHeader` roots
+- `SpaceMap` pages enumerate owned `Data` pages
+- normal writes land on owned `Data` pages
+- normal reads and scans enumerate rows from owned `Data` pages
+- row-growth updates relocate through delete plus reinsert when they no longer fit in place
+- open and reopen strictly validate physical ownership invariants with no backward-compatibility path for pre-physstore table storage
+- diagnostics and consistency reporting expose per-table physical ownership metadata and inventory truth
+
+This work is about deepening storage and transaction internals while preserving RovaDB's existing goals around clarity, determinism, and a small stable public API.
 
 ## Product Boundary
 
@@ -370,18 +405,23 @@ RovaDB is being built to:
 ## Design principles
 
 ### 1. Go-first
+
 RovaDB should look and feel like a Go project. The code, API, and documentation should serve Go developers directly.
 
 ### 2. Small, but not boxed in
+
 The first versions should stay intentionally small while preserving the seams needed for later growth.
 
 ### 3. Clear layers
+
 The engine should maintain clean boundaries between parsing, planning, execution, storage, and transactions.
 
 ### 4. Readability over cleverness
+
 If contributors cannot understand the code in a reasonable amount of time, the project gives up one of its main advantages.
 
 ### 5. Stable direction
+
 RovaDB should grow through deliberate scope expansion, not feature sprawl.
 
 ## Intended audience
@@ -389,9 +429,11 @@ RovaDB should grow through deliberate scope expansion, not feature sprawl.
 RovaDB is aimed at two groups:
 
 ### Adopters
+
 Go developers who want an embedded SQL database with a straightforward mental model and a clean integration story.
 
 ### Contributors
+
 Engineers who want to work on a real database engine in Go without needing to wade into an enormous, opaque codebase.
 
 ## Architectural direction
