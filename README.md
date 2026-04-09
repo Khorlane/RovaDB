@@ -61,26 +61,26 @@ Run this query:
 SELECT a.cust_nbr AS customer_number, a.name, a.city, b.order_nbr, b.item, b.total_amt
 FROM customers a
 INNER JOIN orders b ON a.cust_nbr = b.cust_nbr
-WHERE b.total_amt > 7
+WHERE b.total_amt > 7.0
 ORDER BY a.name DESC, b.total_amt;
 ```
 
 Or copy/paste this one-line form directly into the CLI:
 
 ```text
-SELECT a.cust_nbr AS customer_number, a.name, a.city, b.order_nbr, b.item, b.total_amt FROM customers a INNER JOIN orders b ON a.cust_nbr = b.cust_nbr WHERE b.total_amt > 7 ORDER BY a.name DESC, b.total_amt;
+SELECT a.cust_nbr AS customer_number, a.name, a.city, b.order_nbr, b.item, b.total_amt FROM customers a INNER JOIN orders b ON a.cust_nbr = b.cust_nbr WHERE b.total_amt > 7.0 ORDER BY a.name DESC, b.total_amt;
 ```
 
 Equivalent comma-join form:
 
 ```text
-SELECT a.cust_nbr, a.name, b.order_nbr, b.total_amt FROM customers a, orders b WHERE a.cust_nbr = b.cust_nbr AND b.total_amt > 7 ORDER BY a.name DESC, b.total_amt;
+SELECT a.cust_nbr, a.name, b.order_nbr, b.total_amt FROM customers a, orders b WHERE a.cust_nbr = b.cust_nbr AND b.total_amt > 7.0 ORDER BY a.name DESC, b.total_amt;
 ```
 
 You should see:
 
 ```text
-rovadb> SELECT a.cust_nbr AS customer_number, a.name, a.city, b.order_nbr, b.item, b.total_amt FROM customers a INNER JOIN orders b ON a.cust_nbr = b.cust_nbr WHERE b.total_amt > 7 ORDER BY a.name DESC, b.total_amt;
+rovadb> SELECT a.cust_nbr AS customer_number, a.name, a.city, b.order_nbr, b.item, b.total_amt FROM customers a INNER JOIN orders b ON a.cust_nbr = b.cust_nbr WHERE b.total_amt > 7.0 ORDER BY a.name DESC, b.total_amt;
   customer_number | a.name       | a.city   | b.order_nbr | b.item   | b.total_amt
   ----------------|--------------|----------|-------------|----------|------------
   2               | Brian Lewis  | Chicago  | 3           | Stapler  | 15
