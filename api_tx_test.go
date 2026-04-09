@@ -14,9 +14,8 @@ func TestPublicTransactionAPIMethodShapesCompile(t *testing.T) {
 	var query func(*Tx, string, ...any) (*Rows, error) = (*Tx).Query
 	var queryRow func(*Tx, string, ...any) *Row = (*Tx).QueryRow
 
-	if begin == nil || commit == nil || rollback == nil || exec == nil || query == nil || queryRow == nil {
-		t.Fatal("public transaction method expressions should be non-nil")
-	}
+	// Keep explicit references so method-shape compatibility is checked at compile time.
+	_, _, _, _, _, _ = begin, commit, rollback, exec, query, queryRow
 }
 
 func TestBeginOnOpenDBReturnsActiveTx(t *testing.T) {

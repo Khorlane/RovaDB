@@ -72,7 +72,7 @@ func (tx *Tx) Exec(query string, args ...any) (Result, error) {
 		if err != nil {
 			return Result{}, err
 		}
-		if err := validateTables(tx.tables, false); err != nil {
+		if err := validateTables(tx.tables); err != nil {
 			return Result{}, err
 		}
 		return Result{rowsAffected: rowsAffected}, nil
@@ -82,7 +82,7 @@ func (tx *Tx) Exec(query string, args ...any) (Result, error) {
 			return Result{}, err
 		}
 		tx.tables = updated
-		if err := validateTables(tx.tables, false); err != nil {
+		if err := validateTables(tx.tables); err != nil {
 			return Result{}, err
 		}
 		return Result{rowsAffected: rowsAffected}, nil
@@ -92,7 +92,7 @@ func (tx *Tx) Exec(query string, args ...any) (Result, error) {
 			return Result{}, err
 		}
 		tx.tables = updated
-		if err := validateTables(tx.tables, false); err != nil {
+		if err := validateTables(tx.tables); err != nil {
 			return Result{}, err
 		}
 		return Result{rowsAffected: rowsAffected}, nil
@@ -102,7 +102,7 @@ func (tx *Tx) Exec(query string, args ...any) (Result, error) {
 			return Result{}, err
 		}
 		tx.tables = updated
-		if err := validateTables(tx.tables, false); err != nil {
+		if err := validateTables(tx.tables); err != nil {
 			return Result{}, err
 		}
 		return Result{rowsAffected: rowsAffected}, nil
@@ -136,7 +136,7 @@ func (tx *Tx) Query(query string, args ...any) (*Rows, error) {
 	}
 
 	if sel.TableName != "" {
-		if err := validateTables(tx.tables, false); err != nil {
+		if err := validateTables(tx.tables); err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
 		plan, err := planner.PlanSelect(sel, plannerTableMetadata(tx.tables))
@@ -189,7 +189,7 @@ func (tx *Tx) Commit() error {
 		return tx.db.persistPublicTxState(committedTables)
 	})
 	if committed {
-		if err := validateTables(committedTables, false); err != nil {
+		if err := validateTables(committedTables); err != nil {
 			return err
 		}
 		clearLoadedRows(committedTables)

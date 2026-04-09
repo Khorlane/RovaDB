@@ -1808,21 +1808,6 @@ func TestOpenFailsOnTruncatedWALFrameDuringReplay(t *testing.T) {
 	}
 }
 
-func seedFreePageForTest(t *testing.T, pager *storage.Pager, pageID storage.PageID, next storage.PageID) {
-	t.Helper()
-
-	page, err := pager.Get(pageID)
-	if err != nil {
-		t.Fatalf("pager.Get(%d) error = %v", pageID, err)
-	}
-	clear(page.Data())
-	copy(page.Data(), storage.InitFreePage(uint32(pageID), uint32(next)))
-	pager.MarkDirty(page)
-	if err := pager.Flush(); err != nil {
-		t.Fatalf("pager.Flush() error = %v", err)
-	}
-}
-
 func appendFreePageForTest(t *testing.T, pager *storage.Pager, next storage.PageID) storage.PageID {
 	t.Helper()
 

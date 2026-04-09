@@ -256,7 +256,7 @@ func Open(path string) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
-	if err := validateTables(tables, true); err != nil {
+	if err := validateTables(tables); err != nil {
 		_ = pager.Close()
 		_ = file.Close()
 		return nil, err
@@ -398,7 +398,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			return nil
 		})
 		if committed {
-			if err := validateTables(committedTables, false); err != nil {
+			if err := validateTables(committedTables); err != nil {
 				return Result{}, err
 			}
 			clearLoadedRows(committedTables)
@@ -430,7 +430,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			return nil
 		})
 		if committed {
-			if err := validateTables(committedTables, false); err != nil {
+			if err := validateTables(committedTables); err != nil {
 				return Result{}, err
 			}
 			clearLoadedRows(committedTables)
@@ -462,7 +462,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			return nil
 		})
 		if committed {
-			if err := validateTables(committedTables, false); err != nil {
+			if err := validateTables(committedTables); err != nil {
 				return Result{}, err
 			}
 			clearLoadedRows(committedTables)
@@ -493,7 +493,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			return nil
 		})
 		if committed {
-			if err := validateTables(committedTables, false); err != nil {
+			if err := validateTables(committedTables); err != nil {
 				return Result{}, err
 			}
 			clearLoadedRows(committedTables)
@@ -522,7 +522,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			return nil
 		})
 		if committed {
-			if err := validateTables(committedTables, false); err != nil {
+			if err := validateTables(committedTables); err != nil {
 				return Result{}, err
 			}
 			clearLoadedRows(committedTables)
@@ -551,7 +551,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			return nil
 		})
 		if committed {
-			if err := validateTables(committedTables, false); err != nil {
+			if err := validateTables(committedTables); err != nil {
 				return Result{}, err
 			}
 			clearLoadedRows(committedTables)
@@ -583,7 +583,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			return nil
 		})
 		if committed {
-			if err := validateTables(committedTables, false); err != nil {
+			if err := validateTables(committedTables); err != nil {
 				return Result{}, err
 			}
 			clearLoadedRows(committedTables)
@@ -615,7 +615,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			return nil
 		})
 		if committed {
-			if err := validateTables(committedTables, false); err != nil {
+			if err := validateTables(committedTables); err != nil {
 				return Result{}, err
 			}
 			clearLoadedRows(committedTables)
@@ -715,7 +715,7 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 	}
 
 	if sel.TableName != "" {
-		if err := validateTables(db.tables, false); err != nil {
+		if err := validateTables(db.tables); err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
 		plan, err := planner.PlanSelect(sel, plannerTableMetadata(db.tables))
@@ -770,7 +770,7 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
-		if err := validateTables(execTables, false); err != nil {
+		if err := validateTables(execTables); err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
 		rows, err := executor.Select(plan, execTables)
@@ -1614,14 +1614,6 @@ func (db *DB) applyStagedCreate(stagedTables map[string]*executor.Table, tableNa
 		return err
 	}
 	return nil
-}
-
-func (db *DB) refreshBufferPool() {
-	if db == nil || db.pager == nil {
-		return
-	}
-	poolSize := int(db.pager.NextPageID()) + 1
-	db.pool = bufferpool.New(poolSize, pagerPageLoader{pager: db.pager})
 }
 
 func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, tableName string) error {
@@ -3394,10 +3386,10 @@ func (db *DB) insertIndexRecord(table *executor.Table, indexDef *storage.Catalog
 	stager.stage(stagedPage{id: leafPageID, data: leftPageData})
 	stager.stage(stagedPage{id: rightPageID, data: rightPageData, isNew: rightIsNew})
 
-	return db.propagateIndexSplit(table, indexDef, path, leafPageID, rightPageID, separatorKey, stager)
+	return db.propagateIndexSplit(indexDef, path, leafPageID, rightPageID, separatorKey, stager)
 }
 
-func (db *DB) propagateIndexSplit(table *executor.Table, indexDef *storage.CatalogIndex, path []indexInsertPathEntry, leftPageID, rightPageID storage.PageID, separatorKey []byte, stager *indexPageStager) error {
+func (db *DB) propagateIndexSplit(indexDef *storage.CatalogIndex, path []indexInsertPathEntry, leftPageID, rightPageID storage.PageID, separatorKey []byte, stager *indexPageStager) error {
 	for len(path) > 0 {
 		parent := path[len(path)-1]
 		path = path[:len(path)-1]
@@ -3743,17 +3735,6 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 	}
 
 	return tables, nil
-}
-
-func columnNamesForTable(table *executor.Table) []string {
-	if table == nil {
-		return nil
-	}
-	colNames := make([]string, 0, len(table.Columns))
-	for _, col := range table.Columns {
-		colNames = append(colNames, col.Name)
-	}
-	return colNames
 }
 
 func executeCreateIndex(stmt *parser.CreateIndexStmt, tables map[string]*executor.Table) (int64, map[string]*executor.Table, error) {
@@ -4416,26 +4397,6 @@ func committedFreePageSet(pool *bufferpool.BufferPool, head storage.PageID) (map
 	return freePages, nil
 }
 
-func decodePersistedTableRows(pageData []byte, columns []parser.ColumnDef) ([][]parser.Value, error) {
-	if storage.IsSlottedTablePage(pageData) {
-		return storage.ReadSlottedRowsFromTablePageData(pageData, storageColumnTypes(columns))
-	}
-
-	payloads, err := storage.ReadRowsFromTablePageData(pageData)
-	if err != nil {
-		return nil, wrapStorageError(err)
-	}
-	rows := make([][]parser.Value, 0, len(payloads))
-	for _, payload := range payloads {
-		row, err := storage.DecodeRow(payload)
-		if err != nil {
-			return nil, wrapStorageError(err)
-		}
-		rows = append(rows, row)
-	}
-	return rows, nil
-}
-
 func storageColumnTypes(columns []parser.ColumnDef) []uint8 {
 	columnTypes := make([]uint8, 0, len(columns))
 	for _, column := range columns {
@@ -4503,7 +4464,7 @@ func padRowToSchema(row []parser.Value, width int) []parser.Value {
 	return padded
 }
 
-func validateTables(tables map[string]*executor.Table, storageBoundary bool) error {
+func validateTables(tables map[string]*executor.Table) error {
 	for _, table := range tables {
 		if err := validateIndexConsistency(table); err != nil {
 			return err

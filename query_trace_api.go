@@ -49,7 +49,7 @@ func (db *DB) ExplainQueryPath(sql string, args ...any) (QueryExecutionTrace, er
 	if sel.TableName == "" {
 		return trace, nil
 	}
-	if err := validateTables(db.tables, false); err != nil {
+	if err := validateTables(db.tables); err != nil {
 		return QueryExecutionTrace{}, err
 	}
 

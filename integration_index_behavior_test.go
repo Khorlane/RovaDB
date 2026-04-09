@@ -33,7 +33,7 @@ func TestStage7IndexLifecycleAcrossReopen(t *testing.T) {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
 	assertQueryIntRows(t, db, "SELECT id FROM users WHERE name = 'alice' ORDER BY id", 1, 3)
-	assertIndexConsistency(t, db, db.tables["users"])
+	assertIndexConsistency(t, db.tables["users"])
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
@@ -41,7 +41,7 @@ func TestStage7IndexLifecycleAcrossReopen(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 	assertQueryIntRows(t, db, "SELECT id FROM users WHERE name = 'alice' ORDER BY id", 1, 3)
-	assertIndexConsistency(t, db, db.tables["users"])
+	assertIndexConsistency(t, db.tables["users"])
 }
 
 func TestStage7MutationAndIndexCorrectness(t *testing.T) {
@@ -73,7 +73,7 @@ func TestStage7MutationAndIndexCorrectness(t *testing.T) {
 
 	assertQueryIntRows(t, db, "SELECT id FROM users WHERE name = 'alice' ORDER BY id", 2)
 	assertQueryIntRows(t, db, "SELECT id FROM users WHERE name = 'cara'", 3)
-	assertIndexConsistency(t, db, db.tables["users"])
+	assertIndexConsistency(t, db.tables["users"])
 }
 
 func TestStage7IndexedAndNonIndexedQueriesStayAligned(t *testing.T) {
@@ -112,7 +112,7 @@ func TestStage7IndexedAndNonIndexedQueriesStayAligned(t *testing.T) {
 	if got := collectIntRows(t, db, "SELECT id FROM users ORDER BY id"); !reflect.DeepEqual(got, fullBaseline) {
 		t.Fatalf("full scan rows = %#v, want %#v", got, fullBaseline)
 	}
-	assertIndexConsistency(t, db, db.tables["users"])
+	assertIndexConsistency(t, db.tables["users"])
 }
 
 func TestStage7IndexEdgeCases(t *testing.T) {
@@ -138,7 +138,7 @@ func TestStage7IndexEdgeCases(t *testing.T) {
 		}
 
 		assertQueryIntRows(t, db, "SELECT id FROM users WHERE name = NULL ORDER BY id", 1, 3)
-		assertIndexConsistency(t, db, db.tables["users"])
+		assertIndexConsistency(t, db.tables["users"])
 	})
 
 	t.Run("empty table with index", func(t *testing.T) {
@@ -156,7 +156,7 @@ func TestStage7IndexEdgeCases(t *testing.T) {
 		}
 
 		assertQueryIntRows(t, db, "SELECT COUNT(*) FROM users WHERE name = 'alice'", 0)
-		assertIndexConsistency(t, db, db.tables["users"])
+		assertIndexConsistency(t, db.tables["users"])
 	})
 
 	t.Run("single row", func(t *testing.T) {
@@ -177,7 +177,7 @@ func TestStage7IndexEdgeCases(t *testing.T) {
 		}
 
 		assertQueryIntRows(t, db, "SELECT id FROM users WHERE name = 'solo'", 1)
-		assertIndexConsistency(t, db, db.tables["users"])
+		assertIndexConsistency(t, db.tables["users"])
 	})
 
 	t.Run("large-ish identical values", func(t *testing.T) {
@@ -203,7 +203,7 @@ func TestStage7IndexEdgeCases(t *testing.T) {
 		if !reflect.DeepEqual(got, []int{50}) {
 			t.Fatalf("count rows = %#v, want []int{50}", got)
 		}
-		assertIndexConsistency(t, db, db.tables["users"])
+		assertIndexConsistency(t, db.tables["users"])
 	})
 }
 
@@ -240,7 +240,7 @@ func TestStage7OpenPreIndexCatalogFails(t *testing.T) {
 	}
 }
 
-func assertIndexConsistency(t *testing.T, db *DB, table *executor.Table) {
+func assertIndexConsistency(t *testing.T, table *executor.Table) {
 	t.Helper()
 
 	if table == nil || len(table.IndexDefs) == 0 {

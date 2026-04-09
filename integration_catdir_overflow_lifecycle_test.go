@@ -421,22 +421,3 @@ func allocateFreePagesFromHeadForTest(t *testing.T, path string, freeListHead ui
 	}
 	return pageIDs
 }
-
-func assertSameStoragePageSet(t *testing.T, got []storage.PageID, want []storage.PageID) {
-	t.Helper()
-	if len(got) != len(want) {
-		t.Fatalf("len(pageIDs) = %d, want %d", len(got), len(want))
-	}
-	wantSet := make(map[storage.PageID]int, len(want))
-	for _, pageID := range want {
-		wantSet[pageID]++
-	}
-	for _, pageID := range got {
-		wantSet[pageID]--
-	}
-	for pageID, remaining := range wantSet {
-		if remaining != 0 {
-			t.Fatalf("page set mismatch for page %d, remaining count %d, got=%#v want=%#v", pageID, remaining, got, want)
-		}
-	}
-}
