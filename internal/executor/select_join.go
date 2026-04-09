@@ -8,6 +8,10 @@ import (
 	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
+// Join SELECT execution stays runtime-owned here: planner selects the join scan
+// shape, and executor owns joined-row resolution, filtering, ordering, and
+// materialization from that plan data.
+
 type joinSelectSource struct {
 	ref    parser.TableRef
 	table  *Table

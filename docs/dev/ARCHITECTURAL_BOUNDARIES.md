@@ -64,6 +64,13 @@ The following rules are locked:
 - Planner and execution operate on logical and value-level data, not physical page structures.
 - Cross-layer interaction must use small, explicit interfaces and narrow data contracts.
 
+## Current Hardening Focus
+
+- The next boundary hardening focus is planner to execution.
+- Planner owns plan construction and stable plan shapes.
+- Execution owns runtime flow and runtime state.
+- This boundary should be enforced through a data contract, not shared concrete runtime shapes.
+
 ## Enforcement
 
 - Package docs and root-layer comments must describe the same ownership model.

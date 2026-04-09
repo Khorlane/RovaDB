@@ -6,6 +6,10 @@ import (
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
+// This file owns parsed-statement-to-plan translation only. It decides logical
+// scan shape and emits planner data contracts; execution-owned runtime state and
+// row materialization do not belong here.
+
 // TableMetadata is the minimal planner-side table info used for scan choice.
 type TableMetadata struct {
 	SimpleIndexes map[string]SimpleIndex
@@ -22,6 +26,9 @@ type SimpleIndex struct {
 // PlanSelect creates a basic execution plan for SELECT.
 // Current behavior defaults to table scan unless optional metadata supports
 // a simple equality index scan decision.
+// NOTE: The returned plan still carries parser-owned statement/value shapes in
+// this milestone line. Later slices will narrow that boundary without changing
+// ownership: planner emits plan data, executor owns runtime flow.
 func PlanSelect(stmt *parser.SelectExpr, tables ...map[string]*TableMetadata) (*SelectPlan, error) {
 	if stmt == nil {
 		return nil, newPlanError("unsupported query form")
