@@ -22,37 +22,33 @@ type joinSelectResolver struct {
 	sources []joinSelectSource
 }
 
-func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Value, error) {
-	if plan == nil || plan.Query == nil || plan.JoinScan == nil {
+func executeJoinSelect(plan *selectPlanBridge, tables map[string]*Table) ([][]parser.Value, error) {
+	if plan == nil || plan.query == nil || plan.scanType != planner.ScanTypeJoin {
 		return nil, errInvalidSelectPlan
 	}
-	if !isSupportedJoinSelectShape(plan.Query) {
+	if !isSupportedJoinSelectShape(plan.query) {
 		return nil, errUnsupportedStatement
 	}
 
-	leftTable := tables[plan.JoinScan.LeftTableName]
-	rightTable := tables[plan.JoinScan.RightTableName]
-	if leftTable == nil {
-		return nil, newTableNotFoundError(plan.JoinScan.LeftTableName)
-	}
-	if rightTable == nil {
-		return nil, newTableNotFoundError(plan.JoinScan.RightTableName)
-	}
-
-	resolver := newJoinSelectResolver(plan.Query, leftTable, rightTable)
-	leftIdx, err := resolver.resolveQualifiedColumnIndex(plan.JoinScan.LeftTableName, plan.JoinScan.LeftTableAlias, plan.JoinScan.LeftColumnName)
-	if err != nil {
-		return nil, err
-	}
-	rightIdx, err := resolver.resolveQualifiedColumnIndex(plan.JoinScan.RightTableName, plan.JoinScan.RightTableAlias, plan.JoinScan.RightColumnName)
+	leftTable, rightTable, err := plan.joinTables(tables)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := validateJoinFilterColumns(plan.Query, resolver); err != nil {
+	resolver := newJoinSelectResolver(plan.query, leftTable, rightTable)
+	leftIdx, err := resolver.resolveQualifiedColumnIndex(plan.join.leftTableName, plan.join.leftTableAlias, plan.join.leftColumnName)
+	if err != nil {
 		return nil, err
 	}
-	if err := validateJoinProjectionExprs(plan.Query, resolver); err != nil {
+	rightIdx, err := resolver.resolveQualifiedColumnIndex(plan.join.rightTableName, plan.join.rightTableAlias, plan.join.rightColumnName)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := validateJoinFilterColumns(plan.query, resolver); err != nil {
+		return nil, err
+	}
+	if err := validateJoinProjectionExprs(plan.query, resolver); err != nil {
 		return nil, err
 	}
 
@@ -67,7 +63,7 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 			if !match {
 				continue
 			}
-			whereMatch, err := evalJoinPredicateOrWhere(row, plan.Query, resolver)
+			whereMatch, err := evalJoinPredicateOrWhere(row, plan.query, resolver)
 			if err != nil {
 				return nil, err
 			}
@@ -78,8 +74,8 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 		}
 	}
 
-	if plan.Query.IsCountStar {
-		if len(plan.Query.OrderBys) > 0 || plan.Query.OrderBy != nil {
+	if plan.query.IsCountStar {
+		if len(plan.query.OrderBys) > 0 || plan.query.OrderBy != nil {
 			return nil, errCountOrderByUnsupported
 		}
 		value, err := publicIntResult(int64(len(joinedRows)))
@@ -88,17 +84,17 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 		}
 		return [][]parser.Value{{value}}, nil
 	}
-	if hasAggregateProjection(plan.Query) {
-		return executeJoinAggregateSelectRows(plan.Query, joinedRows, resolver)
+	if hasAggregateProjection(plan.query) {
+		return executeJoinAggregateSelectRows(plan.query, joinedRows, resolver)
 	}
 
-	if err := sortJoinRows(joinedRows, plan.Query, resolver); err != nil {
+	if err := sortJoinRows(joinedRows, plan.query, resolver); err != nil {
 		return nil, err
 	}
 
 	rows := make([][]parser.Value, 0, len(joinedRows))
 	for _, row := range joinedRows {
-		out, err := projectJoinRow(plan.Query, row, resolver)
+		out, err := projectJoinRow(plan.query, row, resolver)
 		if err != nil {
 			return nil, err
 		}
@@ -132,26 +128,26 @@ func executeJoinAggregateSelectRows(sel *planner.SelectQuery, rows [][]parser.Va
 }
 
 func ProjectedColumnNamesForPlan(plan *planner.SelectPlan, tables map[string]*Table) ([]string, error) {
-	if plan == nil || plan.Query == nil {
-		return nil, errUnsupportedStatement
+	bridge, err := bridgeSelectPlan(plan)
+	if err != nil {
+		return nil, err
 	}
-	if plan.ScanType != planner.ScanTypeJoin {
-		return ProjectedColumnNames(plan, tables[plan.Query.TableName])
+	if bridge.scanType != planner.ScanTypeJoin {
+		table, err := bridge.singleTable(tables)
+		if err != nil {
+			return nil, err
+		}
+		return projectedColumnNames(bridge.query, table, validateProjectionExprs, resolveSelectColumnIndex)
 	}
-	if plan.JoinScan == nil {
-		return nil, errInvalidSelectPlan
+	leftTable, rightTable, err := bridge.joinTables(tables)
+	if err != nil {
+		return nil, err
 	}
-	leftTable := tables[plan.JoinScan.LeftTableName]
-	rightTable := tables[plan.JoinScan.RightTableName]
-	if leftTable == nil {
-		return nil, newTableNotFoundError(plan.JoinScan.LeftTableName)
-	}
-	if rightTable == nil {
-		return nil, newTableNotFoundError(plan.JoinScan.RightTableName)
-	}
-	resolver := newJoinSelectResolver(plan.Query, leftTable, rightTable)
+	resolver := newJoinSelectResolver(bridge.query, leftTable, rightTable)
+	return projectedJoinColumnNames(bridge.query, resolver)
+}
 
-	sel := plan.Query
+func projectedJoinColumnNames(sel *planner.SelectQuery, resolver *joinSelectResolver) ([]string, error) {
 	if sel.IsCountStar {
 		return []string{"count"}, nil
 	}

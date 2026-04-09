@@ -12,56 +12,61 @@ import (
 // data and owns row flow, evaluation, and materialization; it does not make
 // planner decisions beyond interpreting the plan contract.
 func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Value, error) {
-	if err := validateSelectPlan(plan); err != nil {
+	bridge, err := bridgeSelectPlan(plan)
+	if err != nil {
 		return nil, err
 	}
 
-	sel := plan.Query
+	sel := bridge.query
 	if sel.TableName == "" {
 		return nil, errUnsupportedStatement
 	}
-	if len(sel.From) > 1 && plan.ScanType != planner.ScanTypeJoin {
+	if len(sel.From) > 1 && bridge.scanType != planner.ScanTypeJoin {
 		return nil, errUnsupportedStatement
 	}
 
-	switch plan.ScanType {
+	switch bridge.scanType {
 	case planner.ScanTypeJoin:
-		return executeJoinSelect(plan, tables)
+		return executeJoinSelect(bridge, tables)
 	case planner.ScanTypeTable:
-		table, ok := tables[sel.TableName]
-		if !ok {
-			return nil, newTableNotFoundError(sel.TableName)
+		table, err := bridge.singleTable(tables)
+		if err != nil {
+			return nil, err
 		}
 		return executeSelectRows(sel, table, table.Rows)
 	case planner.ScanTypeIndex:
-		table, ok := tables[sel.TableName]
-		if !ok {
-			return nil, newTableNotFoundError(sel.TableName)
+		table, err := bridge.singleTable(tables)
+		if err != nil {
+			return nil, err
 		}
-		return executeIndexSelect(plan, table)
+		return executeIndexSelect(bridge, table)
 	default:
 		return nil, errInvalidSelectPlan
 	}
 }
 
-func executeIndexSelect(plan *planner.SelectPlan, table *Table) ([][]parser.Value, error) {
-	if plan == nil || plan.IndexScan == nil || table == nil {
+func executeIndexSelect(plan *selectPlanBridge, table *Table) ([][]parser.Value, error) {
+	if plan == nil || plan.scanType != planner.ScanTypeIndex || plan.query == nil || table == nil {
+		return nil, errInvalidSelectPlan
+	}
+	if plan.index.columnName == "" {
 		return nil, errInvalidSelectPlan
 	}
 	// Public indexed query execution now lives in the DB-owned page-backed path.
 	// This executor helper remains metadata-only for isolated unit coverage.
-	return executeSelectRows(plan.Query, table, table.Rows)
+	return executeSelectRows(plan.query, table, table.Rows)
 }
 
 // SelectCandidateRows executes a planned single-table select against caller-supplied candidate rows.
 func SelectCandidateRows(plan *planner.SelectPlan, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
-	if plan == nil || plan.Query == nil || table == nil {
+	bridge, err := bridgeSelectPlan(plan)
+	if err != nil || table == nil {
 		return nil, errInvalidSelectPlan
 	}
-	if plan.ScanType == planner.ScanTypeJoin {
+	if bridge.scanType == planner.ScanTypeJoin {
 		return nil, errInvalidSelectPlan
 	}
-	return executeSelectRows(plan.Query, table, candidateRows)
+	return executeSelectRows(bridge.query, table, candidateRows)
 }
 
 func executeSelectRows(sel *planner.SelectQuery, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
@@ -188,42 +193,26 @@ func executeAggregateSelectRows(sel *planner.SelectQuery, table *Table, rows [][
 }
 
 func validateSelectPlan(plan *planner.SelectPlan) error {
-	if plan == nil || plan.Query == nil {
-		return errUnsupportedStatement
-	}
-	if plan.Query.TableName == "" {
-		return nil
-	}
-	switch plan.ScanType {
-	case planner.ScanTypeTable:
-		if plan.TableScan == nil || plan.TableScan.TableName != plan.Query.TableName {
-			return errInvalidSelectPlan
-		}
-	case planner.ScanTypeIndex:
-		if plan.IndexScan == nil || plan.IndexScan.TableName != plan.Query.TableName || plan.IndexScan.ColumnName == "" {
-			return errInvalidSelectPlan
-		}
-	case planner.ScanTypeJoin:
-		if plan.JoinScan == nil || plan.JoinScan.LeftTableName == "" || plan.JoinScan.RightTableName == "" || plan.JoinScan.LeftColumnName == "" || plan.JoinScan.RightColumnName == "" {
-			return errInvalidSelectPlan
-		}
-	default:
-		return errInvalidSelectPlan
-	}
-	return nil
+	_, err := bridgeSelectPlan(plan)
+	return err
 }
 
 func ProjectedColumnNames(plan *planner.SelectPlan, table *Table) ([]string, error) {
 	if plan == nil || plan.Query == nil || table == nil {
 		return nil, errUnsupportedStatement
 	}
+	return projectedColumnNames(plan.Query, table, validateProjectionExprs, resolveSelectColumnIndex)
+}
 
-	sel := plan.Query
+type selectProjectionExprValidator func(sel *planner.SelectQuery, table *Table) error
+type selectProjectionColumnResolver func(sel *planner.SelectQuery, name string, table *Table) (int, error)
+
+func projectedColumnNames(sel *planner.SelectQuery, table *Table, validateExprs selectProjectionExprValidator, resolveColumn selectProjectionColumnResolver) ([]string, error) {
 	if sel.IsCountStar {
 		return []string{"count"}, nil
 	}
 	if len(sel.ProjectionExprs) > 0 {
-		if err := validateProjectionExprs(sel, table); err != nil {
+		if err := validateExprs(sel, table); err != nil {
 			return nil, err
 		}
 		names := make([]string, 0, len(sel.ProjectionExprs))
@@ -254,7 +243,7 @@ func ProjectedColumnNames(plan *planner.SelectPlan, table *Table) ([]string, err
 
 	names := make([]string, 0, len(sel.Columns))
 	for _, name := range sel.Columns {
-		if _, err := resolveSelectColumnIndex(sel, name, table); err != nil {
+		if _, err := resolveColumn(sel, name, table); err != nil {
 			return nil, err
 		}
 		names = append(names, name)
