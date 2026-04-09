@@ -6,7 +6,7 @@ import (
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
-func TestTableScanReadsRowsFromStorage(t *testing.T) {
+func TestQueryReloadsRowsFromStorageInsteadOfStaleTableCache(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)

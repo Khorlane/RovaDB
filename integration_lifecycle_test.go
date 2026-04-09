@@ -1,11 +1,6 @@
 package rovadb
 
-import (
-	"errors"
-	"testing"
-
-	"github.com/Khorlane/RovaDB/internal/parser"
-)
+import "testing"
 
 func TestLifecycleWriteCloseReopenQuery(t *testing.T) {
 	path := testDBPath(t)
@@ -96,52 +91,6 @@ func TestLifecycleDeleteCloseReopenQuery(t *testing.T) {
 	assertSelectRowsWithNames(t, db, "SELECT id, name FROM users", [][2]any{
 		{int(1), "alice"},
 		{int(3), "cara"},
-	})
-}
-
-func TestLifecycleRollbackCloseReopenKeepsCommittedState(t *testing.T) {
-	path := testDBPath(t)
-
-	db, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
-		t.Fatalf("Exec(create) error = %v", err)
-	}
-	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
-		t.Fatalf("Exec(insert) error = %v", err)
-	}
-
-	_, err = db.execMutatingStatement(func() error {
-		stagedTables := cloneTables(db.tables)
-		if err := db.loadRowsIntoTables(stagedTables, "users"); err != nil {
-			return err
-		}
-		table := stagedTables["users"]
-		table.Rows[0][1] = parser.StringValue("rolled-back")
-		if err := db.applyStagedTableRewrite(stagedTables, "users"); err != nil {
-			return err
-		}
-		return errors.New("force rollback")
-	})
-	if err == nil || err.Error() != "force rollback" {
-		t.Fatalf("execMutatingStatement() error = %v, want %q", err, "force rollback")
-	}
-
-	assertSelectRowsWithNames(t, db, "SELECT id, name FROM users", [][2]any{
-		{int(1), "alice"},
-	})
-
-	if err := db.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-
-	db = reopenDB(t, path)
-	defer db.Close()
-
-	assertSelectRowsWithNames(t, db, "SELECT id, name FROM users", [][2]any{
-		{int(1), "alice"},
 	})
 }
 

@@ -78,6 +78,48 @@ func TestCommitFlushesDirtyPages(t *testing.T) {
 	assertSelectIntRows(t, db, "SELECT * FROM t")
 }
 
+func TestExecMutatingStatementRollbackKeepsCommittedStateAcrossReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	_, err = db.execMutatingStatement(func() error {
+		stagedTables := cloneTables(db.tables)
+		if err := db.loadRowsIntoTables(stagedTables, "users"); err != nil {
+			return err
+		}
+		table := stagedTables["users"]
+		table.Rows[0][1] = parser.StringValue("rolled-back")
+		if err := db.applyStagedTableRewrite(stagedTables, "users"); err != nil {
+			return err
+		}
+		return errors.New("force rollback")
+	})
+	if err == nil || err.Error() != "force rollback" {
+		t.Fatalf("execMutatingStatement() error = %v, want %q", err, "force rollback")
+	}
+
+	assertSelectTextRows(t, db, "SELECT name FROM users", "alice")
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	assertSelectTextRows(t, db, "SELECT name FROM users", "alice")
+}
+
 func TestCommitWithoutDirtyIsNoOp(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
