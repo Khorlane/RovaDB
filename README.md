@@ -487,6 +487,10 @@ Current documentation in the repository includes:
 - `docs/dev/workflows.md`
 - `examples/basic_usage/main.go`
 
+## Blog
+
+- [Introducing RovaDB](docs/blog/intro.md)
+
 ## Contributing
 
 Contributions are welcome, but they should align with RovaDB's established scope and design direction.
