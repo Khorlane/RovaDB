@@ -1287,7 +1287,7 @@ func TestSelectInvalidPlanMissingTableScan(t *testing.T) {
 	}
 
 	plan := &planner.SelectPlan{
-		Stmt: &parser.SelectExpr{TableName: "users"},
+		Query: &planner.SelectQuery{TableName: "users"},
 	}
 
 	_, err := Select(plan, tables)
@@ -1308,16 +1308,18 @@ func TestSelectWithIndexScan(t *testing.T) {
 	}
 
 	rows, err := Select(&planner.SelectPlan{
-		Stmt: &parser.SelectExpr{
+		Query: &planner.SelectQuery{
 			TableName: "users",
 			Columns:   []string{"id"},
-			Where:     where(parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("alice")}),
+			Where: &planner.WhereClause{Items: []planner.ConditionChainItem{{
+				Condition: planner.Condition{Left: "name", Operator: "=", Right: planner.StringValue("alice")},
+			}}},
 		},
 		ScanType: planner.ScanTypeIndex,
 		IndexScan: &planner.IndexScan{
-			TableName:  "users",
-			ColumnName: "name",
-			Value:      parser.StringValue("alice"),
+			TableName:   "users",
+			ColumnName:  "name",
+			LookupValue: planner.StringValue("alice"),
 		},
 	}, map[string]*Table{"users": table})
 	if err != nil {
@@ -1330,7 +1332,7 @@ func TestSelectWithIndexScan(t *testing.T) {
 
 func TestSelectInvalidPlanMissingIndexScanPayload(t *testing.T) {
 	plan := &planner.SelectPlan{
-		Stmt:     &parser.SelectExpr{TableName: "users"},
+		Query:    &planner.SelectQuery{TableName: "users"},
 		ScanType: planner.ScanTypeIndex,
 	}
 
@@ -1348,15 +1350,17 @@ func TestSelectIndexScanDoesNotRequireRuntimeIndexShell(t *testing.T) {
 	}
 
 	rows, err := Select(&planner.SelectPlan{
-		Stmt: &parser.SelectExpr{
+		Query: &planner.SelectQuery{
 			TableName: "users",
-			Where:     where(parser.Condition{Left: "name", Operator: "=", Right: parser.StringValue("alice")}),
+			Where: &planner.WhereClause{Items: []planner.ConditionChainItem{{
+				Condition: planner.Condition{Left: "name", Operator: "=", Right: planner.StringValue("alice")},
+			}}},
 		},
 		ScanType: planner.ScanTypeIndex,
 		IndexScan: &planner.IndexScan{
-			TableName:  "users",
-			ColumnName: "name",
-			Value:      parser.StringValue("alice"),
+			TableName:   "users",
+			ColumnName:  "name",
+			LookupValue: planner.StringValue("alice"),
 		},
 	}, map[string]*Table{"users": table})
 	if err != nil {

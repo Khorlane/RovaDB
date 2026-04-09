@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
+	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
 var errInvalidExpression = newExecError("unsupported query form")
@@ -217,25 +218,25 @@ func evalScalarFunction(name string, arg parser.Value) (parser.Value, error) {
 	}
 }
 
-func evalBinaryValueExpr(op parser.ValueExprBinaryOp, left, right parser.Value) (parser.Value, error) {
+func evalBinaryValueExpr(op int, left, right parser.Value) (parser.Value, error) {
 	if left.Kind != right.Kind {
 		return parser.Value{}, errTypeMismatch
 	}
 	switch left.Kind {
 	case parser.ValueKindInt64:
 		switch op {
-		case parser.ValueExprBinaryOpAdd:
+		case int(planner.ValueExprBinaryOpAdd):
 			return publicIntResult(left.I64 + right.I64)
-		case parser.ValueExprBinaryOpSub:
+		case int(planner.ValueExprBinaryOpSub):
 			return publicIntResult(left.I64 - right.I64)
 		default:
 			return parser.Value{}, errInvalidExpression
 		}
 	case parser.ValueKindReal:
 		switch op {
-		case parser.ValueExprBinaryOpAdd:
+		case int(planner.ValueExprBinaryOpAdd):
 			return parser.RealValue(left.F64 + right.F64), nil
-		case parser.ValueExprBinaryOpSub:
+		case int(planner.ValueExprBinaryOpSub):
 			return parser.RealValue(left.F64 - right.F64), nil
 		default:
 			return parser.Value{}, errInvalidExpression
@@ -245,6 +246,6 @@ func evalBinaryValueExpr(op parser.ValueExprBinaryOp, left, right parser.Value) 
 	}
 }
 
-func isAggregateExpr(expr *parser.ValueExpr) bool {
-	return expr != nil && expr.Kind == parser.ValueExprKindAggregateCall
+func isAggregateExpr(expr *planner.ValueExpr) bool {
+	return expr != nil && expr.Kind == planner.ValueExprKindAggregateCall
 }

@@ -1,7 +1,5 @@
 package planner
 
-import "github.com/Khorlane/RovaDB/internal/parser"
-
 // ScanType identifies how rows will be accessed.
 // It is planner-owned plan data, not executor runtime state.
 type ScanType string
@@ -19,12 +17,10 @@ type TableScan struct {
 }
 
 // IndexScan represents a single-column equality lookup strategy.
-// NOTE: Value currently uses a parser-owned value shape and is a known boundary
-// pressure point for later narrowing work.
 type IndexScan struct {
-	TableName  string
-	ColumnName string
-	Value      parser.Value
+	TableName   string
+	ColumnName  string
+	LookupValue Value
 }
 
 // IndexOnlyScan is the reserved narrow planner contract for future index-only

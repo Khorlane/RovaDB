@@ -745,13 +745,13 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 			}
 			execTable := cloneSelectTableMeta(table)
 			if sel.IsCountStar {
-				count, err := db.countIndexedRows(execTable, indexDef, plan.IndexScan.Value)
+				count, err := db.countIndexedRows(execTable, indexDef, plan.IndexScan.LookupValue)
 				if err != nil {
 					return &Rows{err: err, idx: -1}, nil
 				}
 				return newRows([]string{"count"}, [][]any{{count}}), nil
 			}
-			candidateRows, err := db.lookupIndexedRows(table, indexDef, plan.IndexScan.Value)
+			candidateRows, err := db.lookupIndexedRows(table, indexDef, plan.IndexScan.LookupValue)
 			if err != nil {
 				return &Rows{err: err, idx: -1}, nil
 			}
@@ -797,7 +797,7 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 }
 
 func (db *DB) queryIndexOnly(plan *planner.SelectPlan) (*Rows, bool, error) {
-	if db == nil || plan == nil || plan.Stmt == nil {
+	if db == nil || plan == nil || plan.Query == nil {
 		return nil, false, nil
 	}
 	if plan.ScanType != planner.ScanTypeIndexOnly || plan.IndexOnlyScan == nil {
@@ -839,41 +839,41 @@ func (db *DB) queryIndexOnly(plan *planner.SelectPlan) (*Rows, bool, error) {
 }
 
 func supportsIndexOnlyExecutionPlan(plan *planner.SelectPlan) bool {
-	if plan == nil || plan.Stmt == nil || plan.IndexOnlyScan == nil {
+	if plan == nil || plan.Query == nil || plan.IndexOnlyScan == nil {
 		return false
 	}
 	if plan.IndexOnlyScan.TableName == "" || len(plan.IndexOnlyScan.ColumnNames) != 1 || plan.IndexOnlyScan.ColumnNames[0] == "" {
 		return false
 	}
 	if plan.IndexOnlyScan.CountStar {
-		return plan.Stmt.IsCountStar &&
-			plan.Stmt.Where == nil &&
-			plan.Stmt.Predicate == nil &&
-			len(plan.Stmt.OrderBys) == 0 &&
-			plan.Stmt.OrderBy == nil
+		return plan.Query.IsCountStar &&
+			plan.Query.Where == nil &&
+			plan.Query.Predicate == nil &&
+			len(plan.Query.OrderBys) == 0 &&
+			plan.Query.OrderBy == nil
 	}
-	if plan.Stmt.IsCountStar ||
-		plan.Stmt.Where != nil ||
-		plan.Stmt.Predicate != nil ||
-		len(plan.Stmt.OrderBys) > 0 ||
-		plan.Stmt.OrderBy != nil ||
-		len(plan.Stmt.ProjectionExprs) != 1 {
+	if plan.Query.IsCountStar ||
+		plan.Query.Where != nil ||
+		plan.Query.Predicate != nil ||
+		len(plan.Query.OrderBys) > 0 ||
+		plan.Query.OrderBy != nil ||
+		len(plan.Query.ProjectionExprs) != 1 {
 		return false
 	}
-	if len(plan.Stmt.ProjectionAliases) > 0 && plan.Stmt.ProjectionAliases[0] != "" {
+	if len(plan.Query.ProjectionAliases) > 0 && plan.Query.ProjectionAliases[0] != "" {
 		return false
 	}
-	expr := plan.Stmt.ProjectionExprs[0]
-	return expr != nil && expr.Kind == parser.ValueExprKindColumnRef && expr.Column != ""
+	expr := plan.Query.ProjectionExprs[0]
+	return expr != nil && expr.Kind == planner.ValueExprKindColumnRef && expr.Column != ""
 }
 
 func downgradeIndexOnlyPlanForExecution(plan *planner.SelectPlan) *planner.SelectPlan {
-	if plan == nil || plan.ScanType != planner.ScanTypeIndexOnly || plan.Stmt == nil || plan.Stmt.TableName == "" {
+	if plan == nil || plan.ScanType != planner.ScanTypeIndexOnly || plan.Query == nil || plan.Query.TableName == "" {
 		return plan
 	}
 	downgraded := *plan
 	downgraded.ScanType = planner.ScanTypeTable
-	downgraded.TableScan = &planner.TableScan{TableName: plan.Stmt.TableName}
+	downgraded.TableScan = &planner.TableScan{TableName: plan.Query.TableName}
 	downgraded.IndexOnlyScan = nil
 	return &downgraded
 }
@@ -919,7 +919,7 @@ func materializeRows(rows [][]parser.Value) [][]any {
 }
 
 func (db *DB) tablesForSelect(plan *planner.SelectPlan) (map[string]*executor.Table, error) {
-	if plan == nil || plan.Stmt == nil || plan.Stmt.TableName == "" {
+	if plan == nil || plan.Query == nil || plan.Query.TableName == "" {
 		return db.tables, nil
 	}
 
@@ -964,7 +964,7 @@ func (db *DB) scanTableRows(table *executor.Table) ([][]parser.Value, error) {
 	return cloneRows(rows), nil
 }
 
-func (db *DB) lookupIndexedRows(table *executor.Table, indexDef *storage.CatalogIndex, searchValue parser.Value) ([][]parser.Value, error) {
+func (db *DB) lookupIndexedRows(table *executor.Table, indexDef *storage.CatalogIndex, searchValue planner.Value) ([][]parser.Value, error) {
 	locators, err := db.lookupIndexedLocators(table, indexDef, searchValue)
 	if err != nil {
 		return nil, err
@@ -981,7 +981,7 @@ func (db *DB) lookupIndexedRows(table *executor.Table, indexDef *storage.Catalog
 	return rows, nil
 }
 
-func (db *DB) lookupIndexedLocators(table *executor.Table, indexDef *storage.CatalogIndex, searchValue parser.Value) ([]storage.RowLocator, error) {
+func (db *DB) lookupIndexedLocators(table *executor.Table, indexDef *storage.CatalogIndex, searchValue planner.Value) ([]storage.RowLocator, error) {
 	if db == nil || table == nil || indexDef == nil {
 		return nil, ErrInvalidArgument
 	}
@@ -990,14 +990,14 @@ func (db *DB) lookupIndexedLocators(table *executor.Table, indexDef *storage.Cat
 		return nil, err
 	}
 
-	locators, err := storage.LookupSimpleIndexExact(db.pageReaderForLookup, indexDef.RootPageID, storageValueFromParser(searchValue))
+	locators, err := storage.LookupSimpleIndexExact(db.pageReaderForLookup, indexDef.RootPageID, storageValueFromParser(searchValue.ParserValue()))
 	if err != nil {
 		return nil, wrapStorageError(err)
 	}
 	return locators, nil
 }
 
-func (db *DB) countIndexedRows(table *executor.Table, indexDef *storage.CatalogIndex, searchValue parser.Value) (int, error) {
+func (db *DB) countIndexedRows(table *executor.Table, indexDef *storage.CatalogIndex, searchValue planner.Value) (int, error) {
 	locators, err := db.lookupIndexedLocators(table, indexDef, searchValue)
 	if err != nil {
 		return 0, err
@@ -1029,7 +1029,7 @@ func (db *DB) countAllRowsFromIndexOnly(table *executor.Table, indexDef *storage
 }
 
 func (db *DB) projectAllRowsFromIndexOnly(plan *planner.SelectPlan, table *executor.Table, indexDef *storage.CatalogIndex) (*Rows, error) {
-	if db == nil || plan == nil || plan.Stmt == nil || table == nil || indexDef == nil {
+	if db == nil || plan == nil || plan.Query == nil || table == nil || indexDef == nil {
 		return nil, ErrInvalidArgument
 	}
 	if len(plan.IndexOnlyScan.ColumnNames) != 1 || plan.IndexOnlyScan.ColumnNames[0] == "" {
@@ -1254,7 +1254,7 @@ func (db *DB) committedTableLocators(table *executor.Table) ([]storage.RowLocato
 }
 
 func tableNamesForSelect(plan *planner.SelectPlan) []string {
-	if plan == nil || plan.Stmt == nil {
+	if plan == nil || plan.Query == nil {
 		return nil
 	}
 	switch plan.ScanType {
@@ -1264,7 +1264,7 @@ func tableNamesForSelect(plan *planner.SelectPlan) []string {
 		}
 		return []string{plan.JoinScan.LeftTableName, plan.JoinScan.RightTableName}
 	case planner.ScanTypeTable, planner.ScanTypeIndex:
-		return []string{plan.Stmt.TableName}
+		return []string{plan.Query.TableName}
 	default:
 		return nil
 	}

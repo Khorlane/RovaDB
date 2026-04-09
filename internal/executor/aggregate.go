@@ -4,12 +4,13 @@ import (
 	"strings"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
+	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
-type aggregateValueEvaluator func(row []parser.Value, expr *parser.ValueExpr) (parser.Value, error)
+type aggregateValueEvaluator func(row []parser.Value, expr *planner.ValueExpr) (parser.Value, error)
 
-func evalAggregateExprRows(expr *parser.ValueExpr, rows [][]parser.Value, eval aggregateValueEvaluator) (parser.Value, error) {
-	if expr == nil || expr.Kind != parser.ValueExprKindAggregateCall {
+func evalAggregateExprRows(expr *planner.ValueExpr, rows [][]parser.Value, eval aggregateValueEvaluator) (parser.Value, error) {
+	if expr == nil || expr.Kind != planner.ValueExprKindAggregateCall {
 		return parser.Value{}, errUnsupportedStatement
 	}
 
@@ -43,7 +44,7 @@ func evalAggregateExprRows(expr *parser.ValueExpr, rows [][]parser.Value, eval a
 	}
 }
 
-func aggregateMinMax(rows [][]parser.Value, arg *parser.ValueExpr, eval aggregateValueEvaluator, wantMin bool) (parser.Value, error) {
+func aggregateMinMax(rows [][]parser.Value, arg *planner.ValueExpr, eval aggregateValueEvaluator, wantMin bool) (parser.Value, error) {
 	var result parser.Value
 	found := false
 	for _, row := range rows {
@@ -78,7 +79,7 @@ func aggregateMinMax(rows [][]parser.Value, arg *parser.ValueExpr, eval aggregat
 	return result, nil
 }
 
-func aggregateAvg(rows [][]parser.Value, arg *parser.ValueExpr, eval aggregateValueEvaluator) (parser.Value, error) {
+func aggregateAvg(rows [][]parser.Value, arg *planner.ValueExpr, eval aggregateValueEvaluator) (parser.Value, error) {
 	sum := 0.0
 	count := 0
 	for _, row := range rows {
@@ -104,7 +105,7 @@ func aggregateAvg(rows [][]parser.Value, arg *parser.ValueExpr, eval aggregateVa
 	return parser.RealValue(sum / float64(count)), nil
 }
 
-func aggregateSum(rows [][]parser.Value, arg *parser.ValueExpr, eval aggregateValueEvaluator) (parser.Value, error) {
+func aggregateSum(rows [][]parser.Value, arg *planner.ValueExpr, eval aggregateValueEvaluator) (parser.Value, error) {
 	sum := 0.0
 	found := false
 	for _, row := range rows {

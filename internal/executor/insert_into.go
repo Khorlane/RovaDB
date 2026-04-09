@@ -144,7 +144,7 @@ func evalInsertValueExpr(expr *parser.ValueExpr) (parser.Value, error) {
 		if err != nil {
 			return parser.Value{}, err
 		}
-		return evalBinaryValueExpr(expr.Op, left, right)
+		return evalBinaryValueExpr(int(expr.Op), left, right)
 	case parser.ValueExprKindFunctionCall:
 		arg, err := evalInsertValueExpr(expr.Arg)
 		if err != nil {

@@ -36,7 +36,7 @@ func TestStructuredPlanErrorPrefix(t *testing.T) {
 
 func TestStructuredExecutionErrorPrefix(t *testing.T) {
 	plan := &planner.SelectPlan{
-		Stmt:      &parser.SelectExpr{TableName: "missing"},
+		Query:     &planner.SelectQuery{TableName: "missing"},
 		ScanType:  planner.ScanTypeTable,
 		TableScan: &planner.TableScan{TableName: "missing"},
 	}

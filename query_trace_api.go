@@ -69,7 +69,7 @@ func (db *DB) ExplainQueryPath(sql string, args ...any) (QueryExecutionTrace, er
 	switch plan.ScanType {
 	case planner.ScanTypeTable:
 		trace.ScanType = "table"
-		trace.TableName = plan.Stmt.TableName
+		trace.TableName = plan.Query.TableName
 	case planner.ScanTypeIndex:
 		table := db.tables[plan.IndexScan.TableName]
 		if table == nil {

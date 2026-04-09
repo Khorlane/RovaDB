@@ -11,16 +11,12 @@ import (
 // This file owns SELECT runtime behavior. It consumes planner-produced plan
 // data and owns row flow, evaluation, and materialization; it does not make
 // planner decisions beyond interpreting the plan contract.
-//
-// NOTE: Some executor paths still read parser/planner concrete shapes directly.
-// That is a known boundary-narrowing target for later slices.
-
 func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Value, error) {
 	if err := validateSelectPlan(plan); err != nil {
 		return nil, err
 	}
 
-	sel := plan.Stmt
+	sel := plan.Query
 	if sel.TableName == "" {
 		return nil, errUnsupportedStatement
 	}
@@ -54,21 +50,21 @@ func executeIndexSelect(plan *planner.SelectPlan, table *Table) ([][]parser.Valu
 	}
 	// Public indexed query execution now lives in the DB-owned page-backed path.
 	// This executor helper remains metadata-only for isolated unit coverage.
-	return executeSelectRows(plan.Stmt, table, table.Rows)
+	return executeSelectRows(plan.Query, table, table.Rows)
 }
 
 // SelectCandidateRows executes a planned single-table select against caller-supplied candidate rows.
 func SelectCandidateRows(plan *planner.SelectPlan, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
-	if plan == nil || plan.Stmt == nil || table == nil {
+	if plan == nil || plan.Query == nil || table == nil {
 		return nil, errInvalidSelectPlan
 	}
 	if plan.ScanType == planner.ScanTypeJoin {
 		return nil, errInvalidSelectPlan
 	}
-	return executeSelectRows(plan.Stmt, table, candidateRows)
+	return executeSelectRows(plan.Query, table, candidateRows)
 }
 
-func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
+func executeSelectRows(sel *planner.SelectQuery, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
 	if err := validateSelectFilterColumns(sel, table); err != nil {
 		return nil, err
 	}
@@ -129,7 +125,7 @@ func executeSelectRows(sel *parser.SelectExpr, table *Table, candidateRows [][]p
 	return rows, nil
 }
 
-func hasAggregateProjection(sel *parser.SelectExpr) bool {
+func hasAggregateProjection(sel *planner.SelectQuery) bool {
 	if sel == nil {
 		return false
 	}
@@ -144,7 +140,7 @@ func hasAggregateProjection(sel *parser.SelectExpr) bool {
 	return false
 }
 
-func validateAggregateProjectionShape(sel *parser.SelectExpr) error {
+func validateAggregateProjectionShape(sel *planner.SelectQuery) error {
 	if sel == nil {
 		return nil
 	}
@@ -167,7 +163,7 @@ func validateAggregateProjectionShape(sel *parser.SelectExpr) error {
 	return nil
 }
 
-func executeAggregateSelectRows(sel *parser.SelectExpr, table *Table, rows [][]parser.Value) ([][]parser.Value, error) {
+func executeAggregateSelectRows(sel *planner.SelectQuery, table *Table, rows [][]parser.Value) ([][]parser.Value, error) {
 	if err := validateAggregateProjectionShape(sel); err != nil {
 		return nil, err
 	}
@@ -180,7 +176,7 @@ func executeAggregateSelectRows(sel *parser.SelectExpr, table *Table, rows [][]p
 	}
 	out := make([]parser.Value, 0, len(sel.ProjectionExprs))
 	for _, expr := range sel.ProjectionExprs {
-		value, err := evalAggregateExprRows(expr, rows, func(row []parser.Value, expr *parser.ValueExpr) (parser.Value, error) {
+		value, err := evalAggregateExprRows(expr, rows, func(row []parser.Value, expr *planner.ValueExpr) (parser.Value, error) {
 			return evalSelectValueExpr(row, sel, table, expr)
 		})
 		if err != nil {
@@ -192,19 +188,19 @@ func executeAggregateSelectRows(sel *parser.SelectExpr, table *Table, rows [][]p
 }
 
 func validateSelectPlan(plan *planner.SelectPlan) error {
-	if plan == nil || plan.Stmt == nil {
+	if plan == nil || plan.Query == nil {
 		return errUnsupportedStatement
 	}
-	if plan.Stmt.TableName == "" {
+	if plan.Query.TableName == "" {
 		return nil
 	}
 	switch plan.ScanType {
 	case planner.ScanTypeTable:
-		if plan.TableScan == nil || plan.TableScan.TableName != plan.Stmt.TableName {
+		if plan.TableScan == nil || plan.TableScan.TableName != plan.Query.TableName {
 			return errInvalidSelectPlan
 		}
 	case planner.ScanTypeIndex:
-		if plan.IndexScan == nil || plan.IndexScan.TableName != plan.Stmt.TableName || plan.IndexScan.ColumnName == "" {
+		if plan.IndexScan == nil || plan.IndexScan.TableName != plan.Query.TableName || plan.IndexScan.ColumnName == "" {
 			return errInvalidSelectPlan
 		}
 	case planner.ScanTypeJoin:
@@ -218,11 +214,11 @@ func validateSelectPlan(plan *planner.SelectPlan) error {
 }
 
 func ProjectedColumnNames(plan *planner.SelectPlan, table *Table) ([]string, error) {
-	if plan == nil || plan.Stmt == nil || table == nil {
+	if plan == nil || plan.Query == nil || table == nil {
 		return nil, errUnsupportedStatement
 	}
 
-	sel := plan.Stmt
+	sel := plan.Query
 	if sel.IsCountStar {
 		return []string{"count"}, nil
 	}
@@ -240,7 +236,7 @@ func ProjectedColumnNames(plan *planner.SelectPlan, table *Table) ([]string, err
 				names = append(names, sel.ProjectionLabels[i])
 				continue
 			}
-			if expr != nil && expr.Kind == parser.ValueExprKindColumnRef {
+			if expr != nil && expr.Kind == planner.ValueExprKindColumnRef {
 				names = append(names, expr.Column)
 			} else {
 				names = append(names, "expr")
@@ -266,7 +262,7 @@ func ProjectedColumnNames(plan *planner.SelectPlan, table *Table) ([]string, err
 	return names, nil
 }
 
-func projectRow(sel *parser.SelectExpr, table *Table, row []parser.Value) ([]parser.Value, error) {
+func projectRow(sel *planner.SelectQuery, table *Table, row []parser.Value) ([]parser.Value, error) {
 	if len(sel.ProjectionExprs) > 0 {
 		out := make([]parser.Value, 0, len(sel.ProjectionExprs))
 		for _, expr := range sel.ProjectionExprs {
@@ -290,7 +286,7 @@ func projectRow(sel *parser.SelectExpr, table *Table, row []parser.Value) ([]par
 	return out, nil
 }
 
-func validateProjectionExprs(sel *parser.SelectExpr, table *Table) error {
+func validateProjectionExprs(sel *planner.SelectQuery, table *Table) error {
 	if sel == nil {
 		return nil
 	}
@@ -309,7 +305,7 @@ func validateProjectionExprs(sel *parser.SelectExpr, table *Table) error {
 	return nil
 }
 
-func resolveSelectColumns(sel *parser.SelectExpr, table *Table) ([]int, error) {
+func resolveSelectColumns(sel *planner.SelectQuery, table *Table) ([]int, error) {
 	if len(sel.Columns) == 0 {
 		indexes := make([]int, 0, len(table.Columns))
 		for i := range table.Columns {
@@ -358,7 +354,7 @@ func normalizeQualifiedColumnName(name string, table *Table) (string, error) {
 	return parts[1], nil
 }
 
-func resolveSelectColumnIndex(sel *parser.SelectExpr, name string, table *Table) (int, error) {
+func resolveSelectColumnIndex(sel *planner.SelectQuery, name string, table *Table) (int, error) {
 	baseName, err := normalizeSelectQualifiedColumnName(sel, name, table)
 	if err != nil {
 		return -1, err
@@ -371,7 +367,7 @@ func resolveSelectColumnIndex(sel *parser.SelectExpr, name string, table *Table)
 	return -1, newColumnNotFoundError(name)
 }
 
-func normalizeSelectQualifiedColumnName(sel *parser.SelectExpr, name string, table *Table) (string, error) {
+func normalizeSelectQualifiedColumnName(sel *planner.SelectQuery, name string, table *Table) (string, error) {
 	if !strings.Contains(name, ".") {
 		return name, nil
 	}
@@ -433,7 +429,7 @@ func evalFilter(row []parser.Value, table *Table, predicate *parser.PredicateExp
 	return evalWhere(row, table, where)
 }
 
-func evalSelectFilter(row []parser.Value, sel *parser.SelectExpr, table *Table) (bool, error) {
+func evalSelectFilter(row []parser.Value, sel *planner.SelectQuery, table *Table) (bool, error) {
 	if sel != nil && sel.Predicate != nil {
 		return evalSelectPredicate(row, sel, table, sel.Predicate)
 	}
@@ -483,18 +479,18 @@ func evalPredicate(row []parser.Value, table *Table, predicate *parser.Predicate
 	}
 }
 
-func evalSelectPredicate(row []parser.Value, sel *parser.SelectExpr, table *Table, predicate *parser.PredicateExpr) (bool, error) {
+func evalSelectPredicate(row []parser.Value, sel *planner.SelectQuery, table *Table, predicate *planner.PredicateExpr) (bool, error) {
 	if predicate == nil {
 		return true, nil
 	}
 
 	switch predicate.Kind {
-	case parser.PredicateKindComparison:
+	case planner.PredicateKindComparison:
 		if predicate.Comparison == nil {
 			return false, errUnsupportedStatement
 		}
 		return evalSelectWhereCondition(row, sel, table, *predicate.Comparison)
-	case parser.PredicateKindAnd:
+	case planner.PredicateKindAnd:
 		left, err := evalSelectPredicate(row, sel, table, predicate.Left)
 		if err != nil {
 			return false, err
@@ -503,7 +499,7 @@ func evalSelectPredicate(row []parser.Value, sel *parser.SelectExpr, table *Tabl
 			return false, nil
 		}
 		return evalSelectPredicate(row, sel, table, predicate.Right)
-	case parser.PredicateKindOr:
+	case planner.PredicateKindOr:
 		left, err := evalSelectPredicate(row, sel, table, predicate.Left)
 		if err != nil {
 			return false, err
@@ -512,7 +508,7 @@ func evalSelectPredicate(row []parser.Value, sel *parser.SelectExpr, table *Tabl
 			return true, nil
 		}
 		return evalSelectPredicate(row, sel, table, predicate.Right)
-	case parser.PredicateKindNot:
+	case planner.PredicateKindNot:
 		inner, err := evalSelectPredicate(row, sel, table, predicate.Inner)
 		if err != nil {
 			return false, err
@@ -552,7 +548,7 @@ func evalWhereCondition(row []parser.Value, table *Table, cond parser.Condition)
 	return compareValues(cond.Operator, row[idx], cond.Right)
 }
 
-func evalSelectWhere(row []parser.Value, sel *parser.SelectExpr, table *Table, where *parser.WhereClause) (bool, error) {
+func evalSelectWhere(row []parser.Value, sel *planner.SelectQuery, table *Table, where *planner.WhereClause) (bool, error) {
 	if where == nil {
 		return true, nil
 	}
@@ -571,9 +567,9 @@ func evalSelectWhere(row []parser.Value, sel *parser.SelectExpr, table *Table, w
 			return false, err
 		}
 		switch item.Op {
-		case parser.BooleanOpAnd:
+		case planner.BooleanOpAnd:
 			current = current && next
-		case parser.BooleanOpOr:
+		case planner.BooleanOpOr:
 			current = current || next
 		default:
 			return false, errUnsupportedStatement
@@ -583,7 +579,7 @@ func evalSelectWhere(row []parser.Value, sel *parser.SelectExpr, table *Table, w
 	return current, nil
 }
 
-func evalSelectWhereCondition(row []parser.Value, sel *parser.SelectExpr, table *Table, cond parser.Condition) (bool, error) {
+func evalSelectWhereCondition(row []parser.Value, sel *planner.SelectQuery, table *Table, cond planner.Condition) (bool, error) {
 	if cond.LeftExpr != nil && cond.RightExpr != nil {
 		left, err := evalSelectValueExpr(row, sel, table, cond.LeftExpr)
 		if err != nil {
@@ -609,7 +605,7 @@ func evalSelectWhereCondition(row []parser.Value, sel *parser.SelectExpr, table 
 		return compareValues(cond.Operator, row[idx], row[rightIdx])
 	}
 
-	return compareValues(cond.Operator, row[idx], cond.Right)
+	return compareValues(cond.Operator, row[idx], parserValueFromPlan(cond.Right))
 }
 
 func validateWhereColumns(where *parser.WhereClause, table *Table) error {
@@ -647,7 +643,7 @@ func validateFilterColumns(predicate *parser.PredicateExpr, where *parser.WhereC
 	return validateWhereColumns(where, table)
 }
 
-func validateSelectFilterColumns(sel *parser.SelectExpr, table *Table) error {
+func validateSelectFilterColumns(sel *planner.SelectQuery, table *Table) error {
 	if sel != nil && sel.Predicate != nil {
 		return validateSelectPredicateColumns(sel, sel.Predicate, table)
 	}
@@ -693,13 +689,13 @@ func validatePredicateColumns(predicate *parser.PredicateExpr, table *Table) err
 	}
 }
 
-func validateSelectPredicateColumns(sel *parser.SelectExpr, predicate *parser.PredicateExpr, table *Table) error {
+func validateSelectPredicateColumns(sel *planner.SelectQuery, predicate *planner.PredicateExpr, table *Table) error {
 	if predicate == nil {
 		return nil
 	}
 
 	switch predicate.Kind {
-	case parser.PredicateKindComparison:
+	case planner.PredicateKindComparison:
 		if predicate.Comparison == nil {
 			return errUnsupportedStatement
 		}
@@ -717,19 +713,19 @@ func validateSelectPredicateColumns(sel *parser.SelectExpr, predicate *parser.Pr
 			_, err = resolveSelectColumnIndex(sel, predicate.Comparison.RightRef, table)
 		}
 		return err
-	case parser.PredicateKindAnd, parser.PredicateKindOr:
+	case planner.PredicateKindAnd, planner.PredicateKindOr:
 		if err := validateSelectPredicateColumns(sel, predicate.Left, table); err != nil {
 			return err
 		}
 		return validateSelectPredicateColumns(sel, predicate.Right, table)
-	case parser.PredicateKindNot:
+	case planner.PredicateKindNot:
 		return validateSelectPredicateColumns(sel, predicate.Inner, table)
 	default:
 		return errUnsupportedStatement
 	}
 }
 
-func validateSelectWhereColumns(sel *parser.SelectExpr, where *parser.WhereClause, table *Table) error {
+func validateSelectWhereColumns(sel *planner.SelectQuery, where *planner.WhereClause, table *Table) error {
 	if where == nil {
 		return nil
 	}
@@ -784,7 +780,7 @@ func evalValueExpr(row []parser.Value, table *Table, expr *parser.ValueExpr) (pa
 		if err != nil {
 			return parser.Value{}, err
 		}
-		return evalBinaryValueExpr(expr.Op, left, right)
+		return evalBinaryValueExpr(int(expr.Op), left, right)
 	case parser.ValueExprKindFunctionCall:
 		arg, err := evalValueExpr(row, table, expr.Arg)
 		if err != nil {
@@ -796,15 +792,15 @@ func evalValueExpr(row []parser.Value, table *Table, expr *parser.ValueExpr) (pa
 	}
 }
 
-func evalSelectValueExpr(row []parser.Value, sel *parser.SelectExpr, table *Table, expr *parser.ValueExpr) (parser.Value, error) {
+func evalSelectValueExpr(row []parser.Value, sel *planner.SelectQuery, table *Table, expr *planner.ValueExpr) (parser.Value, error) {
 	if expr == nil {
 		return parser.Value{}, errUnsupportedStatement
 	}
 
 	switch expr.Kind {
-	case parser.ValueExprKindLiteral:
-		return expr.Value, nil
-	case parser.ValueExprKindColumnRef:
+	case planner.ValueExprKindLiteral:
+		return parserValueFromPlan(expr.Value), nil
+	case planner.ValueExprKindColumnRef:
 		name := expr.Column
 		if expr.Qualifier != "" {
 			name = expr.Qualifier + "." + expr.Column
@@ -814,9 +810,9 @@ func evalSelectValueExpr(row []parser.Value, sel *parser.SelectExpr, table *Tabl
 			return parser.Value{}, err
 		}
 		return row[idx], nil
-	case parser.ValueExprKindParen:
+	case planner.ValueExprKindParen:
 		return evalSelectValueExpr(row, sel, table, expr.Inner)
-	case parser.ValueExprKindBinary:
+	case planner.ValueExprKindBinary:
 		left, err := evalSelectValueExpr(row, sel, table, expr.Left)
 		if err != nil {
 			return parser.Value{}, err
@@ -825,8 +821,8 @@ func evalSelectValueExpr(row []parser.Value, sel *parser.SelectExpr, table *Tabl
 		if err != nil {
 			return parser.Value{}, err
 		}
-		return evalBinaryValueExpr(expr.Op, left, right)
-	case parser.ValueExprKindFunctionCall:
+		return evalBinaryValueExpr(int(expr.Op), left, right)
+	case planner.ValueExprKindFunctionCall:
 		arg, err := evalSelectValueExpr(row, sel, table, expr.Arg)
 		if err != nil {
 			return parser.Value{}, err
@@ -866,30 +862,30 @@ func validateValueExprColumns(expr *parser.ValueExpr, table *Table) error {
 	}
 }
 
-func validateSelectValueExprColumns(sel *parser.SelectExpr, expr *parser.ValueExpr, table *Table) error {
+func validateSelectValueExprColumns(sel *planner.SelectQuery, expr *planner.ValueExpr, table *Table) error {
 	if expr == nil {
 		return nil
 	}
 	switch expr.Kind {
-	case parser.ValueExprKindLiteral:
+	case planner.ValueExprKindLiteral:
 		return nil
-	case parser.ValueExprKindColumnRef:
+	case planner.ValueExprKindColumnRef:
 		name := expr.Column
 		if expr.Qualifier != "" {
 			name = expr.Qualifier + "." + expr.Column
 		}
 		_, err := resolveSelectColumnIndex(sel, name, table)
 		return err
-	case parser.ValueExprKindParen:
+	case planner.ValueExprKindParen:
 		return validateSelectValueExprColumns(sel, expr.Inner, table)
-	case parser.ValueExprKindBinary:
+	case planner.ValueExprKindBinary:
 		if err := validateSelectValueExprColumns(sel, expr.Left, table); err != nil {
 			return err
 		}
 		return validateSelectValueExprColumns(sel, expr.Right, table)
-	case parser.ValueExprKindFunctionCall:
+	case planner.ValueExprKindFunctionCall:
 		return validateSelectValueExprColumns(sel, expr.Arg, table)
-	case parser.ValueExprKindAggregateCall:
+	case planner.ValueExprKindAggregateCall:
 		if expr.StarArg {
 			if strings.EqualFold(expr.FuncName, "COUNT") {
 				return nil
@@ -902,7 +898,7 @@ func validateSelectValueExprColumns(sel *parser.SelectExpr, expr *parser.ValueEx
 	}
 }
 
-func selectOrderByList(sel *parser.SelectExpr) []parser.OrderByClause {
+func selectOrderByList(sel *planner.SelectQuery) []planner.OrderByClause {
 	if sel == nil {
 		return nil
 	}
@@ -910,19 +906,19 @@ func selectOrderByList(sel *parser.SelectExpr) []parser.OrderByClause {
 		return sel.OrderBys
 	}
 	if sel.OrderBy != nil {
-		return []parser.OrderByClause{*sel.OrderBy}
+		return []planner.OrderByClause{*sel.OrderBy}
 	}
 	return nil
 }
 
-func projectionAliasAt(sel *parser.SelectExpr, idx int) string {
+func projectionAliasAt(sel *planner.SelectQuery, idx int) string {
 	if sel == nil || idx < 0 || idx >= len(sel.ProjectionAliases) {
 		return ""
 	}
 	return sel.ProjectionAliases[idx]
 }
 
-func projectionExprForOrderByAlias(sel *parser.SelectExpr, alias string) *parser.ValueExpr {
+func projectionExprForOrderByAlias(sel *planner.SelectQuery, alias string) *planner.ValueExpr {
 	if sel == nil || alias == "" {
 		return nil
 	}
@@ -934,13 +930,13 @@ func projectionExprForOrderByAlias(sel *parser.SelectExpr, alias string) *parser
 	return nil
 }
 
-func sortSelectRows(rows [][]parser.Value, sel *parser.SelectExpr, table *Table, orderBys []parser.OrderByClause) error {
+func sortSelectRows(rows [][]parser.Value, sel *planner.SelectQuery, table *Table, orderBys []planner.OrderByClause) error {
 	if len(orderBys) == 0 {
 		return nil
 	}
 	type orderByResolver struct {
 		index int
-		expr  *parser.ValueExpr
+		expr  *planner.ValueExpr
 	}
 	resolvers := make([]orderByResolver, 0, len(orderBys))
 	for _, orderBy := range orderBys {

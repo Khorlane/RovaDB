@@ -55,8 +55,8 @@ func TestPlanSelectLiteralLeavesTableScanNil(t *testing.T) {
 	if plan == nil {
 		t.Fatal("PlanSelect() = nil, want value")
 	}
-	if plan.Stmt != stmt {
-		t.Fatalf("PlanSelect().Stmt = %#v, want original stmt", plan.Stmt)
+	if plan.Query == nil || plan.Query.TableName != "" {
+		t.Fatalf("PlanSelect().Query = %#v, want literal query with empty table name", plan.Query)
 	}
 	if plan.TableScan != nil {
 		t.Fatalf("PlanSelect().TableScan = %#v, want nil", plan.TableScan)
@@ -103,7 +103,7 @@ func TestPlanSelectEqualityWithIndexUsesIndexScan(t *testing.T) {
 	if plan.IndexScan == nil {
 		t.Fatal("PlanSelect().IndexScan = nil, want value")
 	}
-	if plan.IndexScan.TableName != "users" || plan.IndexScan.ColumnName != "id" || plan.IndexScan.Value != parser.Int64Value(1) {
+	if plan.IndexScan.TableName != "users" || plan.IndexScan.ColumnName != "id" || plan.IndexScan.LookupValue != Int64Value(1) {
 		t.Fatalf("PlanSelect().IndexScan = %#v, want users.id = 1", plan.IndexScan)
 	}
 	if plan.TableScan != nil {
@@ -124,7 +124,7 @@ func TestPlanSelectQualifiedEqualityWithIndexUsesIndexScan(t *testing.T) {
 	if plan.ScanType != ScanTypeIndex {
 		t.Fatalf("PlanSelect().ScanType = %q, want %q", plan.ScanType, ScanTypeIndex)
 	}
-	if plan.IndexScan == nil || plan.IndexScan.ColumnName != "id" || plan.IndexScan.Value != parser.Int64Value(1) {
+	if plan.IndexScan == nil || plan.IndexScan.ColumnName != "id" || plan.IndexScan.LookupValue != Int64Value(1) {
 		t.Fatalf("PlanSelect().IndexScan = %#v, want users.id = 1", plan.IndexScan)
 	}
 }
@@ -142,7 +142,7 @@ func TestPlanSelectAliasQualifiedEqualityWithIndexUsesIndexScan(t *testing.T) {
 	if plan.ScanType != ScanTypeIndex {
 		t.Fatalf("PlanSelect().ScanType = %q, want %q", plan.ScanType, ScanTypeIndex)
 	}
-	if plan.IndexScan == nil || plan.IndexScan.TableName != "users" || plan.IndexScan.ColumnName != "id" || plan.IndexScan.Value != parser.Int64Value(1) {
+	if plan.IndexScan == nil || plan.IndexScan.TableName != "users" || plan.IndexScan.ColumnName != "id" || plan.IndexScan.LookupValue != Int64Value(1) {
 		t.Fatalf("PlanSelect().IndexScan = %#v, want users.id = 1", plan.IndexScan)
 	}
 }

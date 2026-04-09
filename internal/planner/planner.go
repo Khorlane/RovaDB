@@ -26,16 +26,13 @@ type SimpleIndex struct {
 // PlanSelect creates a basic execution plan for SELECT.
 // Current behavior defaults to table scan unless optional metadata supports
 // a simple equality index scan decision.
-// NOTE: The returned plan still carries parser-owned statement/value shapes in
-// this milestone line. Later slices will narrow that boundary without changing
-// ownership: planner emits plan data, executor owns runtime flow.
 func PlanSelect(stmt *parser.SelectExpr, tables ...map[string]*TableMetadata) (*SelectPlan, error) {
 	if stmt == nil {
 		return nil, newPlanError("unsupported query form")
 	}
 
 	plan := &SelectPlan{
-		Stmt: stmt,
+		Query: queryFromParser(stmt),
 	}
 	if joinScan, ok := chooseJoinScan(stmt); ok {
 		plan.ScanType = ScanTypeJoin
@@ -336,9 +333,9 @@ func chooseIndexScan(stmt *parser.SelectExpr, tables map[string]*TableMetadata) 
 	}
 
 	return &IndexScan{
-		TableName:  index.TableName,
-		ColumnName: index.ColumnName,
-		Value:      value,
+		TableName:   index.TableName,
+		ColumnName:  index.ColumnName,
+		LookupValue: valueFromParser(value),
 	}
 }
 

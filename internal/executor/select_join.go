@@ -13,7 +13,7 @@ import (
 // materialization from that plan data.
 
 type joinSelectSource struct {
-	ref    parser.TableRef
+	ref    planner.TableRef
 	table  *Table
 	offset int
 }
@@ -23,10 +23,10 @@ type joinSelectResolver struct {
 }
 
 func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Value, error) {
-	if plan == nil || plan.Stmt == nil || plan.JoinScan == nil {
+	if plan == nil || plan.Query == nil || plan.JoinScan == nil {
 		return nil, errInvalidSelectPlan
 	}
-	if !isSupportedJoinSelectShape(plan.Stmt) {
+	if !isSupportedJoinSelectShape(plan.Query) {
 		return nil, errUnsupportedStatement
 	}
 
@@ -39,7 +39,7 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 		return nil, newTableNotFoundError(plan.JoinScan.RightTableName)
 	}
 
-	resolver := newJoinSelectResolver(plan.Stmt, leftTable, rightTable)
+	resolver := newJoinSelectResolver(plan.Query, leftTable, rightTable)
 	leftIdx, err := resolver.resolveQualifiedColumnIndex(plan.JoinScan.LeftTableName, plan.JoinScan.LeftTableAlias, plan.JoinScan.LeftColumnName)
 	if err != nil {
 		return nil, err
@@ -49,10 +49,10 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 		return nil, err
 	}
 
-	if err := validateJoinFilterColumns(plan.Stmt, resolver); err != nil {
+	if err := validateJoinFilterColumns(plan.Query, resolver); err != nil {
 		return nil, err
 	}
-	if err := validateJoinProjectionExprs(plan.Stmt, resolver); err != nil {
+	if err := validateJoinProjectionExprs(plan.Query, resolver); err != nil {
 		return nil, err
 	}
 
@@ -67,7 +67,7 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 			if !match {
 				continue
 			}
-			whereMatch, err := evalJoinPredicateOrWhere(row, plan.Stmt, resolver)
+			whereMatch, err := evalJoinPredicateOrWhere(row, plan.Query, resolver)
 			if err != nil {
 				return nil, err
 			}
@@ -78,8 +78,8 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 		}
 	}
 
-	if plan.Stmt.IsCountStar {
-		if len(plan.Stmt.OrderBys) > 0 || plan.Stmt.OrderBy != nil {
+	if plan.Query.IsCountStar {
+		if len(plan.Query.OrderBys) > 0 || plan.Query.OrderBy != nil {
 			return nil, errCountOrderByUnsupported
 		}
 		value, err := publicIntResult(int64(len(joinedRows)))
@@ -88,17 +88,17 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 		}
 		return [][]parser.Value{{value}}, nil
 	}
-	if hasAggregateProjection(plan.Stmt) {
-		return executeJoinAggregateSelectRows(plan.Stmt, joinedRows, resolver)
+	if hasAggregateProjection(plan.Query) {
+		return executeJoinAggregateSelectRows(plan.Query, joinedRows, resolver)
 	}
 
-	if err := sortJoinRows(joinedRows, plan.Stmt, resolver); err != nil {
+	if err := sortJoinRows(joinedRows, plan.Query, resolver); err != nil {
 		return nil, err
 	}
 
 	rows := make([][]parser.Value, 0, len(joinedRows))
 	for _, row := range joinedRows {
-		out, err := projectJoinRow(plan.Stmt, row, resolver)
+		out, err := projectJoinRow(plan.Query, row, resolver)
 		if err != nil {
 			return nil, err
 		}
@@ -107,7 +107,7 @@ func executeJoinSelect(plan *planner.SelectPlan, tables map[string]*Table) ([][]
 	return rows, nil
 }
 
-func executeJoinAggregateSelectRows(sel *parser.SelectExpr, rows [][]parser.Value, resolver *joinSelectResolver) ([][]parser.Value, error) {
+func executeJoinAggregateSelectRows(sel *planner.SelectQuery, rows [][]parser.Value, resolver *joinSelectResolver) ([][]parser.Value, error) {
 	if err := validateAggregateProjectionShape(sel); err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func executeJoinAggregateSelectRows(sel *parser.SelectExpr, rows [][]parser.Valu
 	}
 	out := make([]parser.Value, 0, len(sel.ProjectionExprs))
 	for _, expr := range sel.ProjectionExprs {
-		value, err := evalAggregateExprRows(expr, rows, func(row []parser.Value, expr *parser.ValueExpr) (parser.Value, error) {
+		value, err := evalAggregateExprRows(expr, rows, func(row []parser.Value, expr *planner.ValueExpr) (parser.Value, error) {
 			return evalJoinValueExpr(row, expr, resolver)
 		})
 		if err != nil {
@@ -132,11 +132,11 @@ func executeJoinAggregateSelectRows(sel *parser.SelectExpr, rows [][]parser.Valu
 }
 
 func ProjectedColumnNamesForPlan(plan *planner.SelectPlan, tables map[string]*Table) ([]string, error) {
-	if plan == nil || plan.Stmt == nil {
+	if plan == nil || plan.Query == nil {
 		return nil, errUnsupportedStatement
 	}
 	if plan.ScanType != planner.ScanTypeJoin {
-		return ProjectedColumnNames(plan, tables[plan.Stmt.TableName])
+		return ProjectedColumnNames(plan, tables[plan.Query.TableName])
 	}
 	if plan.JoinScan == nil {
 		return nil, errInvalidSelectPlan
@@ -149,9 +149,9 @@ func ProjectedColumnNamesForPlan(plan *planner.SelectPlan, tables map[string]*Ta
 	if rightTable == nil {
 		return nil, newTableNotFoundError(plan.JoinScan.RightTableName)
 	}
-	resolver := newJoinSelectResolver(plan.Stmt, leftTable, rightTable)
+	resolver := newJoinSelectResolver(plan.Query, leftTable, rightTable)
 
-	sel := plan.Stmt
+	sel := plan.Query
 	if sel.IsCountStar {
 		return []string{"count"}, nil
 	}
@@ -164,7 +164,7 @@ func ProjectedColumnNamesForPlan(plan *planner.SelectPlan, tables map[string]*Ta
 		}
 		names := make([]string, 0, len(sel.ProjectionExprs))
 		for _, expr := range sel.ProjectionExprs {
-			if expr != nil && expr.Kind == parser.ValueExprKindColumnRef {
+			if expr != nil && expr.Kind == planner.ValueExprKindColumnRef {
 				names = append(names, expr.Column)
 			} else {
 				names = append(names, "expr")
@@ -178,9 +178,9 @@ func ProjectedColumnNamesForPlan(plan *planner.SelectPlan, tables map[string]*Ta
 	return append([]string(nil), sel.Columns...), nil
 }
 
-func newJoinSelectResolver(sel *parser.SelectExpr, leftTable, rightTable *Table) *joinSelectResolver {
-	leftRef := parser.TableRef{Name: leftTable.Name}
-	rightRef := parser.TableRef{Name: rightTable.Name}
+func newJoinSelectResolver(sel *planner.SelectQuery, leftTable, rightTable *Table) *joinSelectResolver {
+	leftRef := planner.TableRef{Name: leftTable.Name}
+	rightRef := planner.TableRef{Name: rightTable.Name}
 	if sel != nil {
 		if len(sel.From) > 0 {
 			leftRef = sel.From[0]
@@ -200,7 +200,7 @@ func newJoinSelectResolver(sel *parser.SelectExpr, leftTable, rightTable *Table)
 	}
 }
 
-func isSupportedJoinSelectShape(sel *parser.SelectExpr) bool {
+func isSupportedJoinSelectShape(sel *planner.SelectQuery) bool {
 	if sel == nil {
 		return false
 	}
@@ -272,7 +272,7 @@ func resolveColumnOffset(table *Table, offset int, name string) (int, error) {
 	return -1, errColumnDoesNotExist
 }
 
-func validateJoinFilterColumns(sel *parser.SelectExpr, resolver *joinSelectResolver) error {
+func validateJoinFilterColumns(sel *planner.SelectQuery, resolver *joinSelectResolver) error {
 	if sel != nil && sel.Predicate != nil {
 		return validateJoinPredicateColumns(sel.Predicate, resolver)
 	}
@@ -282,12 +282,12 @@ func validateJoinFilterColumns(sel *parser.SelectExpr, resolver *joinSelectResol
 	return nil
 }
 
-func validateJoinPredicateColumns(predicate *parser.PredicateExpr, resolver *joinSelectResolver) error {
+func validateJoinPredicateColumns(predicate *planner.PredicateExpr, resolver *joinSelectResolver) error {
 	if predicate == nil {
 		return nil
 	}
 	switch predicate.Kind {
-	case parser.PredicateKindComparison:
+	case planner.PredicateKindComparison:
 		if predicate.Comparison == nil {
 			return errUnsupportedStatement
 		}
@@ -305,19 +305,19 @@ func validateJoinPredicateColumns(predicate *parser.PredicateExpr, resolver *joi
 			return err
 		}
 		return nil
-	case parser.PredicateKindAnd, parser.PredicateKindOr:
+	case planner.PredicateKindAnd, planner.PredicateKindOr:
 		if err := validateJoinPredicateColumns(predicate.Left, resolver); err != nil {
 			return err
 		}
 		return validateJoinPredicateColumns(predicate.Right, resolver)
-	case parser.PredicateKindNot:
+	case planner.PredicateKindNot:
 		return validateJoinPredicateColumns(predicate.Inner, resolver)
 	default:
 		return errUnsupportedStatement
 	}
 }
 
-func validateJoinWhereColumns(where *parser.WhereClause, resolver *joinSelectResolver) error {
+func validateJoinWhereColumns(where *planner.WhereClause, resolver *joinSelectResolver) error {
 	if where == nil {
 		return nil
 	}
@@ -343,7 +343,7 @@ func validateJoinWhereColumns(where *parser.WhereClause, resolver *joinSelectRes
 	return nil
 }
 
-func validateJoinProjectionExprs(sel *parser.SelectExpr, resolver *joinSelectResolver) error {
+func validateJoinProjectionExprs(sel *planner.SelectQuery, resolver *joinSelectResolver) error {
 	if sel == nil {
 		return nil
 	}
@@ -366,30 +366,30 @@ func validateJoinProjectionExprs(sel *parser.SelectExpr, resolver *joinSelectRes
 	return nil
 }
 
-func validateJoinValueExprColumns(expr *parser.ValueExpr, resolver *joinSelectResolver) error {
+func validateJoinValueExprColumns(expr *planner.ValueExpr, resolver *joinSelectResolver) error {
 	if expr == nil {
 		return nil
 	}
 	switch expr.Kind {
-	case parser.ValueExprKindLiteral:
+	case planner.ValueExprKindLiteral:
 		return nil
-	case parser.ValueExprKindColumnRef:
+	case planner.ValueExprKindColumnRef:
 		name := expr.Column
 		if expr.Qualifier != "" {
 			name = expr.Qualifier + "." + expr.Column
 		}
 		_, err := resolver.resolveColumnIndex(name)
 		return err
-	case parser.ValueExprKindParen:
+	case planner.ValueExprKindParen:
 		return validateJoinValueExprColumns(expr.Inner, resolver)
-	case parser.ValueExprKindBinary:
+	case planner.ValueExprKindBinary:
 		if err := validateJoinValueExprColumns(expr.Left, resolver); err != nil {
 			return err
 		}
 		return validateJoinValueExprColumns(expr.Right, resolver)
-	case parser.ValueExprKindFunctionCall:
+	case planner.ValueExprKindFunctionCall:
 		return validateJoinValueExprColumns(expr.Arg, resolver)
-	case parser.ValueExprKindAggregateCall:
+	case planner.ValueExprKindAggregateCall:
 		if expr.StarArg {
 			if strings.EqualFold(expr.FuncName, "COUNT") {
 				return nil
@@ -402,7 +402,7 @@ func validateJoinValueExprColumns(expr *parser.ValueExpr, resolver *joinSelectRe
 	}
 }
 
-func evalJoinPredicateOrWhere(row []parser.Value, sel *parser.SelectExpr, resolver *joinSelectResolver) (bool, error) {
+func evalJoinPredicateOrWhere(row []parser.Value, sel *planner.SelectQuery, resolver *joinSelectResolver) (bool, error) {
 	if sel != nil && sel.Predicate != nil {
 		return evalJoinPredicate(row, sel.Predicate, resolver)
 	}
@@ -412,17 +412,17 @@ func evalJoinPredicateOrWhere(row []parser.Value, sel *parser.SelectExpr, resolv
 	return true, nil
 }
 
-func evalJoinPredicate(row []parser.Value, predicate *parser.PredicateExpr, resolver *joinSelectResolver) (bool, error) {
+func evalJoinPredicate(row []parser.Value, predicate *planner.PredicateExpr, resolver *joinSelectResolver) (bool, error) {
 	if predicate == nil {
 		return true, nil
 	}
 	switch predicate.Kind {
-	case parser.PredicateKindComparison:
+	case planner.PredicateKindComparison:
 		if predicate.Comparison == nil {
 			return false, errUnsupportedStatement
 		}
 		return evalJoinWhereCondition(row, *predicate.Comparison, resolver)
-	case parser.PredicateKindAnd:
+	case planner.PredicateKindAnd:
 		left, err := evalJoinPredicate(row, predicate.Left, resolver)
 		if err != nil {
 			return false, err
@@ -431,7 +431,7 @@ func evalJoinPredicate(row []parser.Value, predicate *parser.PredicateExpr, reso
 			return false, nil
 		}
 		return evalJoinPredicate(row, predicate.Right, resolver)
-	case parser.PredicateKindOr:
+	case planner.PredicateKindOr:
 		left, err := evalJoinPredicate(row, predicate.Left, resolver)
 		if err != nil {
 			return false, err
@@ -440,7 +440,7 @@ func evalJoinPredicate(row []parser.Value, predicate *parser.PredicateExpr, reso
 			return true, nil
 		}
 		return evalJoinPredicate(row, predicate.Right, resolver)
-	case parser.PredicateKindNot:
+	case planner.PredicateKindNot:
 		inner, err := evalJoinPredicate(row, predicate.Inner, resolver)
 		if err != nil {
 			return false, err
@@ -451,7 +451,7 @@ func evalJoinPredicate(row []parser.Value, predicate *parser.PredicateExpr, reso
 	}
 }
 
-func evalJoinWhere(row []parser.Value, where *parser.WhereClause, resolver *joinSelectResolver) (bool, error) {
+func evalJoinWhere(row []parser.Value, where *planner.WhereClause, resolver *joinSelectResolver) (bool, error) {
 	if where == nil {
 		return true, nil
 	}
@@ -468,9 +468,9 @@ func evalJoinWhere(row []parser.Value, where *parser.WhereClause, resolver *join
 			return false, err
 		}
 		switch item.Op {
-		case parser.BooleanOpAnd:
+		case planner.BooleanOpAnd:
 			current = current && next
-		case parser.BooleanOpOr:
+		case planner.BooleanOpOr:
 			current = current || next
 		default:
 			return false, errUnsupportedStatement
@@ -479,7 +479,7 @@ func evalJoinWhere(row []parser.Value, where *parser.WhereClause, resolver *join
 	return current, nil
 }
 
-func evalJoinWhereCondition(row []parser.Value, cond parser.Condition, resolver *joinSelectResolver) (bool, error) {
+func evalJoinWhereCondition(row []parser.Value, cond planner.Condition, resolver *joinSelectResolver) (bool, error) {
 	if cond.LeftExpr != nil && cond.RightExpr != nil {
 		left, err := evalJoinValueExpr(row, cond.LeftExpr, resolver)
 		if err != nil {
@@ -503,17 +503,17 @@ func evalJoinWhereCondition(row []parser.Value, cond parser.Condition, resolver 
 		}
 		return compareValues(cond.Operator, row[idx], row[rightIdx])
 	}
-	return compareValues(cond.Operator, row[idx], cond.Right)
+	return compareValues(cond.Operator, row[idx], parserValueFromPlan(cond.Right))
 }
 
-func evalJoinValueExpr(row []parser.Value, expr *parser.ValueExpr, resolver *joinSelectResolver) (parser.Value, error) {
+func evalJoinValueExpr(row []parser.Value, expr *planner.ValueExpr, resolver *joinSelectResolver) (parser.Value, error) {
 	if expr == nil {
 		return parser.Value{}, errUnsupportedStatement
 	}
 	switch expr.Kind {
-	case parser.ValueExprKindLiteral:
-		return expr.Value, nil
-	case parser.ValueExprKindColumnRef:
+	case planner.ValueExprKindLiteral:
+		return parserValueFromPlan(expr.Value), nil
+	case planner.ValueExprKindColumnRef:
 		name := expr.Column
 		if expr.Qualifier != "" {
 			name = expr.Qualifier + "." + expr.Column
@@ -523,9 +523,9 @@ func evalJoinValueExpr(row []parser.Value, expr *parser.ValueExpr, resolver *joi
 			return parser.Value{}, err
 		}
 		return row[idx], nil
-	case parser.ValueExprKindParen:
+	case planner.ValueExprKindParen:
 		return evalJoinValueExpr(row, expr.Inner, resolver)
-	case parser.ValueExprKindBinary:
+	case planner.ValueExprKindBinary:
 		left, err := evalJoinValueExpr(row, expr.Left, resolver)
 		if err != nil {
 			return parser.Value{}, err
@@ -534,8 +534,8 @@ func evalJoinValueExpr(row []parser.Value, expr *parser.ValueExpr, resolver *joi
 		if err != nil {
 			return parser.Value{}, err
 		}
-		return evalBinaryValueExpr(expr.Op, left, right)
-	case parser.ValueExprKindFunctionCall:
+		return evalBinaryValueExpr(int(expr.Op), left, right)
+	case planner.ValueExprKindFunctionCall:
 		arg, err := evalJoinValueExpr(row, expr.Arg, resolver)
 		if err != nil {
 			return parser.Value{}, err
@@ -546,7 +546,7 @@ func evalJoinValueExpr(row []parser.Value, expr *parser.ValueExpr, resolver *joi
 	}
 }
 
-func sortJoinRows(rows [][]parser.Value, sel *parser.SelectExpr, resolver *joinSelectResolver) error {
+func sortJoinRows(rows [][]parser.Value, sel *planner.SelectQuery, resolver *joinSelectResolver) error {
 	if sel == nil {
 		return nil
 	}
@@ -586,7 +586,7 @@ func sortJoinRows(rows [][]parser.Value, sel *parser.SelectExpr, resolver *joinS
 	return sortErr
 }
 
-func projectJoinRow(sel *parser.SelectExpr, row []parser.Value, resolver *joinSelectResolver) ([]parser.Value, error) {
+func projectJoinRow(sel *planner.SelectQuery, row []parser.Value, resolver *joinSelectResolver) ([]parser.Value, error) {
 	if len(sel.ProjectionExprs) > 0 {
 		out := make([]parser.Value, 0, len(sel.ProjectionExprs))
 		for _, expr := range sel.ProjectionExprs {
