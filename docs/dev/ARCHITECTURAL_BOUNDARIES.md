@@ -1,0 +1,65 @@
+# Architectural Boundaries
+
+This document locks the architectural ownership and dependency rules for the RovaDB engine. It is authoritative for boundary decisions and is intentionally declarative rather than aspirational.
+
+## Layers (Locked)
+
+### Parser
+
+- Owns SQL syntax parsing only.
+- Produces AST and parsed statement/value structures.
+- Has no execution, storage, page, or durability awareness.
+
+### Planner
+
+- Owns plan construction only.
+- Consumes parsed structures from the parser layer.
+- Produces execution plans and logical planning decisions.
+- Has no storage, page, pager, WAL, or physical-layout awareness.
+
+### Execution
+
+- Owns runtime operators, statement execution, and row flow.
+- Executes plans and coordinates logical work.
+- Interacts with storage only through narrow explicit interfaces.
+- Must not expose storage internals upward.
+
+### Storage
+
+- Owns pages, WAL and journal formats, buffer-pool-facing durable access, and physical layout.
+- Owns durable metadata encoding and validation.
+- Has no knowledge of SQL syntax, parsed statements, or execution plans.
+
+### Root API
+
+- Owns the public embedded API surface, including `DB`, `Rows`, and `Result`.
+- Coordinates public entrypoints and transaction-facing API behavior.
+- Does not define engine-layer ownership or durable-format policy.
+
+## Dependency Direction (Locked)
+
+The architectural pipeline is one-way:
+
+`parser -> planner -> execution -> storage`
+
+The following rules are locked:
+
+- No upward imports.
+- No sibling-layer imports that bypass the pipeline.
+- `storage` never imports `execution`, `planner`, or `parser`.
+- `planner` never depends on storage concrete types.
+- `execution` must not expose storage internals upward.
+
+## Type Boundaries
+
+- Storage types must not leak outside the storage layer unless an explicit boundary type is intentionally defined for that purpose.
+- Planner and execution operate on logical and value-level data, not physical page structures.
+- Cross-layer interaction must use small, explicit interfaces and narrow data contracts.
+
+## Non-Goals
+
+- No package count increase as part of this boundary lock.
+- No feature expansion.
+- No SQL surface changes.
+
+Future slices may tighten enforcement, but they must preserve this ownership model unless an explicit architectural change is approved first.

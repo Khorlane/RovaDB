@@ -1,3 +1,5 @@
+// Package rovadb is the root API layer: it owns the public embedded API surface
+// and contains no engine logic.
 package rovadb
 
 import (

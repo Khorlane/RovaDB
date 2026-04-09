@@ -117,6 +117,12 @@ The current engine storage truth is:
 
 This work is about deepening storage and transaction internals while preserving RovaDB's existing goals around clarity, determinism, and a small stable public API.
 
+## Architectural Boundaries
+
+RovaDB follows a locked layered pipeline: parser -> planner -> execution -> storage, with the root package owning only the public API surface. Each layer has strict ownership, dependencies flow one way, and storage internals must not leak upward across the engine boundary.
+
+See `docs/dev/ARCHITECTURAL_BOUNDARIES.md` for the authoritative boundary contract.
+
 ## Product Boundary
 
 ### Intended Use

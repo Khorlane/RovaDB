@@ -1,3 +1,3 @@
-// Package planner chooses simple executable scan shapes from parsed statements.
-// It does not execute queries or access storage directly.
+// Package planner is the planner layer: it builds execution plans from parsed
+// structures and has no storage or page awareness.
 package planner

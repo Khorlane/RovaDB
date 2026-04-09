@@ -1,2 +1,3 @@
-// Package parser will turn SQL text into syntax trees.
+// Package parser is the parser layer: it owns SQL syntax only and has no
+// execution or storage knowledge.
 package parser

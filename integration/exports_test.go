@@ -27,12 +27,12 @@ const (
 )
 
 var (
-	ErrNotImplemented     = rovadb.ErrNotImplemented
-	ErrTxnAlreadyActive   = rovadb.ErrTxnAlreadyActive
+	ErrNotImplemented      = rovadb.ErrNotImplemented
+	ErrTxnAlreadyActive    = rovadb.ErrTxnAlreadyActive
 	ErrQueryRequiresSelect = rovadb.ErrQueryRequiresSelect
 	ErrExecDisallowsSelect = rovadb.ErrExecDisallowsSelect
-	ErrNoRows             = rovadb.ErrNoRows
-	ErrMultipleRows       = rovadb.ErrMultipleRows
+	ErrNoRows              = rovadb.ErrNoRows
+	ErrMultipleRows        = rovadb.ErrMultipleRows
 )
 
 func Open(path string) (*DB, error) {
