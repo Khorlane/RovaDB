@@ -991,11 +991,7 @@ func (db *DB) lookupIndexedLocators(table *executor.Table, indexDef *storage.Cat
 		return nil, err
 	}
 
-	searchKey, err := storage.EncodeIndexKey([]storage.Value{storageValueFromParser(searchValue)})
-	if err != nil {
-		return nil, wrapStorageError(err)
-	}
-	locators, err := storage.LookupIndexExact(db.pageReaderForLookup, indexDef.RootPageID, searchKey)
+	locators, err := storage.LookupSimpleIndexExact(db.pageReaderForLookup, indexDef.RootPageID, storageValueFromParser(searchValue))
 	if err != nil {
 		return nil, wrapStorageError(err)
 	}
@@ -1026,7 +1022,7 @@ func (db *DB) countAllRowsFromIndexOnly(table *executor.Table, indexDef *storage
 	if err != nil {
 		return 0, err
 	}
-	count, err := storage.CountAllIndexEntries(db.pageReaderForLookup, indexDef.RootPageID)
+	count, err := storage.CountAllSimpleIndexEntries(db.pageReaderForLookup, indexDef.RootPageID)
 	if err != nil {
 		return 0, wrapStorageError(err)
 	}
@@ -1045,21 +1041,14 @@ func (db *DB) projectAllRowsFromIndexOnly(plan *planner.SelectPlan, table *execu
 		return nil, err
 	}
 
-	records, err := storage.ReadAllIndexLeafRecordsInOrder(db.pageReaderForLookup, indexDef.RootPageID)
+	values, err := storage.ReadAllSimpleIndexValuesInOrder(db.pageReaderForLookup, indexDef.RootPageID)
 	if err != nil {
 		return nil, wrapStorageError(err)
 	}
 
-	projected := make([][]any, 0, len(records))
-	for _, record := range records {
-		values, err := storage.DecodeIndexKey(record.Key)
-		if err != nil {
-			return nil, wrapStorageError(err)
-		}
-		if len(values) != 1 {
-			return nil, newStorageError("corrupted index page")
-		}
-		projected = append(projected, []any{apiValue(parserValueFromStorage(values[0]))})
+	projected := make([][]any, 0, len(values))
+	for _, value := range values {
+		projected = append(projected, []any{apiValue(parserValueFromStorage(value))})
 	}
 
 	columns, err := executor.ProjectedColumnNames(plan, cloneSelectTableMeta(table))
@@ -1108,19 +1097,8 @@ func (db *DB) validateIndexLookupMetadata(table *executor.Table, indexDef *stora
 		return nil, newExecError("index/table mismatch")
 	}
 
-	pageData, err := readCommittedPageData(db.pool, storage.PageID(indexDef.RootPageID))
-	if err != nil {
+	if err := storage.ValidateIndexRoot(db.pageReaderForLookup, indexDef.RootPageID); err != nil {
 		return nil, wrapStorageError(err)
-	}
-	if pageData == nil {
-		return nil, newStorageError("corrupted index page")
-	}
-	if err := storage.ValidatePageImage(pageData); err != nil {
-		return nil, wrapStorageError(err)
-	}
-	pageType := pageTypeOf(pageData)
-	if pageType != storage.PageTypeIndexLeaf && pageType != storage.PageTypeIndexInternal {
-		return nil, newStorageError("corrupted index page")
 	}
 	return indexDef, nil
 }

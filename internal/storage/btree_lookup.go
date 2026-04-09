@@ -7,7 +7,18 @@ import (
 
 type IndexPageReader func(pageID uint32) ([]byte, error)
 
-func CountAllIndexEntries(pageReader IndexPageReader, rootPageID uint32) (int, error) {
+func ValidateIndexRoot(pageReader IndexPageReader, rootPageID uint32) error {
+	if pageReader == nil || rootPageID == 0 {
+		return errCorruptedIndexPage
+	}
+	page, err := pageReader(rootPageID)
+	if err != nil {
+		return err
+	}
+	return validateIndexPage(page)
+}
+
+func countAllIndexEntries(pageReader IndexPageReader, rootPageID uint32) (int, error) {
 	_, leafPage, err := findLeftmostIndexLeafPage(pageReader, rootPageID)
 	if err != nil {
 		return 0, err
@@ -39,7 +50,7 @@ func CountAllIndexEntries(pageReader IndexPageReader, rootPageID uint32) (int, e
 	}
 }
 
-func ReadAllIndexLeafRecordsInOrder(pageReader IndexPageReader, rootPageID uint32) ([]IndexLeafRecord, error) {
+func readAllIndexLeafRecordsInOrder(pageReader IndexPageReader, rootPageID uint32) ([]IndexLeafRecord, error) {
 	_, leafPage, err := findLeftmostIndexLeafPage(pageReader, rootPageID)
 	if err != nil {
 		return nil, err
@@ -160,6 +171,38 @@ func lookupIndexLeafExact(page []byte, searchKey []byte) ([]RowLocator, error) {
 		}
 	}
 	return matches, nil
+}
+
+func LookupSimpleIndexExact(pageReader IndexPageReader, rootPageID uint32, searchValue Value) ([]RowLocator, error) {
+	searchKey, err := EncodeIndexKey([]Value{searchValue})
+	if err != nil {
+		return nil, err
+	}
+	return LookupIndexExact(pageReader, rootPageID, searchKey)
+}
+
+func CountAllSimpleIndexEntries(pageReader IndexPageReader, rootPageID uint32) (int, error) {
+	return countAllIndexEntries(pageReader, rootPageID)
+}
+
+func ReadAllSimpleIndexValuesInOrder(pageReader IndexPageReader, rootPageID uint32) ([]Value, error) {
+	records, err := readAllIndexLeafRecordsInOrder(pageReader, rootPageID)
+	if err != nil {
+		return nil, err
+	}
+
+	values := make([]Value, 0, len(records))
+	for _, record := range records {
+		decoded, err := decodeIndexKey(record.Key)
+		if err != nil {
+			return nil, err
+		}
+		if len(decoded) != 1 {
+			return nil, errCorruptedIndexPage
+		}
+		values = append(values, decoded[0])
+	}
+	return values, nil
 }
 
 func LookupIndexExact(pageReader IndexPageReader, rootPageID uint32, searchKey []byte) ([]RowLocator, error) {

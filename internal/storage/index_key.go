@@ -65,7 +65,7 @@ func EncodeIndexKey(values []Value) ([]byte, error) {
 	return buf, nil
 }
 
-func DecodeIndexKey(data []byte) ([]Value, error) {
+func decodeIndexKey(data []byte) ([]Value, error) {
 	if len(data) < 2 {
 		return nil, errCorruptedIndexPage
 	}
@@ -135,9 +135,9 @@ func DecodeIndexKey(data []byte) ([]Value, error) {
 }
 
 func CompareIndexKeys(left, right []byte) (int, error) {
-	leftValues, err := DecodeIndexKey(left)
+	leftValues, err := decodeIndexKey(left)
 	leftValid := err == nil
-	rightValues, err := DecodeIndexKey(right)
+	rightValues, err := decodeIndexKey(right)
 	rightValid := err == nil
 
 	if !leftValid || !rightValid {
