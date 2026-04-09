@@ -34,7 +34,14 @@ This document locks the architectural ownership and dependency rules for the Rov
 
 - Owns the public embedded API surface, including `DB`, `Rows`, and `Result`.
 - Coordinates public entrypoints and transaction-facing API behavior.
+- Stays thin: it coordinates engine packages but does not own parser, planner, execution, or storage logic.
 - Does not define engine-layer ownership or durable-format policy.
+
+### Transaction And Buffer Pool Support
+
+- `txn` owns transaction state transitions and durability-oriented orchestration.
+- `bufferpool` owns committed/private page mediation for durable page access.
+- Neither package changes the one-way ownership of the main engine pipeline.
 
 ## Dependency Direction (Locked)
 
@@ -53,13 +60,17 @@ The following rules are locked:
 ## Type Boundaries
 
 - Storage types must not leak outside the storage layer unless an explicit boundary type is intentionally defined for that purpose.
+- Storage owns durable value encoding, index structures, and page/layout metadata.
 - Planner and execution operate on logical and value-level data, not physical page structures.
 - Cross-layer interaction must use small, explicit interfaces and narrow data contracts.
+
+## Enforcement
+
+- Package docs and root-layer comments must describe the same ownership model.
+- Architectural guardrail tests enforce dependency direction and the current root/storage boundary contracts.
 
 ## Non-Goals
 
 - No package count increase as part of this boundary lock.
 - No feature expansion.
 - No SQL surface changes.
-
-Future slices may tighten enforcement, but they must preserve this ownership model unless an explicit architectural change is approved first.

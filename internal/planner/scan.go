@@ -31,8 +31,7 @@ type IndexScan struct {
 // simple COUNT(*) and simple indexed-column projection shapes. Any uncertain or
 // unsupported case must fall back to existing table/index scan paths.
 //
-// This type is a design anchor only in ixonly.1; planner/runtime wiring lands
-// in later slices.
+// This type remains the narrow planner contract for index-only eligibility.
 type IndexOnlyScan struct {
 	TableName   string
 	IndexName   string

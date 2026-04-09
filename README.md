@@ -119,7 +119,7 @@ This work is about deepening storage and transaction internals while preserving 
 
 ## Architectural Boundaries
 
-RovaDB follows a locked layered pipeline: parser -> planner -> execution -> storage, with the root package owning only the public API surface. Each layer has strict ownership, dependencies flow one way, and storage internals must not leak upward across the engine boundary.
+RovaDB follows a locked layered pipeline: parser -> planner -> execution -> storage, with the root package owning only the public API surface. Each layer has strict ownership, dependencies flow one way, storage-owned value and index details stay behind explicit boundaries, and architectural guardrail tests enforce the dependency direction.
 
 See `docs/dev/ARCHITECTURAL_BOUNDARIES.md` for the authoritative boundary contract.
 
@@ -444,23 +444,21 @@ Engineers who want to work on a real database engine in Go without needing to wa
 
 ## Architectural direction
 
-RovaDB grows around these major layers:
+RovaDB grows around these locked major layers:
 
+- **root API**
 - **parser**
-- **binder / catalog**
 - **planner**
-- **executor**
+- **execution**
 - **storage**
-- **transaction / pager**
-- **SQL function and operator registry**
 
-The intended execution path is:
+The intended engine path is:
 
 ```text
-SQL -> AST -> Bound AST -> Logical Plan -> Physical Plan -> Executor
+SQL -> parser -> planner -> execution -> storage
 ```
 
-Even in a deliberately small engine, those boundaries matter. They reduce coupling and make it possible to add features later without tearing the engine apart.
+`txn` and `bufferpool` support transaction and durable-page orchestration around that path, but they do not redefine layer ownership. The root package stays thin and public-facing, while storage continues to own durable metadata, value encoding, and index/page details behind narrow contracts.
 
 ## Storage direction
 
