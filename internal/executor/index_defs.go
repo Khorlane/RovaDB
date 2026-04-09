@@ -21,15 +21,16 @@ func (t *Table) HasEquivalentIndexDefinition(candidate storage.CatalogIndex) boo
 		return false
 	}
 	for _, existing := range t.IndexDefs {
-		if EquivalentIndexDefinition(existing, candidate) {
+		if equivalentIndexDefinition(existing, candidate) {
 			return true
 		}
 	}
 	return false
 }
 
-// EquivalentIndexDefinition reports semantic equality between two definitions.
-func EquivalentIndexDefinition(left, right storage.CatalogIndex) bool {
+// equivalentIndexDefinition reports semantic equality between two execution-owned
+// catalog index definitions without widening the package boundary.
+func equivalentIndexDefinition(left, right storage.CatalogIndex) bool {
 	if left.Unique != right.Unique || len(left.Columns) != len(right.Columns) {
 		return false
 	}

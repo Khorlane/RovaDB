@@ -42,16 +42,16 @@ func TestFindIndexLeafPageDescendsLeftChild(t *testing.T) {
 	insertInternalEntry(t, root, "m", 2)
 	insertInternalEntry(t, root, "z", 3)
 
-	leafPageID, _, err := FindIndexLeafPage(mapPageReader(map[uint32][]byte{
+	leafPageID, _, err := findIndexLeafPage(mapPageReader(map[uint32][]byte{
 		1: root,
 		2: left,
 		3: right,
 	}), 1, []byte("apple"))
 	if err != nil {
-		t.Fatalf("FindIndexLeafPage() error = %v", err)
+		t.Fatalf("findIndexLeafPage() error = %v", err)
 	}
 	if leafPageID != 2 {
-		t.Fatalf("FindIndexLeafPage() leafPageID = %d, want 2", leafPageID)
+		t.Fatalf("findIndexLeafPage() leafPageID = %d, want 2", leafPageID)
 	}
 }
 
@@ -65,16 +65,16 @@ func TestFindIndexLeafPageDescendsRightmostChild(t *testing.T) {
 	insertInternalEntry(t, root, "m", 2)
 	insertInternalEntry(t, root, "z", 3)
 
-	leafPageID, _, err := FindIndexLeafPage(mapPageReader(map[uint32][]byte{
+	leafPageID, _, err := findIndexLeafPage(mapPageReader(map[uint32][]byte{
 		1: root,
 		2: left,
 		3: right,
 	}), 1, []byte("zzz"))
 	if err != nil {
-		t.Fatalf("FindIndexLeafPage() error = %v", err)
+		t.Fatalf("findIndexLeafPage() error = %v", err)
 	}
 	if leafPageID != 3 {
-		t.Fatalf("FindIndexLeafPage() leafPageID = %d, want 3", leafPageID)
+		t.Fatalf("findIndexLeafPage() leafPageID = %d, want 3", leafPageID)
 	}
 }
 
@@ -84,17 +84,17 @@ func TestLookupIndexLeafExactReturnsDuplicateLocatorsInOrder(t *testing.T) {
 	insertLeafEntry(t, page, "alice", RowLocator{PageID: 10, SlotID: 1})
 	insertLeafEntry(t, page, "bob", RowLocator{PageID: 10, SlotID: 2})
 
-	locators, err := LookupIndexLeafExact(page, []byte("alice"))
+	locators, err := lookupIndexLeafExact(page, []byte("alice"))
 	if err != nil {
-		t.Fatalf("LookupIndexLeafExact() error = %v", err)
+		t.Fatalf("lookupIndexLeafExact() error = %v", err)
 	}
 	want := []RowLocator{{PageID: 10, SlotID: 0}, {PageID: 10, SlotID: 1}}
 	if len(locators) != len(want) {
-		t.Fatalf("LookupIndexLeafExact() = %#v, want %#v", locators, want)
+		t.Fatalf("lookupIndexLeafExact() = %#v, want %#v", locators, want)
 	}
 	for i := range want {
 		if locators[i] != want[i] {
-			t.Fatalf("LookupIndexLeafExact()[%d] = %#v, want %#v", i, locators[i], want[i])
+			t.Fatalf("lookupIndexLeafExact()[%d] = %#v, want %#v", i, locators[i], want[i])
 		}
 	}
 }
@@ -117,9 +117,9 @@ func TestLookupIndexLeafExactRejectsMalformedLeafEntry(t *testing.T) {
 		t.Fatalf("InsertIndexEntry() error = %v", err)
 	}
 
-	_, err := LookupIndexLeafExact(page, []byte("a"))
+	_, err := lookupIndexLeafExact(page, []byte("a"))
 	if !errors.Is(err, errCorruptedIndexPage) {
-		t.Fatalf("LookupIndexLeafExact() error = %v, want %v", err, errCorruptedIndexPage)
+		t.Fatalf("lookupIndexLeafExact() error = %v, want %v", err, errCorruptedIndexPage)
 	}
 }
 
@@ -128,12 +128,12 @@ func TestFindIndexLeafPageRejectsWrongPageTypeDuringDescent(t *testing.T) {
 	insertInternalEntry(t, root, "m", 2)
 	tablePage := InitializeTablePage(2)
 
-	_, _, err := FindIndexLeafPage(mapPageReader(map[uint32][]byte{
+	_, _, err := findIndexLeafPage(mapPageReader(map[uint32][]byte{
 		1: root,
 		2: tablePage,
 	}), 1, []byte("a"))
 	if !errors.Is(err, errCorruptedIndexPage) {
-		t.Fatalf("FindIndexLeafPage() error = %v, want %v", err, errCorruptedIndexPage)
+		t.Fatalf("findIndexLeafPage() error = %v, want %v", err, errCorruptedIndexPage)
 	}
 }
 
@@ -142,14 +142,14 @@ func TestFindIndexLeafPageReturnsMissingChildError(t *testing.T) {
 	insertInternalEntry(t, root, "m", 2)
 	wantErr := errors.New("missing page")
 
-	_, _, err := FindIndexLeafPage(func(pageID uint32) ([]byte, error) {
+	_, _, err := findIndexLeafPage(func(pageID uint32) ([]byte, error) {
 		if pageID == 1 {
 			return root, nil
 		}
 		return nil, wantErr
 	}, 1, []byte("a"))
 	if !errors.Is(err, wantErr) {
-		t.Fatalf("FindIndexLeafPage() error = %v, want %v", err, wantErr)
+		t.Fatalf("findIndexLeafPage() error = %v, want %v", err, wantErr)
 	}
 }
 

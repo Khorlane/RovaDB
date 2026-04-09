@@ -8,6 +8,10 @@ import (
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
+// NOTE: System catalog orchestration belongs to the root API layer because it
+// bridges public database lifecycle with executor/storage contracts without
+// redefining either layer's ownership.
+
 const (
 	systemTableTables       = "sys_tables"
 	systemTableColumns      = "sys_tb_columns"

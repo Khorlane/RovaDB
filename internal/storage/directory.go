@@ -392,8 +392,9 @@ func canStoreCatalogPayloadEmbedded(catalogPayload []byte, rootIDPayload []byte)
 	return len(catalogPayload) <= embeddedDirectoryCatalogPayloadCapacity(len(rootIDPayload))
 }
 
-// BuildDirectoryRootIDMappings derives the durable physical root mappings keyed by stable logical IDs.
-func BuildDirectoryRootIDMappings(cat *CatalogData) []DirectoryRootIDMapping {
+// buildDirectoryRootIDMappings derives the durable physical root mappings keyed
+// by stable logical IDs. The mappings are a storage-internal durability detail.
+func buildDirectoryRootIDMappings(cat *CatalogData) []DirectoryRootIDMapping {
 	if cat == nil || len(cat.Tables) == 0 {
 		return nil
 	}

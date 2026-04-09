@@ -12,7 +12,9 @@ func catalogOverflowRequiredPageCount(payloadBytes int) int {
 	return (payloadBytes + CatalogOverflowPayloadCapacity - 1) / CatalogOverflowPayloadCapacity
 }
 
-// BuildCatalogOverflowPageChain encodes one CAT/DIR payload across supplied overflow pages.
+// BuildCatalogOverflowPageChain encodes one CAT/DIR payload across supplied
+// overflow pages. This stays in storage because overflow chaining is a
+// durable-format concern, not an execution or API-layer contract.
 func BuildCatalogOverflowPageChain(payload []byte, pageIDs []PageID) ([]CatalogOverflowPageImage, error) {
 	if len(payload) == 0 {
 		return nil, nil
@@ -95,7 +97,7 @@ func ReadCatalogOverflowChainPageIDs(reader PageReader, headPageID PageID, expec
 	return pageIDs, nil
 }
 
-func BuildCatalogOverflowReclaimPages(reader PageReader, headPageID PageID, expectedPageCount uint32, freeListHead uint32) ([]CatalogWritePage, uint32, error) {
+func buildCatalogOverflowReclaimPages(reader PageReader, headPageID PageID, expectedPageCount uint32, freeListHead uint32) ([]CatalogWritePage, uint32, error) {
 	pageIDs, err := ReadCatalogOverflowChainPageIDs(reader, headPageID, expectedPageCount)
 	if err != nil {
 		return nil, freeListHead, err

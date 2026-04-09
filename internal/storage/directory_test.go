@@ -552,7 +552,7 @@ func TestBuildDirectoryRootIDMappingsOrdersDeterministically(t *testing.T) {
 		},
 	}
 
-	got := BuildDirectoryRootIDMappings(catalog)
+	got := buildDirectoryRootIDMappings(catalog)
 	wantIDMappings := []DirectoryRootIDMapping{
 		{ObjectType: DirectoryRootMappingObjectTable, ObjectID: 3, RootPageID: 9},
 		{ObjectType: DirectoryRootMappingObjectTable, ObjectID: 7, RootPageID: 11},
@@ -562,11 +562,11 @@ func TestBuildDirectoryRootIDMappingsOrdersDeterministically(t *testing.T) {
 	}
 
 	if len(got) != len(wantIDMappings) {
-		t.Fatalf("len(BuildDirectoryRootIDMappings()) = %d, want %d", len(got), len(wantIDMappings))
+		t.Fatalf("len(buildDirectoryRootIDMappings()) = %d, want %d", len(got), len(wantIDMappings))
 	}
 	for i := range wantIDMappings {
 		if got[i] != wantIDMappings[i] {
-			t.Fatalf("BuildDirectoryRootIDMappings()[%d] = %#v, want %#v", i, got[i], wantIDMappings[i])
+			t.Fatalf("buildDirectoryRootIDMappings()[%d] = %#v, want %#v", i, got[i], wantIDMappings[i])
 		}
 	}
 }

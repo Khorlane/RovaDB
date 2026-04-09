@@ -6,6 +6,10 @@ import (
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
+// NOTE: This file remains storage-owned even where helpers decode into
+// parser.Value slices. That coupling is limited to row-value encoding at the
+// storage boundary and should be isolated further in a later boundary slice.
+
 const tablePageHeaderSize = 8
 
 const (

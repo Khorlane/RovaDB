@@ -88,8 +88,8 @@ func LoadCatalog(reader PageReader) (*CatalogData, error) {
 	return loadCatalogPayload(payload)
 }
 
-// LoadCatalogPageData decodes a catalog page image.
-func LoadCatalogPageData(pageData []byte) (*CatalogData, error) {
+// loadCatalogPageData decodes a catalog page image.
+func loadCatalogPageData(pageData []byte) (*CatalogData, error) {
 	if ValidateDirectoryPage(pageData) == nil {
 		payload, err := directoryCatalogPayload(pageData)
 		if err != nil {
@@ -270,7 +270,7 @@ func SaveCatalog(pager *Pager, cat *CatalogData) error {
 	currentMode := DirectoryCATDIRStorageModeEmbedded
 	currentOverflowHead := PageID(0)
 	currentOverflowCount := uint32(0)
-	rootIDMappings := BuildDirectoryRootIDMappings(cat)
+	rootIDMappings := buildDirectoryRootIDMappings(cat)
 	if ValidateDirectoryPage(page.Data()) == nil {
 		freeListHead, err = DirectoryFreeListHead(page.Data())
 		if err != nil {
@@ -339,17 +339,14 @@ func mergePreservedTableHeaderMappings(cat *CatalogData, rootIDMappings []Direct
 
 // BuildCatalogPageData encodes the catalog into a full embedded directory page image.
 func BuildCatalogPageData(cat *CatalogData) ([]byte, error) {
-	return BuildCatalogPageDataWithDirectoryState(cat, 0, DirectoryCheckpointMetadata{})
+	return buildCatalogPageDataWithDirectoryState(cat, 0, DirectoryCheckpointMetadata{})
 }
 
-// BuildCatalogPageDataWithFreeListHead encodes the catalog into the directory-wrapped page 0 image.
-func BuildCatalogPageDataWithFreeListHead(cat *CatalogData, freeListHead uint32) ([]byte, error) {
-	return BuildCatalogPageDataWithDirectoryState(cat, freeListHead, DirectoryCheckpointMetadata{})
-}
-
-// BuildCatalogPageDataWithDirectoryState encodes the wrapped page 0 image with directory state.
-func BuildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint32, checkpointMeta DirectoryCheckpointMetadata) ([]byte, error) {
-	plan, err := PrepareCatalogWritePlan(cat, DirectoryCATDIRStorageModeEmbedded, 0, 0, nil, CurrentDBFormatVersion, &freeListHead, checkpointMeta, nil)
+// buildCatalogPageDataWithDirectoryState encodes the wrapped page 0 image with
+// directory state. It stays storage-private because only the fully embedded
+// image is a useful boundary contract.
+func buildCatalogPageDataWithDirectoryState(cat *CatalogData, freeListHead uint32, checkpointMeta DirectoryCheckpointMetadata) ([]byte, error) {
+	plan, err := prepareCatalogWritePlan(cat, DirectoryCATDIRStorageModeEmbedded, 0, 0, nil, CurrentDBFormatVersion, &freeListHead, checkpointMeta, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -498,8 +495,8 @@ func appendCatalogIndex(buf []byte, index CatalogIndex, columns []CatalogColumn)
 	return buf, nil
 }
 
-func PrepareCatalogWritePlan(cat *CatalogData, currentMode uint32, currentOverflowHead PageID, currentOverflowPageCount uint32, reader PageReader, formatVersion uint32, freeListHead *uint32, checkpointMeta DirectoryCheckpointMetadata, allocate CatalogOverflowPageAllocator) (*CatalogWritePlan, error) {
-	return PrepareCatalogWritePlanWithRootMappings(cat, BuildDirectoryRootIDMappings(cat), currentMode, currentOverflowHead, currentOverflowPageCount, reader, formatVersion, freeListHead, checkpointMeta, allocate)
+func prepareCatalogWritePlan(cat *CatalogData, currentMode uint32, currentOverflowHead PageID, currentOverflowPageCount uint32, reader PageReader, formatVersion uint32, freeListHead *uint32, checkpointMeta DirectoryCheckpointMetadata, allocate CatalogOverflowPageAllocator) (*CatalogWritePlan, error) {
+	return PrepareCatalogWritePlanWithRootMappings(cat, buildDirectoryRootIDMappings(cat), currentMode, currentOverflowHead, currentOverflowPageCount, reader, formatVersion, freeListHead, checkpointMeta, allocate)
 }
 
 func PrepareCatalogWritePlanWithRootMappings(cat *CatalogData, rootIDMappings []DirectoryRootIDMapping, currentMode uint32, currentOverflowHead PageID, currentOverflowPageCount uint32, reader PageReader, formatVersion uint32, freeListHead *uint32, checkpointMeta DirectoryCheckpointMetadata, allocate CatalogOverflowPageAllocator) (*CatalogWritePlan, error) {
@@ -551,7 +548,7 @@ func PrepareCatalogWritePlanWithRootMappings(cat *CatalogData, rootIDMappings []
 		if currentOverflowHead == 0 || currentOverflowPageCount == 0 || reader == nil {
 			return nil, errCorruptedCatalogOverflow
 		}
-		reclaimedPages, *freeListHead, err = BuildCatalogOverflowReclaimPages(reader, currentOverflowHead, currentOverflowPageCount, *freeListHead)
+		reclaimedPages, *freeListHead, err = buildCatalogOverflowReclaimPages(reader, currentOverflowHead, currentOverflowPageCount, *freeListHead)
 		if err != nil {
 			return nil, err
 		}

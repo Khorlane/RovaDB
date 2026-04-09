@@ -71,7 +71,7 @@ func ReadAllIndexLeafRecordsInOrder(pageReader IndexPageReader, rootPageID uint3
 	}
 }
 
-func FindIndexLeafPage(pageReader IndexPageReader, rootPageID uint32, searchKey []byte) (leafPageID uint32, leafPage []byte, err error) {
+func findIndexLeafPage(pageReader IndexPageReader, rootPageID uint32, searchKey []byte) (leafPageID uint32, leafPage []byte, err error) {
 	if pageReader == nil || rootPageID == 0 {
 		return 0, nil, errCorruptedIndexPage
 	}
@@ -139,7 +139,7 @@ func findLeftmostIndexLeafPage(pageReader IndexPageReader, rootPageID uint32) (l
 	}
 }
 
-func LookupIndexLeafExact(page []byte, searchKey []byte) ([]RowLocator, error) {
+func lookupIndexLeafExact(page []byte, searchKey []byte) ([]RowLocator, error) {
 	if err := validateLeafIndexPage(page); err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func LookupIndexLeafExact(page []byte, searchKey []byte) ([]RowLocator, error) {
 }
 
 func LookupIndexExact(pageReader IndexPageReader, rootPageID uint32, searchKey []byte) ([]RowLocator, error) {
-	_, leafPage, err := FindIndexLeafPage(pageReader, rootPageID, searchKey)
+	_, leafPage, err := findIndexLeafPage(pageReader, rootPageID, searchKey)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +171,7 @@ func LookupIndexExact(pageReader IndexPageReader, rootPageID uint32, searchKey [
 	matches := make([]RowLocator, 0)
 	currentPage := leafPage
 	for {
-		currentMatches, err := LookupIndexLeafExact(currentPage, searchKey)
+		currentMatches, err := lookupIndexLeafExact(currentPage, searchKey)
 		if err != nil {
 			return nil, err
 		}

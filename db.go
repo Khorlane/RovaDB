@@ -20,6 +20,10 @@ import (
 	"github.com/Khorlane/RovaDB/internal/txn"
 )
 
+// NOTE: This root-layer file owns public API orchestration across parser,
+// planner, executor, transaction, and storage boundaries. The imported engine
+// packages still own their respective logic; this file only coordinates them.
+
 var (
 	errDuplicateRootPageID      = newStorageError("corrupted catalog page")
 	errInvalidStoredTableMeta   = newStorageError("corrupted catalog page")

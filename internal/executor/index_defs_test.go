@@ -23,8 +23,8 @@ func TestEquivalentIndexDefinitionIgnoresNameButRespectsShape(t *testing.T) {
 			{Name: "last", Desc: true},
 		},
 	}
-	if !EquivalentIndexDefinition(left, right) {
-		t.Fatal("EquivalentIndexDefinition() = false, want true")
+	if !equivalentIndexDefinition(left, right) {
+		t.Fatal("equivalentIndexDefinition() = false, want true")
 	}
 }
 

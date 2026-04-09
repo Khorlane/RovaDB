@@ -8,6 +8,10 @@ import (
 	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
+// NOTE: This file owns logical SELECT runtime behavior. Page-backed index
+// access orchestration still lives in the root API layer and calls into this
+// package only through narrow row/materialization helpers.
+
 func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Value, error) {
 	if err := validateSelectPlan(plan); err != nil {
 		return nil, err

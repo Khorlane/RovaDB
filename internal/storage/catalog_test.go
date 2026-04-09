@@ -217,9 +217,9 @@ func TestLoadCatalogRejectsLegacyPayloadVersions(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := LoadCatalogPageData(tc.payload)
+			_, err := loadCatalogPageData(tc.payload)
 			if !errors.Is(err, errUnsupportedCatalogPage) {
-				t.Fatalf("LoadCatalogPageData() error = %v, want %v", err, errUnsupportedCatalogPage)
+				t.Fatalf("loadCatalogPageData() error = %v, want %v", err, errUnsupportedCatalogPage)
 			}
 		})
 	}
@@ -241,9 +241,9 @@ func TestLoadCatalogRejectsLegacyRootPagePayloadLayout(t *testing.T) {
 		},
 	})
 
-	_, err := LoadCatalogPageData(payload)
+	_, err := loadCatalogPageData(payload)
 	if !errors.Is(err, errUnsupportedCatalogPage) {
-		t.Fatalf("LoadCatalogPageData() error = %v, want %v", err, errUnsupportedCatalogPage)
+		t.Fatalf("loadCatalogPageData() error = %v, want %v", err, errUnsupportedCatalogPage)
 	}
 }
 
@@ -1140,8 +1140,8 @@ func TestReadCatalogOverflowPayloadRejectsZeroPayloadUsedAndReclaimMatches(t *te
 	if _, err := ReadCatalogOverflowPayload(testPageReaderForOverflow(pages), 7, 2, uint32(len(payload))); !errors.Is(err, errMalformedCATDIROverflow) {
 		t.Fatalf("ReadCatalogOverflowPayload(zero used bytes) error = %v, want %v", err, errMalformedCATDIROverflow)
 	}
-	if _, _, err := BuildCatalogOverflowReclaimPages(testPageReaderForOverflow(pages), 7, 2, 0); !errors.Is(err, errMalformedCATDIROverflow) {
-		t.Fatalf("BuildCatalogOverflowReclaimPages(zero used bytes) error = %v, want %v", err, errMalformedCATDIROverflow)
+	if _, _, err := buildCatalogOverflowReclaimPages(testPageReaderForOverflow(pages), 7, 2, 0); !errors.Is(err, errMalformedCATDIROverflow) {
+		t.Fatalf("buildCatalogOverflowReclaimPages(zero used bytes) error = %v, want %v", err, errMalformedCATDIROverflow)
 	}
 }
 
