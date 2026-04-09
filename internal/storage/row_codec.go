@@ -3,8 +3,6 @@ package storage
 import (
 	"encoding/binary"
 	"math"
-
-	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
 const (
@@ -17,36 +15,36 @@ const (
 
 // EncodeRow encodes one row payload using the current row storage format.
 
-func EncodeRow(values []parser.Value) ([]byte, error) {
+func EncodeRow(values []Value) ([]byte, error) {
 	buf := make([]byte, 2)
 	binary.LittleEndian.PutUint16(buf[:2], uint16(len(values)))
 
 	for _, value := range values {
 		switch value.Kind {
-		case parser.ValueKindNull:
+		case ValueKindNull:
 			buf = append(buf, rowTypeNull)
-		case parser.ValueKindInt64:
-			if !parser.PublicIntInRange(value.I64) {
+		case ValueKindInt64:
+			if !publicIntInRange(value.I64) {
 				return nil, errCorruptedRowData
 			}
 			var raw [8]byte
 			buf = append(buf, rowTypeInt64)
 			binary.LittleEndian.PutUint64(raw[:], uint64(value.I64))
 			buf = append(buf, raw[:]...)
-		case parser.ValueKindString:
+		case ValueKindString:
 			var raw [4]byte
 			buf = append(buf, rowTypeString)
 			binary.LittleEndian.PutUint32(raw[:], uint32(len(value.Str)))
 			buf = append(buf, raw[:]...)
 			buf = append(buf, value.Str...)
-		case parser.ValueKindBool:
+		case ValueKindBool:
 			buf = append(buf, rowTypeBool)
 			if value.Bool {
 				buf = append(buf, 1)
 			} else {
 				buf = append(buf, 0)
 			}
-		case parser.ValueKindReal:
+		case ValueKindReal:
 			var raw [8]byte
 			buf = append(buf, rowTypeReal)
 			binary.LittleEndian.PutUint64(raw[:], math.Float64bits(value.F64))
@@ -60,7 +58,7 @@ func EncodeRow(values []parser.Value) ([]byte, error) {
 }
 
 // DecodeRow decodes one row payload using the current row storage format.
-func DecodeRow(data []byte) ([]parser.Value, error) {
+func DecodeRow(data []byte) ([]Value, error) {
 	if len(data) < 2 {
 		return nil, errCorruptedRowData
 	}
@@ -69,7 +67,7 @@ func DecodeRow(data []byte) ([]parser.Value, error) {
 	count := int(binary.LittleEndian.Uint16(data[offset : offset+2]))
 	offset += 2
 
-	values := make([]parser.Value, 0, count)
+	values := make([]Value, 0, count)
 	for i := 0; i < count; i++ {
 		if offset >= len(data) {
 			return nil, errCorruptedRowData
@@ -80,17 +78,17 @@ func DecodeRow(data []byte) ([]parser.Value, error) {
 
 		switch tag {
 		case rowTypeNull:
-			values = append(values, parser.NullValue())
+			values = append(values, NullValue())
 		case rowTypeInt64:
 			if offset+8 > len(data) {
 				return nil, errCorruptedRowData
 			}
 			value := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
-			if !parser.PublicIntInRange(value) {
+			if !publicIntInRange(value) {
 				return nil, errCorruptedRowData
 			}
 			offset += 8
-			values = append(values, parser.Int64Value(value))
+			values = append(values, Int64Value(value))
 		case rowTypeString:
 			if offset+4 > len(data) {
 				return nil, errCorruptedRowData
@@ -100,7 +98,7 @@ func DecodeRow(data []byte) ([]parser.Value, error) {
 			if offset+length > len(data) {
 				return nil, errCorruptedRowData
 			}
-			values = append(values, parser.StringValue(string(data[offset:offset+length])))
+			values = append(values, StringValue(string(data[offset:offset+length])))
 			offset += length
 		case rowTypeBool:
 			if offset >= len(data) {
@@ -108,9 +106,9 @@ func DecodeRow(data []byte) ([]parser.Value, error) {
 			}
 			switch data[offset] {
 			case 0:
-				values = append(values, parser.BoolValue(false))
+				values = append(values, BoolValue(false))
 			case 1:
-				values = append(values, parser.BoolValue(true))
+				values = append(values, BoolValue(true))
 			default:
 				return nil, errCorruptedRowData
 			}
@@ -121,7 +119,7 @@ func DecodeRow(data []byte) ([]parser.Value, error) {
 			}
 			value := math.Float64frombits(binary.LittleEndian.Uint64(data[offset : offset+8]))
 			offset += 8
-			values = append(values, parser.RealValue(value))
+			values = append(values, RealValue(value))
 		default:
 			return nil, errCorruptedRowData
 		}
@@ -135,7 +133,7 @@ func DecodeRow(data []byte) ([]parser.Value, error) {
 }
 
 // EncodeSlottedRow encodes one row payload using the slotted-page row format.
-func EncodeSlottedRow(values []parser.Value) ([]byte, error) {
+func EncodeSlottedRow(values []Value) ([]byte, error) {
 	columnCount := len(values)
 	nullBitmapByteCount := (columnCount + 7) / 8
 
@@ -144,30 +142,30 @@ func EncodeSlottedRow(values []parser.Value) ([]byte, error) {
 	binary.LittleEndian.PutUint16(buf[2:4], uint16(nullBitmapByteCount))
 
 	for i, value := range values {
-		if value.Kind == parser.ValueKindNull {
+		if value.Kind == ValueKindNull {
 			buf[4+i/8] |= 1 << (i % 8)
 			continue
 		}
 
 		switch value.Kind {
-		case parser.ValueKindInt64:
-			if !parser.PublicIntInRange(value.I64) {
+		case ValueKindInt64:
+			if !publicIntInRange(value.I64) {
 				return nil, errInvalidRowData
 			}
 			var raw [4]byte
 			binary.LittleEndian.PutUint32(raw[:], uint32(int32(value.I64)))
 			buf = append(buf, raw[:]...)
-		case parser.ValueKindBool:
+		case ValueKindBool:
 			if value.Bool {
 				buf = append(buf, 1)
 			} else {
 				buf = append(buf, 0)
 			}
-		case parser.ValueKindReal:
+		case ValueKindReal:
 			var raw [8]byte
 			binary.LittleEndian.PutUint64(raw[:], math.Float64bits(value.F64))
 			buf = append(buf, raw[:]...)
-		case parser.ValueKindString:
+		case ValueKindString:
 			text := []byte(value.Str)
 			if len(text) > math.MaxUint16 {
 				return nil, errInvalidRowData
@@ -186,7 +184,7 @@ func EncodeSlottedRow(values []parser.Value) ([]byte, error) {
 
 // DecodeSlottedRow decodes one slotted-page row payload using the expected
 // storage-side column types.
-func DecodeSlottedRow(data []byte, columnTypes []uint8) ([]parser.Value, error) {
+func DecodeSlottedRow(data []byte, columnTypes []uint8) ([]Value, error) {
 	if len(data) < 4 {
 		return nil, errInvalidRowData
 	}
@@ -208,10 +206,10 @@ func DecodeSlottedRow(data []byte, columnTypes []uint8) ([]parser.Value, error) 
 	nullBitmap := data[offset : offset+nullBitmapByteCount]
 	offset += nullBitmapByteCount
 
-	values := make([]parser.Value, 0, columnCount)
+	values := make([]Value, 0, columnCount)
 	for i, columnType := range columnTypes {
 		if nullBitmap[i/8]&(1<<(i%8)) != 0 {
-			values = append(values, parser.NullValue())
+			values = append(values, NullValue())
 			continue
 		}
 
@@ -222,16 +220,16 @@ func DecodeSlottedRow(data []byte, columnTypes []uint8) ([]parser.Value, error) 
 			}
 			value := int64(int32(binary.LittleEndian.Uint32(data[offset : offset+4])))
 			offset += 4
-			values = append(values, parser.Int64Value(value))
+			values = append(values, Int64Value(value))
 		case CatalogColumnTypeBool:
 			if offset >= len(data) {
 				return nil, errInvalidRowData
 			}
 			switch data[offset] {
 			case 0:
-				values = append(values, parser.BoolValue(false))
+				values = append(values, BoolValue(false))
 			case 1:
-				values = append(values, parser.BoolValue(true))
+				values = append(values, BoolValue(true))
 			default:
 				return nil, errInvalidRowData
 			}
@@ -242,7 +240,7 @@ func DecodeSlottedRow(data []byte, columnTypes []uint8) ([]parser.Value, error) 
 			}
 			value := math.Float64frombits(binary.LittleEndian.Uint64(data[offset : offset+8]))
 			offset += 8
-			values = append(values, parser.RealValue(value))
+			values = append(values, RealValue(value))
 		case CatalogColumnTypeText:
 			if offset+2 > len(data) {
 				return nil, errInvalidRowData
@@ -252,7 +250,7 @@ func DecodeSlottedRow(data []byte, columnTypes []uint8) ([]parser.Value, error) 
 			if offset+length > len(data) {
 				return nil, errInvalidRowData
 			}
-			values = append(values, parser.StringValue(string(data[offset:offset+length])))
+			values = append(values, StringValue(string(data[offset:offset+length])))
 			offset += length
 		default:
 			return nil, errInvalidRowData
@@ -263,4 +261,8 @@ func DecodeSlottedRow(data []byte, columnTypes []uint8) ([]parser.Value, error) 
 		return nil, errInvalidRowData
 	}
 	return values, nil
+}
+
+func publicIntInRange(v int64) bool {
+	return v >= math.MinInt32 && v <= math.MaxInt32
 }

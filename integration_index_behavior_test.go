@@ -214,7 +214,7 @@ func TestStage7OpenPreIndexCatalogFails(t *testing.T) {
 
 	rootPage := pager.NewPage()
 	storage.InitTableRootPage(rootPage)
-	row, err := storage.EncodeRow([]parser.Value{parser.Int64Value(1), parser.StringValue("legacy")})
+	row, err := storage.EncodeRow(storageValuesFromParser([]parser.Value{parser.Int64Value(1), parser.StringValue("legacy")}))
 	if err != nil {
 		t.Fatalf("EncodeRow() error = %v", err)
 	}

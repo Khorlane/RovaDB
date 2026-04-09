@@ -5,14 +5,12 @@ import (
 	"errors"
 	"math"
 	"testing"
-
-	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
 func TestEncodeDecodeRowInts(t *testing.T) {
-	values := []parser.Value{
-		parser.Int64Value(1),
-		parser.Int64Value(-42),
+	values := []Value{
+		Int64Value(1),
+		Int64Value(-42),
 	}
 
 	encoded, err := EncodeRow(values)
@@ -29,9 +27,9 @@ func TestEncodeDecodeRowInts(t *testing.T) {
 }
 
 func TestEncodeDecodeRowStrings(t *testing.T) {
-	values := []parser.Value{
-		parser.StringValue("hello"),
-		parser.StringValue("rovadb"),
+	values := []Value{
+		StringValue("hello"),
+		StringValue("rovadb"),
 	}
 
 	encoded, err := EncodeRow(values)
@@ -48,10 +46,10 @@ func TestEncodeDecodeRowStrings(t *testing.T) {
 }
 
 func TestEncodeDecodeRowMixed(t *testing.T) {
-	values := []parser.Value{
-		parser.Int64Value(7),
-		parser.StringValue("alice"),
-		parser.Int64Value(9),
+	values := []Value{
+		Int64Value(7),
+		StringValue("alice"),
+		Int64Value(9),
 	}
 
 	encoded, err := EncodeRow(values)
@@ -68,7 +66,7 @@ func TestEncodeDecodeRowMixed(t *testing.T) {
 }
 
 func TestEncodeRowBoolTrue(t *testing.T) {
-	encoded, err := EncodeRow([]parser.Value{parser.BoolValue(true)})
+	encoded, err := EncodeRow([]Value{BoolValue(true)})
 	if err != nil {
 		t.Fatalf("EncodeRow() error = %v", err)
 	}
@@ -85,7 +83,7 @@ func TestEncodeRowBoolTrue(t *testing.T) {
 }
 
 func TestEncodeRowBoolFalse(t *testing.T) {
-	encoded, err := EncodeRow([]parser.Value{parser.BoolValue(false)})
+	encoded, err := EncodeRow([]Value{BoolValue(false)})
 	if err != nil {
 		t.Fatalf("EncodeRow() error = %v", err)
 	}
@@ -107,7 +105,7 @@ func TestDecodeRowBoolTrue(t *testing.T) {
 		t.Fatalf("DecodeRow() error = %v", err)
 	}
 
-	assertRowValuesEqual(t, decoded, []parser.Value{parser.BoolValue(true)})
+	assertRowValuesEqual(t, decoded, []Value{BoolValue(true)})
 }
 
 func TestDecodeRowBoolFalse(t *testing.T) {
@@ -116,14 +114,14 @@ func TestDecodeRowBoolFalse(t *testing.T) {
 		t.Fatalf("DecodeRow() error = %v", err)
 	}
 
-	assertRowValuesEqual(t, decoded, []parser.Value{parser.BoolValue(false)})
+	assertRowValuesEqual(t, decoded, []Value{BoolValue(false)})
 }
 
 func TestEncodeDecodeRowWithNull(t *testing.T) {
-	values := []parser.Value{
-		parser.Int64Value(7),
-		parser.NullValue(),
-		parser.StringValue("alice"),
+	values := []Value{
+		Int64Value(7),
+		NullValue(),
+		StringValue("alice"),
 	}
 
 	encoded, err := EncodeRow(values)
@@ -140,10 +138,10 @@ func TestEncodeDecodeRowWithNull(t *testing.T) {
 }
 
 func TestEncodeDecodeRowWithNullAndBool(t *testing.T) {
-	values := []parser.Value{
-		parser.BoolValue(true),
-		parser.NullValue(),
-		parser.BoolValue(false),
+	values := []Value{
+		BoolValue(true),
+		NullValue(),
+		BoolValue(false),
 	}
 
 	encoded, err := EncodeRow(values)
@@ -160,7 +158,7 @@ func TestEncodeDecodeRowWithNullAndBool(t *testing.T) {
 }
 
 func TestEncodeRowReal(t *testing.T) {
-	encoded, err := EncodeRow([]parser.Value{parser.RealValue(3.14)})
+	encoded, err := EncodeRow([]Value{RealValue(3.14)})
 	if err != nil {
 		t.Fatalf("EncodeRow() error = %v", err)
 	}
@@ -174,7 +172,7 @@ func TestEncodeRowReal(t *testing.T) {
 }
 
 func TestDecodeRowReal(t *testing.T) {
-	encoded, err := EncodeRow([]parser.Value{parser.RealValue(3.14)})
+	encoded, err := EncodeRow([]Value{RealValue(3.14)})
 	if err != nil {
 		t.Fatalf("EncodeRow() error = %v", err)
 	}
@@ -184,15 +182,15 @@ func TestDecodeRowReal(t *testing.T) {
 		t.Fatalf("DecodeRow() error = %v", err)
 	}
 
-	assertRowValuesEqual(t, decoded, []parser.Value{parser.RealValue(3.14)})
+	assertRowValuesEqual(t, decoded, []Value{RealValue(3.14)})
 }
 
 func TestEncodeDecodeMultipleRealValues(t *testing.T) {
-	values := []parser.Value{
-		parser.RealValue(0.0),
-		parser.RealValue(3.14),
-		parser.RealValue(-2.5),
-		parser.RealValue(10.25),
+	values := []Value{
+		RealValue(0.0),
+		RealValue(3.14),
+		RealValue(-2.5),
+		RealValue(10.25),
 	}
 
 	encoded, err := EncodeRow(values)
@@ -209,12 +207,12 @@ func TestEncodeDecodeMultipleRealValues(t *testing.T) {
 }
 
 func TestEncodeDecodeRowMixedWithBool(t *testing.T) {
-	values := []parser.Value{
-		parser.Int64Value(7),
-		parser.StringValue("alice"),
-		parser.BoolValue(true),
-		parser.BoolValue(false),
-		parser.NullValue(),
+	values := []Value{
+		Int64Value(7),
+		StringValue("alice"),
+		BoolValue(true),
+		BoolValue(false),
+		NullValue(),
 	}
 
 	encoded, err := EncodeRow(values)
@@ -231,13 +229,13 @@ func TestEncodeDecodeRowMixedWithBool(t *testing.T) {
 }
 
 func TestEncodeDecodeRowMixedWithReal(t *testing.T) {
-	values := []parser.Value{
-		parser.Int64Value(7),
-		parser.StringValue("alice"),
-		parser.BoolValue(true),
-		parser.RealValue(10.25),
-		parser.BoolValue(false),
-		parser.NullValue(),
+	values := []Value{
+		Int64Value(7),
+		StringValue("alice"),
+		BoolValue(true),
+		RealValue(10.25),
+		BoolValue(false),
+		NullValue(),
 	}
 
 	encoded, err := EncodeRow(values)
@@ -254,9 +252,9 @@ func TestEncodeDecodeRowMixedWithReal(t *testing.T) {
 }
 
 func TestEncodeDecodeRowExistingIntStringRegression(t *testing.T) {
-	values := []parser.Value{
-		parser.Int64Value(1),
-		parser.StringValue("legacy"),
+	values := []Value{
+		Int64Value(1),
+		StringValue("legacy"),
 	}
 
 	encoded, err := EncodeRow(values)
@@ -289,7 +287,7 @@ func TestDecodeRowTruncatedInt(t *testing.T) {
 }
 
 func TestEncodeRowRejectsOutOfRangeInt(t *testing.T) {
-	_, err := EncodeRow([]parser.Value{parser.Int64Value(2147483648)})
+	_, err := EncodeRow([]Value{Int64Value(2147483648)})
 	if !errors.Is(err, errInvalidRowData) {
 		t.Fatalf("EncodeRow() error = %v, want %v", err, errInvalidRowData)
 	}
@@ -353,15 +351,15 @@ func TestDecodeRowTruncatedReal(t *testing.T) {
 }
 
 func TestBoolEncodingIsDistinctFromIntAndString(t *testing.T) {
-	boolEncoded, err := EncodeRow([]parser.Value{parser.BoolValue(true)})
+	boolEncoded, err := EncodeRow([]Value{BoolValue(true)})
 	if err != nil {
 		t.Fatalf("EncodeRow(bool) error = %v", err)
 	}
-	intEncoded, err := EncodeRow([]parser.Value{parser.Int64Value(1)})
+	intEncoded, err := EncodeRow([]Value{Int64Value(1)})
 	if err != nil {
 		t.Fatalf("EncodeRow(int) error = %v", err)
 	}
-	stringEncoded, err := EncodeRow([]parser.Value{parser.StringValue("true")})
+	stringEncoded, err := EncodeRow([]Value{StringValue("true")})
 	if err != nil {
 		t.Fatalf("EncodeRow(string) error = %v", err)
 	}
@@ -378,19 +376,19 @@ func TestBoolEncodingIsDistinctFromIntAndString(t *testing.T) {
 }
 
 func TestRealEncodingIsDistinctFromIntStringAndBool(t *testing.T) {
-	realEncoded, err := EncodeRow([]parser.Value{parser.RealValue(1.25)})
+	realEncoded, err := EncodeRow([]Value{RealValue(1.25)})
 	if err != nil {
 		t.Fatalf("EncodeRow(real) error = %v", err)
 	}
-	intEncoded, err := EncodeRow([]parser.Value{parser.Int64Value(1)})
+	intEncoded, err := EncodeRow([]Value{Int64Value(1)})
 	if err != nil {
 		t.Fatalf("EncodeRow(int) error = %v", err)
 	}
-	stringEncoded, err := EncodeRow([]parser.Value{parser.StringValue("1.25")})
+	stringEncoded, err := EncodeRow([]Value{StringValue("1.25")})
 	if err != nil {
 		t.Fatalf("EncodeRow(string) error = %v", err)
 	}
-	boolEncoded, err := EncodeRow([]parser.Value{parser.BoolValue(true)})
+	boolEncoded, err := EncodeRow([]Value{BoolValue(true)})
 	if err != nil {
 		t.Fatalf("EncodeRow(bool) error = %v", err)
 	}
@@ -407,7 +405,7 @@ func TestRealEncodingIsDistinctFromIntStringAndBool(t *testing.T) {
 }
 
 func TestDecodeRowTrailingJunk(t *testing.T) {
-	encoded, err := EncodeRow([]parser.Value{parser.Int64Value(1)})
+	encoded, err := EncodeRow([]Value{Int64Value(1)})
 	if err != nil {
 		t.Fatalf("EncodeRow() error = %v", err)
 	}
@@ -423,7 +421,7 @@ func expectDecodeError(data []byte) error {
 	return err
 }
 
-func assertRowValuesEqual(t *testing.T, got, want []parser.Value) {
+func assertRowValuesEqual(t *testing.T, got, want []Value) {
 	t.Helper()
 
 	if len(got) != len(want) {
@@ -438,7 +436,7 @@ func assertRowValuesEqual(t *testing.T, got, want []parser.Value) {
 }
 
 func TestEncodeDecodeSlottedRowSingleInt(t *testing.T) {
-	values := []parser.Value{parser.Int64Value(42)}
+	values := []Value{Int64Value(42)}
 
 	encoded, err := EncodeSlottedRow(values)
 	if err != nil {
@@ -453,7 +451,7 @@ func TestEncodeDecodeSlottedRowSingleInt(t *testing.T) {
 }
 
 func TestEncodeDecodeSlottedRowSingleBool(t *testing.T) {
-	values := []parser.Value{parser.BoolValue(true)}
+	values := []Value{BoolValue(true)}
 
 	encoded, err := EncodeSlottedRow(values)
 	if err != nil {
@@ -468,7 +466,7 @@ func TestEncodeDecodeSlottedRowSingleBool(t *testing.T) {
 }
 
 func TestEncodeDecodeSlottedRowSingleReal(t *testing.T) {
-	values := []parser.Value{parser.RealValue(3.14)}
+	values := []Value{RealValue(3.14)}
 
 	encoded, err := EncodeSlottedRow(values)
 	if err != nil {
@@ -483,7 +481,7 @@ func TestEncodeDecodeSlottedRowSingleReal(t *testing.T) {
 }
 
 func TestEncodeDecodeSlottedRowSingleText(t *testing.T) {
-	values := []parser.Value{parser.StringValue("hello")}
+	values := []Value{StringValue("hello")}
 
 	encoded, err := EncodeSlottedRow(values)
 	if err != nil {
@@ -498,11 +496,11 @@ func TestEncodeDecodeSlottedRowSingleText(t *testing.T) {
 }
 
 func TestEncodeDecodeSlottedRowMixed(t *testing.T) {
-	values := []parser.Value{
-		parser.Int64Value(7),
-		parser.BoolValue(true),
-		parser.RealValue(10.25),
-		parser.StringValue("alice"),
+	values := []Value{
+		Int64Value(7),
+		BoolValue(true),
+		RealValue(10.25),
+		StringValue("alice"),
 	}
 	columnTypes := []uint8{
 		CatalogColumnTypeInt,
@@ -524,11 +522,11 @@ func TestEncodeDecodeSlottedRowMixed(t *testing.T) {
 }
 
 func TestEncodeDecodeSlottedRowWithNulls(t *testing.T) {
-	values := []parser.Value{
-		parser.NullValue(),
-		parser.StringValue("name"),
-		parser.NullValue(),
-		parser.BoolValue(false),
+	values := []Value{
+		NullValue(),
+		StringValue("name"),
+		NullValue(),
+		BoolValue(false),
 	}
 	columnTypes := []uint8{
 		CatalogColumnTypeInt,
@@ -560,9 +558,9 @@ func TestEncodeDecodeSlottedRowWithNulls(t *testing.T) {
 }
 
 func TestEncodeDecodeSlottedRowIntBoundaries(t *testing.T) {
-	values := []parser.Value{
-		parser.Int64Value(math.MinInt32),
-		parser.Int64Value(math.MaxInt32),
+	values := []Value{
+		Int64Value(math.MinInt32),
+		Int64Value(math.MaxInt32),
 	}
 
 	encoded, err := EncodeSlottedRow(values)
@@ -623,7 +621,7 @@ func TestDecodeSlottedRowRejectsTruncatedTextPayload(t *testing.T) {
 }
 
 func TestDecodeSlottedRowRejectsColumnCountMismatch(t *testing.T) {
-	encoded, err := EncodeSlottedRow([]parser.Value{parser.Int64Value(1)})
+	encoded, err := EncodeSlottedRow([]Value{Int64Value(1)})
 	if err != nil {
 		t.Fatalf("EncodeSlottedRow() error = %v", err)
 	}
@@ -635,7 +633,7 @@ func TestDecodeSlottedRowRejectsColumnCountMismatch(t *testing.T) {
 }
 
 func TestDecodeSlottedRowRejectsUnsupportedType(t *testing.T) {
-	encoded, err := EncodeSlottedRow([]parser.Value{parser.Int64Value(1)})
+	encoded, err := EncodeSlottedRow([]Value{Int64Value(1)})
 	if err != nil {
 		t.Fatalf("EncodeSlottedRow() error = %v", err)
 	}
@@ -647,7 +645,7 @@ func TestDecodeSlottedRowRejectsUnsupportedType(t *testing.T) {
 }
 
 func TestEncodeSlottedRowRejectsTextLengthOverflow(t *testing.T) {
-	values := []parser.Value{parser.StringValue(string(make([]byte, math.MaxUint16+1)))}
+	values := []Value{StringValue(string(make([]byte, math.MaxUint16+1)))}
 
 	_, err := EncodeSlottedRow(values)
 	if !errors.Is(err, errInvalidRowData) {
@@ -656,18 +654,18 @@ func TestEncodeSlottedRowRejectsTextLengthOverflow(t *testing.T) {
 }
 
 func TestEncodeSlottedRowRejectsOutOfRangeInt(t *testing.T) {
-	_, err := EncodeSlottedRow([]parser.Value{parser.Int64Value(math.MaxInt32 + 1)})
+	_, err := EncodeSlottedRow([]Value{Int64Value(math.MaxInt32 + 1)})
 	if !errors.Is(err, errInvalidRowData) {
 		t.Fatalf("EncodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
 	}
 }
 
 func TestEncodeInsertDecodeSlottedRowRoundTrip(t *testing.T) {
-	values := []parser.Value{
-		parser.Int64Value(5),
-		parser.StringValue("slot"),
-		parser.BoolValue(true),
-		parser.RealValue(1.5),
+	values := []Value{
+		Int64Value(5),
+		StringValue("slot"),
+		BoolValue(true),
+		RealValue(1.5),
 	}
 	columnTypes := []uint8{
 		CatalogColumnTypeInt,

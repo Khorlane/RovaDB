@@ -2,13 +2,10 @@ package storage
 
 import (
 	"encoding/binary"
-
-	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
-// NOTE: This file remains storage-owned even where helpers decode into
-// parser.Value slices. That coupling is limited to row-value encoding at the
-// storage boundary and should be isolated further in a later boundary slice.
+// NOTE: This file remains storage-owned and works with storage.Value row data
+// at the codec boundary.
 
 const tablePageHeaderSize = 8
 
@@ -497,7 +494,7 @@ func ExtractSlottedRowPayload(page []byte, slotID int) ([]byte, error) {
 	return append([]byte(nil), page[offset:offset+length]...), nil
 }
 
-func ReadSlottedRowsFromTablePageData(page []byte, columnTypes []uint8) ([][]parser.Value, error) {
+func ReadSlottedRowsFromTablePageData(page []byte, columnTypes []uint8) ([][]Value, error) {
 	if err := validateSlottedTablePage(page); err != nil {
 		return nil, err
 	}
@@ -509,7 +506,7 @@ func ReadSlottedRowsFromTablePageData(page []byte, columnTypes []uint8) ([][]par
 	return rows, nil
 }
 
-func ReadSlottedRowsWithLocators(page []byte, pageID uint32, columnTypes []uint8) ([]RowLocator, [][]parser.Value, error) {
+func ReadSlottedRowsWithLocators(page []byte, pageID uint32, columnTypes []uint8) ([]RowLocator, [][]Value, error) {
 	payloads, err := readSlottedRowPayloads(page)
 	if err != nil {
 		return nil, nil, err
@@ -519,7 +516,7 @@ func ReadSlottedRowsWithLocators(page []byte, pageID uint32, columnTypes []uint8
 		return nil, nil, err
 	}
 
-	rows := make([][]parser.Value, 0, len(payloads))
+	rows := make([][]Value, 0, len(payloads))
 	for _, payload := range payloads {
 		row, err := decodeSlottedRowPayload(payload, columnTypes)
 		if err != nil {
@@ -530,7 +527,7 @@ func ReadSlottedRowsWithLocators(page []byte, pageID uint32, columnTypes []uint8
 	return locators, rows, nil
 }
 
-func ReadRowBySlotFromTablePageData(page []byte, slotID uint16, columnTypes []uint8) ([]parser.Value, error) {
+func ReadRowBySlotFromTablePageData(page []byte, slotID uint16, columnTypes []uint8) ([]Value, error) {
 	if err := validateSlottedTablePage(page); err != nil {
 		return nil, err
 	}
@@ -541,7 +538,7 @@ func ReadRowBySlotFromTablePageData(page []byte, slotID uint16, columnTypes []ui
 	return decodeSlottedRowPayload(payload, columnTypes)
 }
 
-func ReadRowByLocatorFromTablePageData(page []byte, locator RowLocator, columnTypes []uint8) ([]parser.Value, error) {
+func ReadRowByLocatorFromTablePageData(page []byte, locator RowLocator, columnTypes []uint8) ([]Value, error) {
 	pageID := binary.LittleEndian.Uint32(page[tablePageHeaderOffsetPageID : tablePageHeaderOffsetPageID+4])
 	if pageID != locator.PageID {
 		return nil, errCorruptedTablePage
@@ -633,7 +630,7 @@ func buildSlottedTablePageImageWithSlotLayout(pageID uint32, owningTableID uint3
 	return page, nil
 }
 
-func decodeSlottedRowPayload(payload []byte, columnTypes []uint8) ([]parser.Value, error) {
+func decodeSlottedRowPayload(payload []byte, columnTypes []uint8) ([]Value, error) {
 	if len(payload) < 2 {
 		return nil, errInvalidRowData
 	}
@@ -646,12 +643,12 @@ func decodeSlottedRowPayload(payload []byte, columnTypes []uint8) ([]parser.Valu
 		return nil, err
 	}
 	for len(row) < len(columnTypes) {
-		row = append(row, parser.NullValue())
+		row = append(row, NullValue())
 	}
 	return row, nil
 }
 
-func BuildSlottedTablePageData(pageID uint32, rows [][]parser.Value) ([]byte, error) {
+func BuildSlottedTablePageData(pageID uint32, rows [][]Value) ([]byte, error) {
 	page, _, err := BuildSlottedTablePageDataWithLocators(pageID, rows)
 	if err != nil {
 		return nil, err
@@ -659,7 +656,7 @@ func BuildSlottedTablePageData(pageID uint32, rows [][]parser.Value) ([]byte, er
 	return page, nil
 }
 
-func BuildSlottedTablePageDataWithLocators(pageID uint32, rows [][]parser.Value) ([]byte, []RowLocator, error) {
+func BuildSlottedTablePageDataWithLocators(pageID uint32, rows [][]Value) ([]byte, []RowLocator, error) {
 	page := InitializeTablePage(pageID)
 	locators := make([]RowLocator, 0, len(rows))
 	for _, row := range rows {

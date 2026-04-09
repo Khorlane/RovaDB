@@ -218,10 +218,11 @@ func TestJournalWrittenBeforeDatabaseOverwrite(t *testing.T) {
 		if len(payloads) != 1 {
 			t.Fatalf("len(payloads) = %d, want 1", len(payloads))
 		}
-		values, err := storage.DecodeSlottedRow(payloads[0], []uint8{storage.CatalogColumnTypeInt})
+		storageValues, err := storage.DecodeSlottedRow(payloads[0], []uint8{storage.CatalogColumnTypeInt})
 		if err != nil {
 			return err
 		}
+		values := parserValuesFromStorage(storageValues)
 		if values[0].I64 != 1 {
 			t.Fatalf("disk value before flush = %d, want 1", values[0].I64)
 		}
@@ -419,10 +420,11 @@ func TestStageDirtyStateUsesPrivateFramesAndLeavesCommittedReadUnchanged(t *test
 	if !db.pool.IsDirty(privateFrame) {
 		t.Fatal("private frame is clean, want dirty after staged write")
 	}
-	privateRows, err := storage.ReadSlottedRowsFromTablePageData(privateFrame.Data[:], []uint8{storage.CatalogColumnTypeInt})
+	storagePrivateRows, err := storage.ReadSlottedRowsFromTablePageData(privateFrame.Data[:], []uint8{storage.CatalogColumnTypeInt})
 	if err != nil {
 		t.Fatalf("ReadSlottedRowsFromTablePageData(private) error = %v", err)
 	}
+	privateRows := parserRowsFromStorage(storagePrivateRows)
 	if len(privateRows) != 1 || privateRows[0][0] != parser.Int64Value(2) {
 		t.Fatalf("private rows = %#v, want [[2]]", privateRows)
 	}
@@ -488,13 +490,14 @@ func TestReaderHelpersStayOnCommittedRowsWhilePrivateFrameExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPrivatePage() error = %v", err)
 	}
-	privateRows, err := storage.ReadSlottedRowsFromTablePageData(privateFrame.Data[:], []uint8{
+	storagePrivateRows, err := storage.ReadSlottedRowsFromTablePageData(privateFrame.Data[:], []uint8{
 		storage.CatalogColumnTypeInt,
 		storage.CatalogColumnTypeText,
 	})
 	if err != nil {
 		t.Fatalf("ReadSlottedRowsFromTablePageData(private) error = %v", err)
 	}
+	privateRows := parserRowsFromStorage(storagePrivateRows)
 	if len(privateRows) != 1 || privateRows[0][1] != parser.StringValue("beth") {
 		t.Fatalf("private rows = %#v, want private row [1 beth]", privateRows)
 	}
@@ -574,10 +577,11 @@ func TestRollbackDiscardsPrivatePagesAndFreshWriteRecreatesFromCommitted(t *test
 	if err != nil {
 		t.Fatalf("GetPrivatePage() after rollback error = %v", err)
 	}
-	privateRows, err := storage.ReadSlottedRowsFromTablePageData(privateAfterRollback.Data[:], []uint8{storage.CatalogColumnTypeInt})
+	storagePrivateRows, err := storage.ReadSlottedRowsFromTablePageData(privateAfterRollback.Data[:], []uint8{storage.CatalogColumnTypeInt})
 	if err != nil {
 		t.Fatalf("ReadSlottedRowsFromTablePageData(private after rollback) error = %v", err)
 	}
+	privateRows := parserRowsFromStorage(storagePrivateRows)
 	if len(privateRows) != 1 || privateRows[0][0] != parser.Int64Value(1) {
 		t.Fatalf("privateRows after rollback = %#v, want recreated committed row [[1]]", privateRows)
 	}
@@ -658,13 +662,14 @@ func TestCommitPromotesPrivatePagesAndReadersSeeNewContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readCommittedPageData(after commit) error = %v", err)
 	}
-	decoded, err := storage.ReadSlottedRowsFromTablePageData(committedPageData, []uint8{
+	storageDecoded, err := storage.ReadSlottedRowsFromTablePageData(committedPageData, []uint8{
 		storage.CatalogColumnTypeInt,
 		storage.CatalogColumnTypeText,
 	})
 	if err != nil {
 		t.Fatalf("ReadSlottedRowsFromTablePageData(after commit) error = %v", err)
 	}
+	decoded := parserRowsFromStorage(storageDecoded)
 	if len(decoded) != 1 || decoded[0][1] != parser.StringValue("beth") {
 		t.Fatalf("decoded committed rows = %#v, want promoted row [1 beth]", decoded)
 	}
@@ -1246,7 +1251,7 @@ func TestApplyErrorTriggersRollback(t *testing.T) {
 		table.Rows = append(table.Rows, []parser.Value{parser.Int64Value(2)})
 		table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
 
-		tablePageData, err := storage.BuildSlottedTablePageData(uint32(table.RootPageID()), table.Rows)
+		tablePageData, err := storage.BuildSlottedTablePageData(uint32(table.RootPageID()), parserRowsToStorage(table.Rows))
 		if err != nil {
 			return err
 		}

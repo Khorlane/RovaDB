@@ -5,8 +5,6 @@ import (
 	"encoding/binary"
 	"math"
 	"strings"
-
-	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
 const (
@@ -17,7 +15,7 @@ const (
 	indexKeyTypeString = 4
 )
 
-func EncodeIndexKey(values []parser.Value) ([]byte, error) {
+func EncodeIndexKey(values []Value) ([]byte, error) {
 	if len(values) > math.MaxUint16 {
 		return nil, errCorruptedIndexPage
 	}
@@ -27,29 +25,29 @@ func EncodeIndexKey(values []parser.Value) ([]byte, error) {
 
 	for _, value := range values {
 		switch value.Kind {
-		case parser.ValueKindNull:
+		case ValueKindNull:
 			buf = append(buf, indexKeyTypeNull)
-		case parser.ValueKindInt64:
-			if !parser.PublicIntInRange(value.I64) {
+		case ValueKindInt64:
+			if !publicIntInRange(value.I64) {
 				return nil, errCorruptedIndexPage
 			}
 			var raw [4]byte
 			buf = append(buf, indexKeyTypeInt)
 			binary.LittleEndian.PutUint32(raw[:], uint32(int32(value.I64)))
 			buf = append(buf, raw[:]...)
-		case parser.ValueKindBool:
+		case ValueKindBool:
 			buf = append(buf, indexKeyTypeBool)
 			if value.Bool {
 				buf = append(buf, 1)
 			} else {
 				buf = append(buf, 0)
 			}
-		case parser.ValueKindReal:
+		case ValueKindReal:
 			var raw [8]byte
 			buf = append(buf, indexKeyTypeReal)
 			binary.LittleEndian.PutUint64(raw[:], math.Float64bits(value.F64))
 			buf = append(buf, raw[:]...)
-		case parser.ValueKindString:
+		case ValueKindString:
 			text := []byte(value.Str)
 			if len(text) > math.MaxUint16 {
 				return nil, errCorruptedIndexPage
@@ -67,7 +65,7 @@ func EncodeIndexKey(values []parser.Value) ([]byte, error) {
 	return buf, nil
 }
 
-func DecodeIndexKey(data []byte) ([]parser.Value, error) {
+func DecodeIndexKey(data []byte) ([]Value, error) {
 	if len(data) < 2 {
 		return nil, errCorruptedIndexPage
 	}
@@ -76,7 +74,7 @@ func DecodeIndexKey(data []byte) ([]parser.Value, error) {
 	count := int(binary.LittleEndian.Uint16(data[offset : offset+2]))
 	offset += 2
 
-	values := make([]parser.Value, 0, count)
+	values := make([]Value, 0, count)
 	for i := 0; i < count; i++ {
 		if offset >= len(data) {
 			return nil, errCorruptedIndexPage
@@ -87,23 +85,23 @@ func DecodeIndexKey(data []byte) ([]parser.Value, error) {
 
 		switch tag {
 		case indexKeyTypeNull:
-			values = append(values, parser.NullValue())
+			values = append(values, NullValue())
 		case indexKeyTypeInt:
 			if offset+4 > len(data) {
 				return nil, errCorruptedIndexPage
 			}
 			value := int64(int32(binary.LittleEndian.Uint32(data[offset : offset+4])))
 			offset += 4
-			values = append(values, parser.Int64Value(value))
+			values = append(values, Int64Value(value))
 		case indexKeyTypeBool:
 			if offset >= len(data) {
 				return nil, errCorruptedIndexPage
 			}
 			switch data[offset] {
 			case 0:
-				values = append(values, parser.BoolValue(false))
+				values = append(values, BoolValue(false))
 			case 1:
-				values = append(values, parser.BoolValue(true))
+				values = append(values, BoolValue(true))
 			default:
 				return nil, errCorruptedIndexPage
 			}
@@ -112,7 +110,7 @@ func DecodeIndexKey(data []byte) ([]parser.Value, error) {
 			if offset+8 > len(data) {
 				return nil, errCorruptedIndexPage
 			}
-			values = append(values, parser.RealValue(math.Float64frombits(binary.LittleEndian.Uint64(data[offset:offset+8]))))
+			values = append(values, RealValue(math.Float64frombits(binary.LittleEndian.Uint64(data[offset:offset+8]))))
 			offset += 8
 		case indexKeyTypeString:
 			if offset+2 > len(data) {
@@ -123,7 +121,7 @@ func DecodeIndexKey(data []byte) ([]parser.Value, error) {
 			if offset+length > len(data) {
 				return nil, errCorruptedIndexPage
 			}
-			values = append(values, parser.StringValue(string(data[offset:offset+length])))
+			values = append(values, StringValue(string(data[offset:offset+length])))
 			offset += length
 		default:
 			return nil, errCorruptedIndexPage
@@ -165,7 +163,7 @@ func CompareIndexKeys(left, right []byte) (int, error) {
 	}
 }
 
-func compareIndexKeyValue(left, right parser.Value) int {
+func compareIndexKeyValue(left, right Value) int {
 	if left.Kind != right.Kind {
 		switch {
 		case left.Kind < right.Kind:
@@ -178,9 +176,9 @@ func compareIndexKeyValue(left, right parser.Value) int {
 	}
 
 	switch left.Kind {
-	case parser.ValueKindNull:
+	case ValueKindNull:
 		return 0
-	case parser.ValueKindInt64:
+	case ValueKindInt64:
 		switch {
 		case left.I64 < right.I64:
 			return -1
@@ -189,7 +187,7 @@ func compareIndexKeyValue(left, right parser.Value) int {
 		default:
 			return 0
 		}
-	case parser.ValueKindBool:
+	case ValueKindBool:
 		switch {
 		case !left.Bool && right.Bool:
 			return -1
@@ -198,7 +196,7 @@ func compareIndexKeyValue(left, right parser.Value) int {
 		default:
 			return 0
 		}
-	case parser.ValueKindReal:
+	case ValueKindReal:
 		switch {
 		case left.F64 < right.F64:
 			return -1
@@ -207,7 +205,7 @@ func compareIndexKeyValue(left, right parser.Value) int {
 		default:
 			return 0
 		}
-	case parser.ValueKindString:
+	case ValueKindString:
 		return strings.Compare(left.Str, right.Str)
 	default:
 		return 0

@@ -5,8 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"testing"
-
-	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
 func TestInitTableRootPage(t *testing.T) {
@@ -24,7 +22,7 @@ func TestInitTableRootPage(t *testing.T) {
 
 func TestAppendRowToTablePage(t *testing.T) {
 	page := NewPage(1)
-	row, err := EncodeRow([]parser.Value{parser.Int64Value(1), parser.StringValue("steve")})
+	row, err := EncodeRow([]Value{Int64Value(1), StringValue("steve")})
 	if err != nil {
 		t.Fatalf("EncodeRow() error = %v", err)
 	}
@@ -63,15 +61,15 @@ func TestAppendRowToTablePageFull(t *testing.T) {
 func TestRewriteTablePage(t *testing.T) {
 	page := NewPage(1)
 
-	row1, err := EncodeRow([]parser.Value{parser.Int64Value(1), parser.StringValue("alice")})
+	row1, err := EncodeRow([]Value{Int64Value(1), StringValue("alice")})
 	if err != nil {
 		t.Fatalf("EncodeRow(row1) error = %v", err)
 	}
-	row2, err := EncodeRow([]parser.Value{parser.Int64Value(2), parser.StringValue("bob")})
+	row2, err := EncodeRow([]Value{Int64Value(2), StringValue("bob")})
 	if err != nil {
 		t.Fatalf("EncodeRow(row2) error = %v", err)
 	}
-	row3, err := EncodeRow([]parser.Value{parser.Int64Value(3), parser.StringValue("carol")})
+	row3, err := EncodeRow([]Value{Int64Value(3), StringValue("carol")})
 	if err != nil {
 		t.Fatalf("EncodeRow(row3) error = %v", err)
 	}
@@ -106,7 +104,7 @@ func TestRewriteTablePage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeRow() error = %v", err)
 	}
-	wantValues := []parser.Value{parser.Int64Value(3), parser.StringValue("carol")}
+	wantValues := []Value{Int64Value(3), StringValue("carol")}
 	if len(values) != len(wantValues) {
 		t.Fatalf("len(values) = %d, want %d", len(values), len(wantValues))
 	}
@@ -142,7 +140,7 @@ func TestReadRowsFromTablePageTruncatedRow(t *testing.T) {
 
 func TestReadRowsFromTablePageCountMismatch(t *testing.T) {
 	page := NewPage(1)
-	row, err := EncodeRow([]parser.Value{parser.Int64Value(1)})
+	row, err := EncodeRow([]Value{Int64Value(1)})
 	if err != nil {
 		t.Fatalf("EncodeRow() error = %v", err)
 	}
@@ -425,9 +423,9 @@ func TestSlotLocatorRejectsInvalidSlotIndex(t *testing.T) {
 }
 
 func TestTablePageLocators(t *testing.T) {
-	page, err := BuildSlottedTablePageData(8, [][]parser.Value{
-		{parser.Int64Value(1)},
-		{parser.Int64Value(2)},
+	page, err := BuildSlottedTablePageData(8, [][]Value{
+		{Int64Value(1)},
+		{Int64Value(2)},
 	})
 	if err != nil {
 		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
@@ -459,9 +457,9 @@ func TestTablePageLocatorsRejectWrongPageType(t *testing.T) {
 }
 
 func TestBuildSlottedTablePageDataStoresEncodedRows(t *testing.T) {
-	rows := [][]parser.Value{
-		{parser.Int64Value(1), parser.StringValue("alice")},
-		{parser.Int64Value(2), parser.StringValue("bob")},
+	rows := [][]Value{
+		{Int64Value(1), StringValue("alice")},
+		{Int64Value(2), StringValue("bob")},
 	}
 
 	page, err := BuildSlottedTablePageData(9, rows)
@@ -508,17 +506,17 @@ func TestBuildSlottedTablePageDataStoresEncodedRows(t *testing.T) {
 }
 
 func TestBuildSlottedTablePageDataOverflow(t *testing.T) {
-	row := []parser.Value{parser.StringValue(string(bytes.Repeat([]byte("x"), PageSize)))}
+	row := []Value{StringValue(string(bytes.Repeat([]byte("x"), PageSize)))}
 
-	_, err := BuildSlottedTablePageData(10, [][]parser.Value{row})
+	_, err := BuildSlottedTablePageData(10, [][]Value{row})
 	if !errors.Is(err, errTablePageFull) {
 		t.Fatalf("BuildSlottedTablePageData() error = %v, want %v", err, errTablePageFull)
 	}
 }
 
 func TestReadSlottedRowsFromTablePageDataPadsTrailingNulls(t *testing.T) {
-	page, err := BuildSlottedTablePageData(11, [][]parser.Value{
-		{parser.Int64Value(1), parser.StringValue("alice")},
+	page, err := BuildSlottedTablePageData(11, [][]Value{
+		{Int64Value(1), StringValue("alice")},
 	})
 	if err != nil {
 		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
@@ -535,7 +533,7 @@ func TestReadSlottedRowsFromTablePageDataPadsTrailingNulls(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("len(rows) = %d, want 1", len(rows))
 	}
-	want := []parser.Value{parser.Int64Value(1), parser.StringValue("alice"), parser.NullValue()}
+	want := []Value{Int64Value(1), StringValue("alice"), NullValue()}
 	for i := range want {
 		if rows[0][i] != want[i] {
 			t.Fatalf("rows[0][%d] = %#v, want %#v", i, rows[0][i], want[i])
@@ -544,8 +542,8 @@ func TestReadSlottedRowsFromTablePageDataPadsTrailingNulls(t *testing.T) {
 }
 
 func TestReadSlottedRowsFromTablePageDataRejectsTruncatedPayload(t *testing.T) {
-	page, err := BuildSlottedTablePageData(12, [][]parser.Value{
-		{parser.Int64Value(1)},
+	page, err := BuildSlottedTablePageData(12, [][]Value{
+		{Int64Value(1)},
 	})
 	if err != nil {
 		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
@@ -575,9 +573,9 @@ func TestReadSlottedRowsFromTablePageDataRejectsWrongPageType(t *testing.T) {
 }
 
 func TestReadSlottedRowsWithLocators(t *testing.T) {
-	rows := [][]parser.Value{
-		{parser.Int64Value(1), parser.StringValue("alice")},
-		{parser.Int64Value(2), parser.StringValue("bob")},
+	rows := [][]Value{
+		{Int64Value(1), StringValue("alice")},
+		{Int64Value(2), StringValue("bob")},
 	}
 	page, err := BuildSlottedTablePageData(14, rows)
 	if err != nil {
@@ -618,9 +616,9 @@ func TestReadSlottedRowsWithLocatorsRejectsInvalidMetadata(t *testing.T) {
 }
 
 func TestReadRowByLocatorFromTablePageData(t *testing.T) {
-	page, err := BuildSlottedTablePageData(16, [][]parser.Value{
-		{parser.Int64Value(1), parser.StringValue("alice")},
-		{parser.Int64Value(2), parser.StringValue("bob")},
+	page, err := BuildSlottedTablePageData(16, [][]Value{
+		{Int64Value(1), StringValue("alice")},
+		{Int64Value(2), StringValue("bob")},
 	})
 	if err != nil {
 		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
@@ -633,7 +631,7 @@ func TestReadRowByLocatorFromTablePageData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadRowByLocatorFromTablePageData() error = %v", err)
 	}
-	want := []parser.Value{parser.Int64Value(2), parser.StringValue("bob")}
+	want := []Value{Int64Value(2), StringValue("bob")}
 	for i := range want {
 		if row[i] != want[i] {
 			t.Fatalf("row[%d] = %#v, want %#v", i, row[i], want[i])
@@ -642,8 +640,8 @@ func TestReadRowByLocatorFromTablePageData(t *testing.T) {
 }
 
 func TestReadRowByLocatorFromTablePageDataPadsTrailingNulls(t *testing.T) {
-	page, err := BuildSlottedTablePageData(17, [][]parser.Value{
-		{parser.Int64Value(1), parser.StringValue("alice")},
+	page, err := BuildSlottedTablePageData(17, [][]Value{
+		{Int64Value(1), StringValue("alice")},
 	})
 	if err != nil {
 		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
@@ -657,7 +655,7 @@ func TestReadRowByLocatorFromTablePageDataPadsTrailingNulls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadRowByLocatorFromTablePageData() error = %v", err)
 	}
-	want := []parser.Value{parser.Int64Value(1), parser.StringValue("alice"), parser.NullValue()}
+	want := []Value{Int64Value(1), StringValue("alice"), NullValue()}
 	for i := range want {
 		if row[i] != want[i] {
 			t.Fatalf("row[%d] = %#v, want %#v", i, row[i], want[i])
@@ -666,8 +664,8 @@ func TestReadRowByLocatorFromTablePageDataPadsTrailingNulls(t *testing.T) {
 }
 
 func TestReadRowByLocatorFromTablePageDataRejectsInvalidSlot(t *testing.T) {
-	page, err := BuildSlottedTablePageData(18, [][]parser.Value{
-		{parser.Int64Value(1)},
+	page, err := BuildSlottedTablePageData(18, [][]Value{
+		{Int64Value(1)},
 	})
 	if err != nil {
 		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
@@ -690,8 +688,8 @@ func TestReadRowByLocatorFromTablePageDataRejectsWrongPageType(t *testing.T) {
 }
 
 func TestReadRowByLocatorFromTablePageDataRejectsMalformedPayload(t *testing.T) {
-	page, err := BuildSlottedTablePageData(20, [][]parser.Value{
-		{parser.Int64Value(1)},
+	page, err := BuildSlottedTablePageData(20, [][]Value{
+		{Int64Value(1)},
 	})
 	if err != nil {
 		t.Fatalf("BuildSlottedTablePageData() error = %v", err)

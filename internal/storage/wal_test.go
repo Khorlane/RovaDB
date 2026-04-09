@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
 func TestWALPath(t *testing.T) {
@@ -636,7 +634,7 @@ func buildTestWALFrame(t *testing.T, pageID uint32, frameLSN uint64, reserved ui
 
 	page := InitializeTablePage(pageID)
 	binary.LittleEndian.PutUint64(page[tablePageHeaderOffsetPageLSN:tablePageHeaderOffsetPageLSN+8], frameLSN)
-	row, err := EncodeSlottedRow([]parser.Value{parser.StringValue("row")})
+	row, err := EncodeSlottedRow([]Value{StringValue("row")})
 	if err != nil {
 		t.Fatalf("EncodeSlottedRow() error = %v", err)
 	}
@@ -663,7 +661,7 @@ func buildTestWALFrameWithValue(t *testing.T, pageID uint32, frameLSN uint64, va
 	if err := SetPageLSN(page, frameLSN); err != nil {
 		t.Fatalf("SetPageLSN() error = %v", err)
 	}
-	row, err := EncodeSlottedRow([]parser.Value{parser.StringValue(value)})
+	row, err := EncodeSlottedRow([]Value{StringValue(value)})
 	if err != nil {
 		t.Fatalf("EncodeSlottedRow() error = %v", err)
 	}

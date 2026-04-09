@@ -15,7 +15,7 @@ func TestOpenRejectsExactStorageRowCountMismatch(t *testing.T) {
 
 	rootPage := pager.NewPage()
 	storage.InitTableRootPage(rootPage)
-	row, err := storage.EncodeSlottedRow([]parser.Value{parser.Int64Value(1)})
+	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.Int64Value(1)}))
 	if err != nil {
 		t.Fatalf("EncodeRow() error = %v", err)
 	}

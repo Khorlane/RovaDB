@@ -1611,7 +1611,7 @@ func TestOpenIgnoresTrailingUncommittedWALFrames(t *testing.T) {
 		t.Fatalf("pager.Get(data) error = %v", err)
 	}
 	uncommitted := append([]byte(nil), rootPage.Data()...)
-	row, err := storage.EncodeSlottedRow([]parser.Value{parser.Int64Value(2)})
+	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.Int64Value(2)}))
 	if err != nil {
 		t.Fatalf("EncodeSlottedRow() error = %v", err)
 	}
@@ -1741,7 +1741,7 @@ func TestOpenReplaysMultipleCommittedWALTransactions(t *testing.T) {
 		t.Fatalf("pager.Get(root) error = %v", err)
 	}
 	older := storage.InitializeTablePage(uint32(rootPageID))
-	row, err := storage.EncodeSlottedRow([]parser.Value{parser.Int64Value(1)})
+	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.Int64Value(1)}))
 	if err != nil {
 		t.Fatalf("EncodeSlottedRow() error = %v", err)
 	}

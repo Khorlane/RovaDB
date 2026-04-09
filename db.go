@@ -991,7 +991,7 @@ func (db *DB) lookupIndexedLocators(table *executor.Table, indexDef *storage.Cat
 		return nil, err
 	}
 
-	searchKey, err := storage.EncodeIndexKey([]parser.Value{searchValue})
+	searchKey, err := storage.EncodeIndexKey([]storage.Value{storageValueFromParser(searchValue)})
 	if err != nil {
 		return nil, wrapStorageError(err)
 	}
@@ -1059,7 +1059,7 @@ func (db *DB) projectAllRowsFromIndexOnly(plan *planner.SelectPlan, table *execu
 		if len(values) != 1 {
 			return nil, newStorageError("corrupted index page")
 		}
-		projected = append(projected, []any{apiValue(values[0])})
+		projected = append(projected, []any{apiValue(parserValueFromStorage(values[0]))})
 	}
 
 	columns, err := executor.ProjectedColumnNames(plan, cloneSelectTableMeta(table))
@@ -1891,7 +1891,7 @@ func (db *DB) insertRowIntoPhysicalStorageState(table *executor.Table, row []par
 		return storage.RowLocator{}, wrapStorageError(err)
 	}
 
-	rowBytes, err := storage.EncodeSlottedRow(row)
+	rowBytes, err := storage.EncodeSlottedRow(storageValuesFromParser(row))
 	if err != nil {
 		return storage.RowLocator{}, wrapStorageError(err)
 	}
@@ -2095,7 +2095,7 @@ func (db *DB) stageUpdatedRowViaPhysicalStorage(table *executor.Table, locator s
 		return storage.RowLocator{}, wrapStorageError(err)
 	}
 
-	rowBytes, err := storage.EncodeSlottedRow(row)
+	rowBytes, err := storage.EncodeSlottedRow(storageValuesFromParser(row))
 	if err != nil {
 		return storage.RowLocator{}, wrapStorageError(err)
 	}
@@ -3327,7 +3327,7 @@ func encodeIndexKeyForRow(row []parser.Value, columns []parser.ColumnDef, indexD
 		}
 		values = append(values, row[position])
 	}
-	return storage.EncodeIndexKey(values)
+	return storage.EncodeIndexKey(storageValuesFromParser(values))
 }
 
 type indexInsertPathEntry struct {
@@ -4094,7 +4094,7 @@ func (db *DB) fetchRowByLocator(table *executor.Table, locator storage.RowLocato
 	if err != nil {
 		return nil, wrapStorageError(err)
 	}
-	return append([]parser.Value(nil), row...), nil
+	return append([]parser.Value(nil), parserValuesFromStorage(row)...), nil
 }
 
 func loadCommittedTableRowsAndLocators(pool *bufferpool.BufferPool, table *executor.Table) ([]storage.RowLocator, [][]parser.Value, error) {
@@ -4130,7 +4130,7 @@ func loadCommittedTableRowsAndLocators(pool *bufferpool.BufferPool, table *execu
 			return nil, nil, wrapStorageError(err)
 		}
 		locators = append(locators, pageLocators...)
-		rows = append(rows, pageRows...)
+		rows = append(rows, parserRowsFromStorage(pageRows)...)
 	}
 	if uint32(len(rows)) != table.PersistedRowCount() {
 		return nil, nil, newStorageError("row count mismatch")

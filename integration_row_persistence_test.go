@@ -74,13 +74,14 @@ func TestInsertPersistsRowsToOwnedDataPage(t *testing.T) {
 	if got := storage.TablePageRowCount(page); got != 2 {
 		t.Fatalf("storage.TablePageRowCount() = %d, want 2", got)
 	}
-	rows, err := storage.ReadSlottedRowsFromTablePageData(page.Data(), []uint8{
+	storageRows, err := storage.ReadSlottedRowsFromTablePageData(page.Data(), []uint8{
 		storage.CatalogColumnTypeInt,
 		storage.CatalogColumnTypeText,
 	})
 	if err != nil {
 		t.Fatalf("storage.ReadSlottedRowsFromTablePageData() error = %v", err)
 	}
+	rows := parserRowsFromStorage(storageRows)
 	if len(rows) != 2 {
 		t.Fatalf("len(rows) = %d, want 2", len(rows))
 	}

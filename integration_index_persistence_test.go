@@ -252,11 +252,11 @@ func TestInsertMaintainsPersistedIndexLeafEntries(t *testing.T) {
 	if len(records) != 3 {
 		t.Fatalf("len(records) = %d, want 3", len(records))
 	}
-	aliceKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue("alice")})
+	aliceKey, err := storage.EncodeIndexKey(storageValuesFromParser([]parser.Value{parser.StringValue("alice")}))
 	if err != nil {
 		t.Fatalf("EncodeIndexKey(alice) error = %v", err)
 	}
-	bobKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue("bob")})
+	bobKey, err := storage.EncodeIndexKey(storageValuesFromParser([]parser.Value{parser.StringValue("bob")}))
 	if err != nil {
 		t.Fatalf("EncodeIndexKey(bob) error = %v", err)
 	}
@@ -382,7 +382,7 @@ func TestFetchRowByLocatorFromIndexLeafSurvivesReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadIndexLeafRecords() error = %v", err)
 	}
-	aliceKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue("alice")})
+	aliceKey, err := storage.EncodeIndexKey(storageValuesFromParser([]parser.Value{parser.StringValue("alice")}))
 	if err != nil {
 		t.Fatalf("EncodeIndexKey(alice) error = %v", err)
 	}
@@ -804,7 +804,7 @@ func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
 	}
 
 	insertedValue := string(bytes.Repeat([]byte("z"), 512))
-	insertedKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue(insertedValue)})
+	insertedKey, err := storage.EncodeIndexKey(storageValuesFromParser([]parser.Value{parser.StringValue(insertedValue)}))
 	if err != nil {
 		t.Fatalf("EncodeIndexKey(insertedValue) error = %v", err)
 	}
@@ -812,7 +812,7 @@ func TestInsertMaintainsIndexAcrossRootSplitAndReopen(t *testing.T) {
 	separatorKeys := make([][]byte, 0, 6)
 	for i := 0; i < 6; i++ {
 		value := string(bytes.Repeat([]byte{byte('b' + i)}, 512))
-		encodedKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue(value)})
+		encodedKey, err := storage.EncodeIndexKey(storageValuesFromParser([]parser.Value{parser.StringValue(value)}))
 		if err != nil {
 			t.Fatalf("EncodeIndexKey(separator %d) error = %v", i, err)
 		}
@@ -1024,11 +1024,11 @@ func TestSplitIndexLookupSurvivesReopen(t *testing.T) {
 	leftLeafPage := pager.NewPage()
 	rightLeafPage := pager.NewPage()
 
-	aliceKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue("alice")})
+	aliceKey, err := storage.EncodeIndexKey(storageValuesFromParser([]parser.Value{parser.StringValue("alice")}))
 	if err != nil {
 		t.Fatalf("EncodeIndexKey(alice) error = %v", err)
 	}
-	zoeKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue("zoe")})
+	zoeKey, err := storage.EncodeIndexKey(storageValuesFromParser([]parser.Value{parser.StringValue("zoe")}))
 	if err != nil {
 		t.Fatalf("EncodeIndexKey(zoe) error = %v", err)
 	}
@@ -1101,7 +1101,7 @@ func TestSplitIndexLookupSurvivesReopen(t *testing.T) {
 		return readCommittedPageData(db.pool, storage.PageID(pageID))
 	}
 	for _, searchValue := range []string{"alice", "zoe"} {
-		searchKey, err := storage.EncodeIndexKey([]parser.Value{parser.StringValue(searchValue)})
+		searchKey, err := storage.EncodeIndexKey(storageValuesFromParser([]parser.Value{parser.StringValue(searchValue)}))
 		if err != nil {
 			t.Fatalf("EncodeIndexKey(%q) error = %v", searchValue, err)
 		}
@@ -1247,7 +1247,7 @@ func assertIndexedRowLookup(t *testing.T, db *DB, tableName, indexName string, k
 	if indexDef == nil {
 		t.Fatalf("IndexDefinition(%s) = nil, defs=%#v", indexName, table.IndexDefs)
 	}
-	searchKey, err := storage.EncodeIndexKey(keyValues)
+	searchKey, err := storage.EncodeIndexKey(storageValuesFromParser(keyValues))
 	if err != nil {
 		t.Fatalf("EncodeIndexKey(%#v) error = %v", keyValues, err)
 	}
