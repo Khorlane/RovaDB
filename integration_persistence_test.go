@@ -12,16 +12,6 @@ import (
 // - mutations are visible immediately
 // - close/reopen preserves full state
 
-func reopenDB(t *testing.T, path string) *DB {
-	t.Helper()
-
-	db, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open() after reopen error = %v", err)
-	}
-	return db
-}
-
 func TestCreateTablePersistence(t *testing.T) {
 	path := testDBPath(t)
 

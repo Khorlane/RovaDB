@@ -1,4 +1,4 @@
-package rovadb
+package rovadb_test
 
 import (
 	"errors"
