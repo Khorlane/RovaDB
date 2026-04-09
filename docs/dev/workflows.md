@@ -4,115 +4,312 @@ This document defines short-trigger repeatable workflows that can be run on dema
 
 The goal is to let us invoke a known task with a short prompt, while keeping the task definitions easy to review, edit, add, or remove over time.
 
-## Trigger Convention
+----------------------------------------------------------------------
+TRIGGER CONVENTION
+----------------------------------------------------------------------
 
 Use a short prompt in this shape:
 
-```text
 workflow <name>
-```
 
 Examples:
+- workflow snapshot
+- workflow archive_kgs
+- workflow update_context
 
-- `workflow snapshot`
-- `workflow archive_kgs`
-- `workflow update_context`
+----------------------------------------------------------------------
+WORKFLOW FORMAT
+----------------------------------------------------------------------
 
-## Workflow Format
+Each workflow defines:
 
-Each workflow should define:
+- Name
+- Trigger
+- Mode
+- Purpose
+- Steps
+- Outputs
+- Notes
 
-- `Name`
-- `Trigger`
-- `Mode`
-- `Purpose`
-- `Steps`
-- `Outputs`
-- `Notes`
+Mode values:
+- safe routine
+- pause before commit/push
+- high impact
 
-### Field Meanings
+----------------------------------------------------------------------
+WORKFLOWS
+----------------------------------------------------------------------
 
-- `Name`
-  Human-readable workflow name.
-- `Trigger`
-  The exact short name used after `workflow`.
-- `Mode`
-  One of:
-  - `safe routine`
-  - `pause before commit/push`
-  - `high impact`
-- `Purpose`
-  Short description of why the workflow exists.
-- `Steps`
-  The repeatable actions to perform.
-- `Outputs`
-  Files, branches, or other artifacts the workflow updates.
-- `Notes`
-  Clarifications, guardrails, or assumptions.
+======================================================================
+SNAPSHOT REPO (AUTHORITATIVE HISTORY + ARCHITECTURE SNAPSHOT)
+======================================================================
 
-## Workflows
+Name: Snapshot Repo (History + Architecture)
+Trigger: snapshot
+Mode: safe routine
+Purpose:
+Produce a single authoritative snapshot that captures BOTH:
+1) repository history
+2) current architectural reality
 
-### Snapshot Repo History
+This snapshot is used for:
+- architecture review
+- continuity across chats
+- regression detection
+- design validation
 
-- `Name`: Snapshot Repo History
-- `Trigger`: `snapshot`
-- `Mode`: `safe routine`
-- `Purpose`: Capture a full repo-history snapshot for continuity/reference in the sister research folder.
+----------------------------------------------------------------------
+STEPS
+----------------------------------------------------------------------
 
-Steps:
+0) Initialize output
 
-1. List all git commits in the repository.
-2. Overwrite `C:\Projects\RovaDB Research\snapshot.txt` with that commit list.
-3. List all git tags in the repository.
-4. Append result to `C:\Projects\RovaDB Research\snapshot.txt`
-5. Produce a concise project folder/file list excluding Git internals.
-6. Append result to `C:\Projects\RovaDB Research\snapshot.txt`
-7. Produce a concise inventory of function and method signatures for the whole repo, grouped by source file, with each source file listed once as a heading using its full absolute path.
-8. Append result to `C:\Projects\RovaDB Research\snapshot.txt`
-9. Report completion.
+- Overwrite:
+  C:\Projects\RovaDB Research\snapshot.txt
 
-Outputs:
+All following sections append to this file.
 
-- `C:\Projects\RovaDB Research\snapshot.txt`
+----------------------------------------------------------------------
+SECTION 1 — GIT HISTORY
+----------------------------------------------------------------------
 
-Notes:
+1. List full git commit history:
+   git log --decorate --date=iso --pretty=format:"%h %ad %d %s"
 
-- This workflow overwrites the target file at the start, then appends the later sections.
-- The snapshot should include both:
-  - full commit history
-  - full tag list
-- The snapshot should also include a concise project folder/file list excluding Git internals.
-- The snapshot should also include a concise function/method signature inventory grouped by source file.
-- This workflow defines the process only; it is not run automatically.
+2. Append to snapshot.
 
+----------------------------------------------------------------------
+SECTION 2 — GIT TAGS
+----------------------------------------------------------------------
 
-### Load file into context
+3. List all tags:
+   git tag -l
 
- - `Name`: Load File Into Context
- - `Trigger`: `load <file>`
-- `Mode`: `safe routine`
-- `Purpose`: Read a specified file into chat context without echoing or discussing its contents.
+4. Append to snapshot.
+
+----------------------------------------------------------------------
+SECTION 3 — REPO STRUCTURE
+----------------------------------------------------------------------
+
+5. Produce concise directory tree (depth ≤ 3):
+   - exclude .git
+   - exclude build artifacts
+
+6. Append to snapshot.
+
+----------------------------------------------------------------------
+SECTION 4 — PACKAGE DEPENDENCY MAP (CRITICAL)
+----------------------------------------------------------------------
+
+7. For each package, list DIRECT imports only:
+
+- root package
+- internal/parser
+- internal/planner
+- internal/executor
+- internal/storage
+- internal/txn
+- internal/bufferpool
+
+Format:
+
+[package]
+imports:
+  - pkgA
+  - pkgB
+
+Rules:
+- include ONLY internal project packages (ignore stdlib unless useful)
+- no recursion
+- keep deterministic order
+
+8. Append to snapshot.
+
+----------------------------------------------------------------------
+SECTION 5 — EXPORTED API SURFACE
+----------------------------------------------------------------------
+
+9. For each package, list EXPORTED symbols only:
+
+- root package (DB, Rows, Result, Tx, etc.)
+- each internal package
+
+Format:
+
+[package]
+exports:
+  - TypeName
+  - FuncName(...)
+  - MethodName(...)
+
+Goal:
+- verify root remains thin
+- detect leakage from internal packages
+
+10. Append to snapshot.
+
+----------------------------------------------------------------------
+SECTION 6 — KEY BOUNDARY TYPES
+----------------------------------------------------------------------
+
+11. Extract and list core cross-layer types:
+
+- planner:
+  - plan structs (SelectPlan, IndexScan, etc.)
+
+- executor:
+  - row/value representations
+  - execution structs
+
+- storage:
+  - value representation
+  - page structs
+  - row encoding types
+  - index key types
+
+Format:
+[group]
+type definitions (names + short shape)
+
+Goal:
+- detect type leakage across layers
+- verify boundary ownership
+
+12. Append to snapshot.
+
+----------------------------------------------------------------------
+SECTION 7 — FUNCTION / METHOD SIGNATURE INVENTORY
+----------------------------------------------------------------------
+
+13. Produce full signature inventory grouped by file:
+
+- each file listed once (absolute path)
+- list functions + methods only
+
+14. Append to snapshot.
+
+----------------------------------------------------------------------
+SECTION 8 — CRITICAL CALL PATHS (FLOW)
+----------------------------------------------------------------------
+
+15. Produce concise call chains (function → function):
+
+A) Query path
+   DB.Query → ... → storage
+
+B) Mutation path
+   INSERT / UPDATE / DELETE flow
+
+C) Index-only path
+   planner → execution → storage boundary helpers
+
+Rules:
+- keep each path short (5–12 steps max)
+- no prose, just flow
+
+16. Append to snapshot.
+
+----------------------------------------------------------------------
+SECTION 9 — ARCHITECTURAL GUARDRAILS
+----------------------------------------------------------------------
+
+17. Summarize what arch_guardrails_test.go enforces:
+
+- forbidden import directions
+- storage isolation guarantees
+- root boundary restrictions
+- index-only boundary constraints
+
+18. List any obvious gaps (if detectable).
+
+19. Append to snapshot.
+
+----------------------------------------------------------------------
+SECTION 10 — LARGE / CENTRAL FILES
+----------------------------------------------------------------------
+
+20. Identify top ~10 files by size (lines of code).
+
+21. Format:
+
+file path — line count
+
+Goal:
+- identify orchestration hotspots
+- detect boundary pressure zones
+
+22. Append to snapshot.
+
+----------------------------------------------------------------------
+SECTION 11 — SUMMARY SIGNAL (SHORT)
+----------------------------------------------------------------------
+
+23. Produce a very short summary:
+
+- boundary direction status
+- root thickness status
+- main remaining pressure points (if obvious)
+
+Limit: 5–10 lines max
+
+24. Append to snapshot.
+
+----------------------------------------------------------------------
+FINAL STEP
+----------------------------------------------------------------------
+
+25. Report completion.
+
+----------------------------------------------------------------------
+OUTPUTS
+----------------------------------------------------------------------
+
+- C:\Projects\RovaDB Research\snapshot.txt
+
+----------------------------------------------------------------------
+NOTES
+----------------------------------------------------------------------
+
+- This is the SINGLE authoritative snapshot.
+- Do not split into multiple files.
+- Keep output structured and labeled by section.
+- Keep output concise and signal-focused.
+- Avoid duplication across sections.
+- Do not include Git internals in structure.
+- Do not include raw code bodies (signatures/types only).
+- Deterministic output is required.
+
+======================================================================
+LOAD FILE INTO CONTEXT
+======================================================================
+
+Name: Load File Into Context
+Trigger: load <file>
+Mode: safe routine
+Purpose:
+Read a specified file into chat context without echoing or analyzing it.
 
 Steps:
 
 1. Read the specified file into context.
-2. Do not print, quote, summarize, analyze, transform, or edit the file.
-3. After completion, respond with exactly `OK`.
+2. Do NOT print, quote, summarize, or transform it.
+3. Respond with exactly:
+
+OK
 
 Outputs:
-
 - None
 
 Notes:
+- Context ingestion only.
+- File path must be explicitly provided.
+- This workflow intentionally uses a parameterized trigger rather than the general `workflow <name>` shape.
 
-- This is a context-ingestion workflow only.
-- The file path must be explicitly provided in the request that invokes the workflow.
-- This workflow intentionally uses a parameterized trigger rather than the usual `workflow <name>` shape.
+----------------------------------------------------------------------
+MAINTENANCE RULES
+----------------------------------------------------------------------
 
-
-## Maintenance Rules
-
-- Workflows may be added, edited, or removed as project needs change.
-- Prefer stable short trigger names once a workflow starts being used regularly.
-- Keep workflows concrete and operational rather than aspirational.
-- If a workflow becomes ambiguous or too broad, split it into smaller workflows.
+- Workflows may be added, edited, or removed as needed.
+- Keep triggers stable once adopted.
+- Prefer precise, operational steps.
+- Split workflows if they become too broad.
