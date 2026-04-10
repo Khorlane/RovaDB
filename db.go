@@ -395,6 +395,9 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			if err != nil {
 				return err
 			}
+			if err := validateTables(stagedTables); err != nil {
+				return err
+			}
 
 			if err := db.applyStagedCreate(stagedTables, stmt.Name); err != nil {
 				return err
@@ -460,6 +463,9 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			var err error
 			rowsAffected, err = executor.Execute(stmt, stagedTables)
 			if err != nil {
+				return err
+			}
+			if err := validateTables(stagedTables); err != nil {
 				return err
 			}
 
@@ -3860,6 +3866,9 @@ func validateTables(tables map[string]*executor.Table) error {
 		}
 	}
 	if err := validateForeignKeyDependencies(tables); err != nil {
+		return err
+	}
+	if err := executor.ValidateCascadeGraphLegality(tables); err != nil {
 		return err
 	}
 	return nil

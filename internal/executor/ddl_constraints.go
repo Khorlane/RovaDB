@@ -50,11 +50,17 @@ func buildCreateTableDefinition(stmt *parser.CreateTableStmt, tables map[string]
 		}
 	}
 
-	if err := applyPrimaryKeyConstraint(table, tables, stmt.PrimaryKey); err != nil {
+	constraintTables := make(map[string]*Table, len(tables)+1)
+	for name, existing := range tables {
+		constraintTables[name] = existing
+	}
+	constraintTables[table.Name] = table
+
+	if err := applyPrimaryKeyConstraint(table, constraintTables, stmt.PrimaryKey); err != nil {
 		return nil, err
 	}
 	for i := range stmt.ForeignKeys {
-		if err := applyForeignKeyConstraint(table, tables, &stmt.ForeignKeys[i]); err != nil {
+		if err := applyForeignKeyConstraint(table, constraintTables, &stmt.ForeignKeys[i]); err != nil {
 			return nil, err
 		}
 	}

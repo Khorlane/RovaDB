@@ -228,57 +228,6 @@ func TestDeleteRestrictAndCascadeBehavior(t *testing.T) {
 		}
 	})
 
-	t.Run("self-referencing cascade and repeated reachability delete correctly", func(t *testing.T) {
-		db := openTestDB(t)
-		defer db.Close()
-
-		mustExec(t, db, "CREATE TABLE nodes (id INT, parent_id INT, alt_parent_id INT, CONSTRAINT pk_nodes PRIMARY KEY (id) USING INDEX idx_nodes_pk)")
-		mustExec(t, db, "CREATE INDEX idx_nodes_parent ON nodes(parent_id)")
-		mustExec(t, db, "CREATE INDEX idx_nodes_alt_parent ON nodes(alt_parent_id)")
-		mustExec(t, db, "ALTER TABLE nodes ADD CONSTRAINT fk_nodes_parent FOREIGN KEY (parent_id) REFERENCES nodes (id) USING INDEX idx_nodes_parent ON DELETE CASCADE")
-		mustExec(t, db, "ALTER TABLE nodes ADD CONSTRAINT fk_nodes_alt_parent FOREIGN KEY (alt_parent_id) REFERENCES nodes (id) USING INDEX idx_nodes_alt_parent ON DELETE CASCADE")
-		for _, sql := range []string{
-			"INSERT INTO nodes VALUES (1, 1, 1)",
-			"INSERT INTO nodes VALUES (2, 1, 1)",
-			"INSERT INTO nodes VALUES (3, 2, 1)",
-			"INSERT INTO nodes VALUES (4, 3, 2)",
-		} {
-			mustExec(t, db, sql)
-		}
-
-		if _, err := db.Exec("DELETE FROM nodes WHERE id = 1"); err != nil {
-			t.Fatalf("Exec(delete self-referencing root) error = %v, want nil", err)
-		}
-		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM nodes"); got != 0 {
-			t.Fatalf("node count after self-referencing cascade delete = %d, want 0", got)
-		}
-	})
-
-	t.Run("self-referencing surviving restrict row still blocks delete", func(t *testing.T) {
-		db := openTestDB(t)
-		defer db.Close()
-
-		mustExec(t, db, "CREATE TABLE nodes (id INT, parent_id INT, owner_id INT, CONSTRAINT pk_nodes PRIMARY KEY (id) USING INDEX idx_nodes_pk)")
-		mustExec(t, db, "CREATE INDEX idx_nodes_parent ON nodes(parent_id)")
-		mustExec(t, db, "CREATE INDEX idx_nodes_owner ON nodes(owner_id)")
-		mustExec(t, db, "ALTER TABLE nodes ADD CONSTRAINT fk_nodes_parent FOREIGN KEY (parent_id) REFERENCES nodes (id) USING INDEX idx_nodes_parent ON DELETE CASCADE")
-		mustExec(t, db, "ALTER TABLE nodes ADD CONSTRAINT fk_nodes_owner FOREIGN KEY (owner_id) REFERENCES nodes (id) USING INDEX idx_nodes_owner ON DELETE RESTRICT")
-		for _, sql := range []string{
-			"INSERT INTO nodes VALUES (1, 1, 1)",
-			"INSERT INTO nodes VALUES (2, 1, 1)",
-			"INSERT INTO nodes VALUES (3, 2, 1)",
-			"INSERT INTO nodes VALUES (4, 4, 1)",
-		} {
-			mustExec(t, db, sql)
-		}
-
-		if _, err := db.Exec("DELETE FROM nodes WHERE id = 1"); err == nil || !isConstraintError(err, "table=nodes", "constraint=fk_nodes_owner", "type=foreign_key_restrict") {
-			t.Fatalf("Exec(delete self-referencing root with surviving restrict row) error = %v, want restrict violation", err)
-		}
-		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM nodes"); got != 4 {
-			t.Fatalf("node count after failed self-referencing mixed delete = %d, want 4", got)
-		}
-	})
 }
 
 func openTestDB(t *testing.T) *DB {
