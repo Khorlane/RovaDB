@@ -24,6 +24,10 @@ This document is for the supported SQL language surface of RovaDB. It is not an 
 - `DROP TABLE`
 - `DROP INDEX`
 - `ALTER TABLE ... ADD COLUMN`
+- `ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY`
+- `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY`
+- `ALTER TABLE ... DROP PRIMARY KEY`
+- `ALTER TABLE ... DROP FOREIGN KEY`
 - `INSERT INTO ... VALUES`
 - `SELECT`
 - `UPDATE`
@@ -35,11 +39,19 @@ This document is for the supported SQL language surface of RovaDB. It is not an 
 
 **CREATE TABLE**
 ```
->>-CREATE TABLE--table-name--(column-definition--+-----------------------+--)--><
-                                                 '-,--column-definition--'
+>>-CREATE TABLE--table-name--(table-element--+-------------------+--)--><
+                                             '-,--table-element--'
+table-element:
+>>-column-definition----------------------><
+  '-constraint-definition-----------------'
 column-definition:
 >>-column-name--type-name--><
 ```
+constraint-definition:
+>>-CONSTRAINT--constraint-name--+---------------------------------------------------------------+--><
+                                '-PRIMARY KEY--(--column-list--)--USING INDEX--index-name-------'
+                                '-FOREIGN KEY--(--column-list--)--REFERENCES--table-name--(--column-list--)--USING INDEX--index-name--ON DELETE--+-RESTRICT-+'
+                                                                                                                                                   '-CASCADE--'
 **CREATE INDEX**
 ```
 >>-CREATE--+--------+--INDEX--index-name--ON--table-name--(--index-column--+------------------+--)--><
@@ -60,6 +72,23 @@ index-column:
 **ALTER TABLE ... ADD COLUMN**
 ```
 >>-ALTER TABLE--table-name--ADD COLUMN--column-definition--><
+```
+**ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY**
+```
+>>-ALTER TABLE--table-name--ADD CONSTRAINT--constraint-name--PRIMARY KEY--(--column-list--)--USING INDEX--index-name--><
+```
+**ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY**
+```
+>>-ALTER TABLE--table-name--ADD CONSTRAINT--constraint-name--FOREIGN KEY--(--column-list--)--REFERENCES--table-name--(--column-list--)--USING INDEX--index-name--ON DELETE--+-RESTRICT-+--><
+                                                                                                                                                                              '-CASCADE--'
+```
+**ALTER TABLE ... DROP PRIMARY KEY**
+```
+>>-ALTER TABLE--table-name--DROP PRIMARY KEY--><
+```
+**ALTER TABLE ... DROP FOREIGN KEY**
+```
+>>-ALTER TABLE--table-name--DROP FOREIGN KEY--constraint-name--><
 ```
 **INSERT INTO ... VALUES**
 ```
@@ -152,18 +181,53 @@ boolean-operator:
 - `DROP INDEX` identifies the target index by database-wide index name
 - `DROP INDEX` fails if the named index does not exist
 - `DROP INDEX` removes only the named index and does not remove table data
+- `DROP INDEX` fails while the index is still required by a primary key or foreign key
 
 **DROP TABLE semantics**
 
 - `DROP TABLE` fails if the named table does not exist
 - `DROP TABLE` removes the named table and all indexes defined on that table
 - `DROP TABLE` removes both table schema metadata and table row data
+- `DROP TABLE` tears down dependent foreign keys in surviving child tables rather than blocking
 
 **ALTER TABLE ... ADD COLUMN semantics**
 
 - `ALTER TABLE ... ADD COLUMN` appends the new column to the end of the table schema
 - existing stored rows are not rewritten when the column is added
 - existing rows read after the schema change yield `NULL` for the added column unless and until later writes populate it
+
+**PRIMARY KEY semantics**
+
+- primary keys are named only
+- at most one primary key may exist per table
+- primary keys may be single-column or composite
+- primary-key columns are implicitly `NOT NULL`
+- `USING INDEX <name>` is required
+- the supporting index must be `UNIQUE` and match the primary-key column list exactly
+- primary-key values cannot be modified
+- `ALTER TABLE ... DROP PRIMARY KEY` removes dependent foreign keys and keeps indexes
+
+**FOREIGN KEY semantics**
+
+- foreign keys are named only
+- foreign keys may be single-column or composite
+- foreign keys reference the parent table primary key only
+- `USING INDEX <name>` is required
+- `ON DELETE RESTRICT` or `ON DELETE CASCADE` is required
+- foreign-key columns may not be `NULL`
+- foreign-key columns may be updated subject to final-state validation
+- the child supporting index must use the foreign-key columns as a contiguous leftmost prefix
+- `ALTER TABLE ... DROP FOREIGN KEY <name>` removes the constraint and keeps the supporting index
+
+**Referential-integrity semantics**
+
+- enforcement is immediate
+- statement execution is atomic
+- validation is against the final statement state
+- `RESTRICT` and `CASCADE` deletes are supported
+- self-reference is allowed subject to cascade-graph legality
+- all-`CASCADE` cycles are rejected at DDL time
+- multiple cascade paths are rejected at DDL time
 
 ### 4. Expression Inventory
 
@@ -335,6 +399,10 @@ Representative accepted examples:
 - `DROP TABLE users`
 - `DROP INDEX idx_users_name`
 - `ALTER TABLE users ADD COLUMN created_at TEXT`
+- `ALTER TABLE users ADD CONSTRAINT pk_users PRIMARY KEY (id) USING INDEX idx_users_pk`
+- `ALTER TABLE users ADD CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES teams (id) USING INDEX idx_users_team ON DELETE RESTRICT`
+- `ALTER TABLE users DROP PRIMARY KEY`
+- `ALTER TABLE users DROP FOREIGN KEY fk_users_team`
 - `INSERT INTO users VALUES (1, 'Alice', TRUE, 3.14)`
 - `INSERT INTO users (id, name) VALUES (?, ?)`
 - `UPDATE users SET name = 'Bob' WHERE id = 1`
@@ -363,6 +431,10 @@ Representative rejected examples:
 - `DROP TABLE`
 - `DROP INDEX`
 - `ALTER TABLE users DROP COLUMN created_at`
+- `CREATE TABLE users (id INT, PRIMARY KEY (id) USING INDEX idx_users_pk)`
+- `CREATE TABLE users (team_id INT, CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES teams (id) USING INDEX idx_users_team)`
+- `ALTER TABLE users ADD CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES teams (id) USING INDEX idx_users_team ON DELETE SET NULL`
+- `ALTER TABLE users DROP FOREIGN KEY`
 - `INSERT INTO users VALUES (1)`
 - `INSERT INTO users VALUES (COUNT(*))`
 - `UPDATE users SET score = AVG(score)`

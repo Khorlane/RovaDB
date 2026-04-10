@@ -152,11 +152,17 @@ See `docs/dev/ARCHITECTURAL_BOUNDARIES.md` for the authoritative boundary contra
 - `CREATE INDEX` / `CREATE UNIQUE INDEX`
 - `DROP INDEX`
 - `DROP TABLE`
+- `ALTER TABLE ... ADD COLUMN`
+- `ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY`
+- `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY`
+- `ALTER TABLE ... DROP PRIMARY KEY`
+- `ALTER TABLE ... DROP FOREIGN KEY`
+- named `PRIMARY KEY` constraints with explicit supporting indexes
+- named `FOREIGN KEY` constraints with immediate referential integrity enforcement
 - `INSERT INTO ... VALUES`
 - `SELECT` with projection expressions, `WHERE`, `ORDER BY`, joins, and the current supported aggregate set
 - `UPDATE`
 - `DELETE`
-- `ALTER TABLE ... ADD COLUMN`
 - positional args via `?` in `Exec`, `Query`, and `QueryRow`
 - explicit public transactions via `Begin`, `Tx.Exec`, `Tx.Query`, `Tx.QueryRow`, `Commit`, and `Rollback`
 - public catalog introspection via `ListTables` and `GetTableSchema`
@@ -179,6 +185,10 @@ Only the following SQL forms are supported today.
 - `DROP INDEX <name>`
 - `DROP TABLE <name>`
 - `ALTER TABLE <table> ADD COLUMN <column> <type>`
+- `ALTER TABLE <table> ADD CONSTRAINT <name> PRIMARY KEY (...) USING INDEX <index>`
+- `ALTER TABLE <table> ADD CONSTRAINT <name> FOREIGN KEY (...) REFERENCES <parent> (...) USING INDEX <index> ON DELETE RESTRICT|CASCADE`
+- `ALTER TABLE <table> DROP PRIMARY KEY`
+- `ALTER TABLE <table> DROP FOREIGN KEY <name>`
 - `INSERT INTO ... VALUES (...)`
 - `SELECT ...`
 - `UPDATE ... SET ...`
@@ -191,6 +201,47 @@ Parser-recognized but not executable today:
 - `ROLLBACK`
 
 Explicit transactions are supported through the Go API only. SQL `BEGIN` / `COMMIT` / `ROLLBACK` statements are not part of the current public product surface.
+
+### Primary and foreign key support
+
+Supported `PRIMARY KEY` contract:
+
+- keys are named only
+- at most one primary key may exist per table
+- primary keys may be single-column or composite
+- primary-key columns are implicitly `NOT NULL`
+- `USING INDEX <name>` is required
+- the supporting index must be `UNIQUE` and match the primary-key column list exactly
+- primary-key values cannot be modified with `UPDATE`
+- `ALTER TABLE ... DROP PRIMARY KEY` removes dependent foreign keys and keeps the underlying indexes
+
+Supported `FOREIGN KEY` contract:
+
+- keys are named only
+- tables may define zero or more foreign keys
+- foreign keys reference the parent table primary key only
+- foreign keys may be single-column or composite
+- `USING INDEX <name>` is required
+- `ON DELETE RESTRICT` or `ON DELETE CASCADE` is required
+- child foreign-key columns may not be `NULL`
+- foreign-key columns may be updated, but the final row state must remain valid
+- the child supporting index must use the foreign-key columns as a contiguous leftmost prefix
+- `ALTER TABLE ... DROP FOREIGN KEY <name>` removes the constraint and keeps the supporting index
+
+Referential-integrity behavior:
+
+- enforcement is immediate
+- statement execution is atomic
+- validation is against the final statement state
+- both `RESTRICT` and `CASCADE` deletes are supported
+- self-references are allowed when the cascade graph is legal
+- all-`CASCADE` cycles are rejected at DDL time
+- multiple cascade paths are rejected at DDL time
+
+Destructive DDL behavior:
+
+- `DROP PRIMARY KEY` and `DROP TABLE` tear down dependent foreign keys instead of blocking
+- `DROP INDEX` is the dependency-blocking exception and fails while an index is still required by a primary key or foreign key
 
 ### SELECT support
 
@@ -227,7 +278,7 @@ Explicit transactions are supported through the Go API only. SQL `BEGIN` / `COMM
 - alias resolution in `WHERE`
 - SQL `BEGIN`
 - public `COMMIT` / `ROLLBACK` SQL
-- schema changes other than `ALTER TABLE ... ADD COLUMN`
+- schema changes other than `ALTER TABLE ... ADD COLUMN`, `ALTER TABLE ... ADD|DROP PRIMARY KEY`, and `ALTER TABLE ... ADD|DROP FOREIGN KEY`
 
 ### Public API
 
@@ -379,6 +430,10 @@ if err := rows.Err(); err != nil {
 Explicit transactions are opt-in through the Go API. Plain `DB.Exec`, `DB.Query`, and `DB.QueryRow` keep their existing autocommit behavior when you do not call `Begin()`.
 
 See `examples/basic_usage/main.go` for a complete open -> begin -> commit -> close -> reopen -> query flow.
+
+## Primary/Foreign Key Example
+
+For a compact example of the supported PK/FK surface, including named constraints, explicit supporting indexes, and `ON DELETE CASCADE`, see `examples/primary_foreign_keys/main.go`.
 
 ## Development Note
 

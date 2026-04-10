@@ -28,8 +28,8 @@ Status values:
 - [dx006] Physical Storage Polish milestone `done`
 - [dx001] Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc
 - [dx002] Explore planner usage for multi-column indexes
-- [dx003] Explore primary key as an explicit table-definition contract
-- [dx004] Explore table-level foreign key constraints
+- [dx003] Primary key support `done`
+- [dx004] Foreign key support `done`
 
 ## Engine
 
@@ -240,76 +240,34 @@ Current context:
 - V1 executable index work is expected to persist and enforce multi-column index definitions
 - planner support may remain narrower than the full persisted index-definition space at first
 
-### Explore primary key as an explicit table-definition contract [dx003]
+### `done` Primary key support [dx003]
 
-Exploration scope:
+Resolved direction:
 
-- whether RovaDB should support an optional `PRIMARY KEY` clause in `CREATE TABLE`
-- how primary key should relate to unique indexes and future foreign-key support
+- primary keys are supported in `CREATE TABLE` and `ALTER TABLE ... ADD CONSTRAINT`
+- primary keys are named only
+- at most one primary key may exist per table
+- primary keys may be single-column or composite
+- primary-key columns are implicitly `NOT NULL`
+- `USING INDEX <name>` is required
+- the supporting index must be `UNIQUE` and match the primary-key column list exactly
+- primary-key values cannot be modified
+- `ALTER TABLE ... DROP PRIMARY KEY` removes dependent foreign keys and keeps indexes
 
-Current intended direction:
+### `done` Foreign key support [dx004]
 
-- `PRIMARY KEY` in `CREATE TABLE` is optional
-- if present, it may be multi-column
-- primary-key columns must be `NOT NULL`
-- a table may have multiple unique indexes, but only one unique index may serve as the primary key
-- RovaDB does not auto-create the backing unique index
-- the matching unique index must be created explicitly
-- until that matching unique index exists, the table is considered inconsistent / unusable
+Resolved direction:
 
-Questions to resolve:
-
-- exact `CREATE TABLE` syntax for single-column and multi-column primary keys
-- how the engine records the declared primary-key intent before the matching unique index exists
-- what operations should be rejected while the table is in the inconsistent / unusable state
-- how the engine determines that a later unique index is the required primary-key backing index
-- what error wording should be used for tables whose declared primary key is not yet backed by the required unique index
-- whether future foreign keys should target only the primary key or also any qualifying unique key
-
-Current context:
-
-- unique indexes are already part of the SQL language spec
-- parser/spec direction is broader than the current executable index implementation
-- this exploration is partly in preparation for future foreign-key support
-
-### Explore table-level foreign key constraints [dx004]
-
-Exploration scope:
-
-- whether RovaDB should support named table-level foreign key constraints in `CREATE TABLE`
-- how foreign keys should relate to primary keys, unique indexes, and referential actions
-
-Canonical syntax direction:
-
-```sql
-CONSTRAINT fk_name
-  FOREIGN KEY (col1, col2)
-  REFERENCES parent_table (pk_col1, pk_col2)
-  ON DELETE RESTRICT
-```
-
-Current intended direction:
-
-- foreign keys are declared as table-level constraints in `CREATE TABLE`
-- multi-column foreign keys are part of the intended design
-- constraint names are included in the design
-- referenced columns are explicit
-- child and parent column counts must match
-- corresponding child and parent column data types must match exactly
-- type matching is strict, with no coercion
-- `ON DELETE RESTRICT` is the preferred first referential action
-- `ON DELETE CASCADE` may be a later expansion
-- `SET NULL` is not in scope
-
-Questions to resolve:
-
-- whether foreign keys should be allowed to reference only the declared primary key or also other qualifying unique keys
-- what operations should validate referential integrity and when
-- what error wording should be standardized for invalid foreign key definitions and violating writes/deletes
-- how foreign key metadata should be represented in catalog storage
-- how foreign keys should interact with tables whose declared primary key is still in the inconsistent / unusable state described in `dx003`
-
-Current context:
-
-- this exploration is downstream of primary-key and unique-index design
-- current executable index support is still narrower than the longer-term SQL language direction
+- foreign keys are supported in `CREATE TABLE` and `ALTER TABLE ... ADD CONSTRAINT`
+- foreign keys are named only
+- foreign keys may be single-column or composite
+- foreign keys reference the parent primary key only
+- `USING INDEX <name>` is required
+- `ON DELETE RESTRICT` and `ON DELETE CASCADE` are supported
+- foreign-key columns may not be `NULL`
+- foreign-key updates are allowed subject to final-state validation
+- the child supporting index must use the foreign-key columns as a contiguous leftmost prefix
+- enforcement is immediate and statement-atomic
+- legal self-reference is supported
+- all-`CASCADE` cycles and multiple cascade paths are rejected at DDL time
+- `ALTER TABLE ... DROP FOREIGN KEY <name>` removes the constraint and keeps the supporting index

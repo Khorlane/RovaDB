@@ -128,8 +128,6 @@ The following are intentionally not required for the initial V1 target:
 - `HAVING`
 - subqueries
 - public `COMMIT` / `ROLLBACK`
-- primary keys
-- foreign keys
 - broad multi-shape index planner exploitation
 - broad SQL completeness
 
