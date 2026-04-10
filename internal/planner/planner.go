@@ -6,9 +6,9 @@ import (
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
-// This file owns parsed-statement-to-plan translation only. Planner still
-// consumes parser AST directly here; v0.41 may tighten that handoff earlier,
-// but parser-owned structures should stop at the earliest honest planning boundary.
+// This file owns parsed-statement-to-plan translation. Planner accepts parser
+// SELECT input at entry, translates it immediately into planner-owned query and
+// value shapes, and keeps later scan-choice helpers on planner-owned types.
 
 // TableMetadata is the minimal planner-side table info used for scan choice.
 type TableMetadata struct {
@@ -61,8 +61,8 @@ func PlanSelect(stmt *parser.SelectExpr, tables ...map[string]*TableMetadata) (*
 }
 
 func chooseIndexOnlyScan(query *SelectQuery, tables map[string]*TableMetadata) *IndexOnlyScan {
-	// Index-only remains a special seam path in this milestone line and is
-	// intentionally isolated until the outer seam is regularized.
+	// Index-only eligibility stays intentionally narrow, but the helper now runs
+	// on planner-owned translated query metadata rather than parser AST payloads.
 	if query == nil || query.TableName == "" || tables == nil {
 		return nil
 	}

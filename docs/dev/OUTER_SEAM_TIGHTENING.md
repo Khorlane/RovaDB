@@ -1,20 +1,20 @@
 # Outer Seam Tightening
 
-This note defines the remaining seam-refinement targets for milestone `v0.41.0-outer-seam-tightening`. It is a boundary lock for follow-up slices, not a behavior-change plan.
+This note records the seam refinements locked for milestone `v0.41.0-outer-seam-tightening`. It is a boundary lock for follow-up slices, not a behavior-change plan.
 
-## Remaining Outer Seam Pressure Points
+## Locked Seam Shape
 
-- executor still accepts `*planner.SelectPlan` as its external input
-- DB/root still contains some direct planner-payload inspection for special cases
-- index-only handling remains a seam outlier
-- planner still consumes parser AST directly where earlier translation may be possible
+- executor runtime entry is handoff-first through executor-owned SELECT handoffs
+- index-only handling is isolated behind `IndexOnlyExecutionHandoff`, with a regular SELECT fallback handoff on the same seam
+- DB/root orchestrates through handoff/access-path APIs rather than peeking into planner-owned index-only payload details
+- planner translates parser-owned SELECT input at `PlanSelect` entry; later scan-choice helpers operate on planner-owned query/value/table-ref types
 
 ## Target End State
 
 - executor entry points consume an executor-facing handoff rather than raw planner select shells
-- normal select and index-only paths use the same seam discipline, or are isolated equally cleanly
-- root orchestrates without peeking into planner payload details where avoidable
-- planner may still consume parser AST, but parser-owned structures should stop at the earliest honest planning boundary
+- normal SELECT and index-only paths follow the same seam discipline, with direct index-only execution isolated behind a narrow handoff
+- root orchestrates without peeking into planner payload details
+- planner may still accept parser AST at entry, but parser-owned structures stop at the earliest honest planning boundary
 
 ## Boundary Rules For This Milestone
 

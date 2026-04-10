@@ -9,8 +9,8 @@ import (
 )
 
 // This file owns SELECT runtime behavior. The executor-facing seam starts at
-// SelectExecutionHandoff; direct planner shell input wrappers remain temporary
-// compatibility helpers while outer-seam tightening continues.
+// SelectExecutionHandoff; the direct planner-plan wrappers are compatibility
+// entrypoints that adapt once into the same executor-owned handoff.
 func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Value, error) {
 	handoff, err := NewSelectExecutionHandoff(plan)
 	if err != nil {

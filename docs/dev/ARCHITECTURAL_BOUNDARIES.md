@@ -66,11 +66,11 @@ The following rules are locked:
 
 ## Current Hardening Focus
 
-- The current boundary hardening focus is planner to execution.
+- The current boundary hardening focus remains planner to execution and the root-side outer seam around that boundary.
 - Planner owns plan construction and stable plan shapes.
 - Execution owns runtime flow, runtime state, and executor-owned adapted SELECT query/value shapes.
-- This boundary is enforced through a data contract and bridge adaptation, not shared concrete runtime shapes.
-- `v0.40` established the planner/executor seam; `v0.41.0-outer-seam-tightening` narrows the remaining outer-shell coupling and special-case handling.
+- This boundary is enforced through a data contract and bridge adaptation, not shared concrete runtime shapes or scattered planner-payload inspection.
+- `v0.40` established the planner/executor seam; `v0.41.0-outer-seam-tightening` regularizes the root-side SELECT/index-only entry around executor handoffs and planner-owned translated helper types.
 - This milestone is refinement work on the existing seam, not a foundational redesign.
 
 ## Enforcement

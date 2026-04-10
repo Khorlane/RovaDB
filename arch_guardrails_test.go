@@ -252,6 +252,103 @@ func TestPlannerExecutionBoundaryExecutorHotPathGuardrails(t *testing.T) {
 	}
 }
 
+func TestArchitectureOuterSeamRootSelectGuardrails(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name               string
+		path               string
+		funcName           string
+		requiredSelectors  []string
+		forbiddenSelectors []string
+	}{
+		{
+			name:     "db query stays handoff-first",
+			path:     "db.go",
+			funcName: "query",
+			requiredSelectors: []string{
+				"NewIndexOnlyExecutionHandoff",
+				"FallbackSelectHandoff",
+				"SelectWithHandoff",
+				"ProjectedColumnNamesForHandoff",
+			},
+			forbiddenSelectors: []string{
+				"Select",
+				"SelectCandidateRows",
+				"ProjectedColumnNames",
+			},
+		},
+		{
+			name:     "tx query stays handoff-first",
+			path:     "tx.go",
+			funcName: "Query",
+			requiredSelectors: []string{
+				"NewSelectExecutionHandoff",
+				"SelectWithHandoff",
+				"ProjectedColumnNamesForHandoff",
+			},
+			forbiddenSelectors: []string{
+				"Select",
+				"SelectCandidateRows",
+				"ProjectedColumnNames",
+			},
+		},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			file := parseGoFile(t, tc.path)
+			selectors := selectorNamesInFunc(t, file, tc.funcName)
+			for _, required := range tc.requiredSelectors {
+				if _, ok := selectors[required]; !ok {
+					t.Fatalf("%s:%s no longer references %s; update the guardrail only if the outer seam intentionally changed", tc.path, tc.funcName, required)
+				}
+			}
+			for _, forbidden := range tc.forbiddenSelectors {
+				if _, ok := selectors[forbidden]; ok {
+					t.Fatalf("%s:%s references raw executor.%s plan wrapper; root SELECT entry must stay handoff-first", tc.path, tc.funcName, forbidden)
+				}
+			}
+		})
+	}
+}
+
+func TestArchitectureOuterSeamRootDoesNotPeekIndexOnlyPayload(t *testing.T) {
+	t.Parallel()
+
+	dbFile := parseGoFile(t, "db.go")
+	selectors := selectorNamesInFunc(t, dbFile, "query")
+	if _, ok := selectors["IndexOnlyScan"]; ok {
+		t.Fatal("db.go:query must not directly inspect planner.IndexOnlyScan payload; keep index-only entry mediated through executor handoffs")
+	}
+}
+
+func TestArchitectureOuterSeamPlannerHelperTranslationGuardrails(t *testing.T) {
+	t.Parallel()
+
+	plannerFile := parseGoFile(t, filepath.Join("internal", "planner", "planner.go"))
+	for _, tc := range []struct {
+		funcName       string
+		requiredParams []string
+	}{
+		{funcName: "chooseIndexOnlyScan", requiredParams: []string{"*SelectQuery", "map[string]*TableMetadata"}},
+		{funcName: "simpleIndexOnlyProjectionColumn", requiredParams: []string{"*SelectQuery"}},
+		{funcName: "chooseJoinScan", requiredParams: []string{"*SelectQuery"}},
+		{funcName: "chooseIndexScan", requiredParams: []string{"*SelectQuery", "map[string]*TableMetadata"}},
+		{funcName: "valueExprOperandShape", requiredParams: []string{"*ValueExpr"}},
+		{funcName: "normalizePlannerColumnName", requiredParams: []string{"string", "*TableRef"}},
+	} {
+		tc := tc
+		t.Run(tc.funcName, func(t *testing.T) {
+			t.Parallel()
+
+			assertFuncParamTypes(t, plannerFile, tc.funcName, tc.requiredParams)
+			assertFuncBodyHasNoSelectorExpr(t, plannerFile, tc.funcName, "parser", "", "internal/planner/"+tc.funcName+" must stay on planner-owned translated types after PlanSelect entry translation")
+		})
+	}
+}
+
 func packageGoFiles(t *testing.T, dir string) []string {
 	t.Helper()
 
@@ -374,6 +471,38 @@ func assertFileHasNoSelectorExpr(t *testing.T, file *ast.File, pkgName, selector
 	}
 }
 
+func assertFuncBodyHasNoSelectorExpr(t *testing.T, file *ast.File, funcName, pkgName, selectorName, message string) {
+	t.Helper()
+
+	found := false
+	fn := findFuncDecl(t, file, funcName)
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		if found {
+			return false
+		}
+		sel, ok := node.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if selectorName == "" {
+			ident, ok := sel.X.(*ast.Ident)
+			if ok && ident.Name == pkgName {
+				found = true
+				return false
+			}
+			return true
+		}
+		if selectorExprMatches(sel, pkgName, selectorName) {
+			found = true
+			return false
+		}
+		return true
+	})
+	if found {
+		t.Fatal(message)
+	}
+}
+
 func selectorExprMatches(expr ast.Expr, pkgName, selectorName string) bool {
 	switch node := expr.(type) {
 	case *ast.SelectorExpr:
@@ -395,6 +524,78 @@ func hasInternalImport(imports []string) bool {
 		}
 	}
 	return false
+}
+
+func findFuncDecl(t *testing.T, file *ast.File, funcName string) *ast.FuncDecl {
+	t.Helper()
+
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name != nil && fn.Name.Name == funcName {
+			if fn.Body == nil {
+				t.Fatalf("function %s has no body", funcName)
+			}
+			return fn
+		}
+	}
+
+	t.Fatalf("function %s not found", funcName)
+	return nil
+}
+
+func selectorNamesInFunc(t *testing.T, file *ast.File, funcName string) map[string]struct{} {
+	t.Helper()
+
+	fn := findFuncDecl(t, file, funcName)
+	selectors := map[string]struct{}{}
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		sel, ok := node.(*ast.SelectorExpr)
+		if !ok || sel.Sel == nil {
+			return true
+		}
+		selectors[sel.Sel.Name] = struct{}{}
+		return true
+	})
+	return selectors
+}
+
+func assertFuncParamTypes(t *testing.T, file *ast.File, funcName string, want []string) {
+	t.Helper()
+
+	fn := findFuncDecl(t, file, funcName)
+	got := make([]string, 0, len(want))
+	if fn.Type.Params != nil {
+		for _, field := range fn.Type.Params.List {
+			typeName := exprString(field.Type)
+			count := len(field.Names)
+			if count == 0 {
+				count = 1
+			}
+			for i := 0; i < count; i++ {
+				got = append(got, typeName)
+			}
+		}
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("%s params = %v, want %v", funcName, got, want)
+	}
+}
+
+func exprString(expr ast.Expr) string {
+	switch node := expr.(type) {
+	case *ast.Ident:
+		return node.Name
+	case *ast.StarExpr:
+		return "*" + exprString(node.X)
+	case *ast.SelectorExpr:
+		return exprString(node.X) + "." + node.Sel.Name
+	case *ast.ArrayType:
+		return "[]" + exprString(node.Elt)
+	case *ast.MapType:
+		return "map[" + exprString(node.Key) + "]" + exprString(node.Value)
+	default:
+		return ""
+	}
 }
 
 func storageSelectorsInFunc(t *testing.T, file *ast.File, funcName string) map[string]struct{} {
