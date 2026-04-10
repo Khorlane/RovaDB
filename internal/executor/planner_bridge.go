@@ -173,6 +173,31 @@ type selectPlanJoinScan struct {
 	rightColumnName string
 }
 
+// SelectExecutionHandoff is the executor-owned runtime entry shape for
+// planned SELECT execution.
+type SelectExecutionHandoff struct {
+	bridge *selectPlanBridge
+}
+
+// NewSelectExecutionHandoff adapts planner-owned SELECT output into the
+// executor-owned runtime handoff once at the seam.
+func NewSelectExecutionHandoff(plan *planner.SelectPlan) (*SelectExecutionHandoff, error) {
+	bridge, err := bridgeSelectPlan(plan)
+	if err != nil {
+		return nil, err
+	}
+	return &SelectExecutionHandoff{bridge: bridge}, nil
+}
+
+// AccessPath exposes the bridge-owned access-path view without leaking planner
+// shell details into executor runtime entry points.
+func (h *SelectExecutionHandoff) AccessPath() SelectAccessPath {
+	if h == nil || h.bridge == nil {
+		return SelectAccessPath{}
+	}
+	return h.bridge.accessPath
+}
+
 // bridgeSelectPlan is the executor-facing seam for SELECT. It validates the
 // current planner contract, centralizes access-path interpretation, and
 // converts planner-owned query/value shapes into runtime executor structs.
@@ -240,11 +265,11 @@ func bridgeSelectPlan(plan *planner.SelectPlan) (*selectPlanBridge, error) {
 // DescribeSelectAccessPath exposes the bridge-owned access-path view without
 // leaking executor runtime evaluation state back into planner types.
 func DescribeSelectAccessPath(plan *planner.SelectPlan) (SelectAccessPath, error) {
-	bridge, err := bridgeSelectPlan(plan)
+	handoff, err := NewSelectExecutionHandoff(plan)
 	if err != nil {
 		return SelectAccessPath{}, err
 	}
-	return bridge.accessPath, nil
+	return handoff.AccessPath(), nil
 }
 
 func runtimeSelectQueryFromPlan(query *planner.SelectQuery) *runtimeSelectQuery {

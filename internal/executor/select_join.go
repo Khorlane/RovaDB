@@ -128,10 +128,18 @@ func executeJoinAggregateSelectRows(sel *runtimeSelectQuery, rows [][]parser.Val
 }
 
 func ProjectedColumnNamesForPlan(plan *planner.SelectPlan, tables map[string]*Table) ([]string, error) {
-	bridge, err := bridgeSelectPlan(plan)
+	handoff, err := NewSelectExecutionHandoff(plan)
 	if err != nil {
 		return nil, err
 	}
+	return ProjectedColumnNamesForHandoff(handoff, tables)
+}
+
+func ProjectedColumnNamesForHandoff(handoff *SelectExecutionHandoff, tables map[string]*Table) ([]string, error) {
+	if handoff == nil || handoff.bridge == nil {
+		return nil, errInvalidSelectPlan
+	}
+	bridge := handoff.bridge
 	if bridge.scanKind != selectScanKindJoin {
 		table, err := bridge.singleTable(tables)
 		if err != nil {

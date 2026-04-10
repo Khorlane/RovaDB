@@ -734,10 +734,11 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 			return rows, nil
 		}
 		plan = downgradeIndexOnlyPlanForExecution(plan)
-		accessPath, err := executor.DescribeSelectAccessPath(plan)
+		handoff, err := executor.NewSelectExecutionHandoff(plan)
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
+		accessPath := handoff.AccessPath()
 		if accessPath.Kind == executor.SelectAccessPathKindIndex {
 			table := db.tables[accessPath.IndexLookup.TableName]
 			if table == nil {
@@ -759,11 +760,11 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 			if err != nil {
 				return &Rows{err: err, idx: -1}, nil
 			}
-			rows, err := executor.SelectCandidateRows(plan, execTable, candidateRows)
+			rows, err := executor.SelectCandidateRowsWithHandoff(handoff, execTable, candidateRows)
 			if err != nil {
 				return &Rows{err: err, idx: -1}, nil
 			}
-			columns, err := executor.ProjectedColumnNames(plan, execTable)
+			columns, err := executor.ProjectedColumnNamesWithHandoff(handoff, execTable)
 			if err != nil {
 				return &Rows{err: err, idx: -1}, nil
 			}
@@ -782,11 +783,11 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		if err := validateTables(execTables); err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
-		rows, err := executor.Select(plan, execTables)
+		rows, err := executor.SelectWithHandoff(handoff, execTables)
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
-		columns, err := executor.ProjectedColumnNamesForPlan(plan, execTables)
+		columns, err := executor.ProjectedColumnNamesForHandoff(handoff, execTables)
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}

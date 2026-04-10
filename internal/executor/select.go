@@ -9,14 +9,22 @@ import (
 )
 
 // This file owns SELECT runtime behavior. The executor-facing seam starts at
-// bridgeSelectPlan; direct planner shell input here remains temporary and is a
-// v0.41 outer-seam tightening target.
+// SelectExecutionHandoff; direct planner shell input wrappers remain temporary
+// compatibility helpers while outer-seam tightening continues.
 func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Value, error) {
-	bridge, err := bridgeSelectPlan(plan)
+	handoff, err := NewSelectExecutionHandoff(plan)
 	if err != nil {
 		return nil, err
 	}
+	return SelectWithHandoff(handoff, tables)
+}
 
+func SelectWithHandoff(handoff *SelectExecutionHandoff, tables map[string]*Table) ([][]parser.Value, error) {
+	if handoff == nil || handoff.bridge == nil {
+		return nil, errInvalidSelectPlan
+	}
+
+	bridge := handoff.bridge
 	sel := bridge.query
 	if sel.tableName == "" {
 		return nil, errUnsupportedStatement
@@ -59,10 +67,20 @@ func executeIndexSelect(plan *selectPlanBridge, table *Table) ([][]parser.Value,
 
 // SelectCandidateRows executes a planned single-table select against caller-supplied candidate rows.
 func SelectCandidateRows(plan *planner.SelectPlan, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
-	bridge, err := bridgeSelectPlan(plan)
-	if err != nil || table == nil {
+	handoff, err := NewSelectExecutionHandoff(plan)
+	if err != nil {
 		return nil, errInvalidSelectPlan
 	}
+	return SelectCandidateRowsWithHandoff(handoff, table, candidateRows)
+}
+
+// SelectCandidateRowsWithHandoff executes a planned single-table select against
+// caller-supplied candidate rows through the executor-owned handoff.
+func SelectCandidateRowsWithHandoff(handoff *SelectExecutionHandoff, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
+	if handoff == nil || handoff.bridge == nil || table == nil {
+		return nil, errInvalidSelectPlan
+	}
+	bridge := handoff.bridge
 	if bridge.scanKind == selectScanKindJoin {
 		return nil, errInvalidSelectPlan
 	}
@@ -193,15 +211,29 @@ func executeAggregateSelectRows(sel *runtimeSelectQuery, table *Table, rows [][]
 }
 
 func validateSelectPlan(plan *planner.SelectPlan) error {
-	_, err := bridgeSelectPlan(plan)
+	_, err := NewSelectExecutionHandoff(plan)
 	return err
 }
 
 func ProjectedColumnNames(plan *planner.SelectPlan, table *Table) ([]string, error) {
+	handoff, err := NewSelectExecutionHandoff(plan)
+	if err == nil {
+		return ProjectedColumnNamesWithHandoff(handoff, table)
+	}
 	if plan == nil || plan.Query == nil || table == nil {
 		return nil, errUnsupportedStatement
 	}
+	// Keep non-runtime planner helpers such as index-only column projection on
+	// their existing compatibility path while normal SELECT execution moves to
+	// the executor-owned handoff.
 	return projectedColumnNames(runtimeSelectQueryFromPlan(plan.Query), table, validateProjectionExprs, resolveSelectColumnIndex)
+}
+
+func ProjectedColumnNamesWithHandoff(handoff *SelectExecutionHandoff, table *Table) ([]string, error) {
+	if handoff == nil || handoff.bridge == nil || handoff.bridge.query == nil || table == nil {
+		return nil, errUnsupportedStatement
+	}
+	return projectedColumnNames(handoff.bridge.query, table, validateProjectionExprs, resolveSelectColumnIndex)
 }
 
 type selectProjectionExprValidator func(sel *runtimeSelectQuery, table *Table) error

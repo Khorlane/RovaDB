@@ -107,6 +107,29 @@ func TestDescribeSelectAccessPathReturnsJoinTables(t *testing.T) {
 	}
 }
 
+func TestNewSelectExecutionHandoffExposesAccessPath(t *testing.T) {
+	handoff, err := NewSelectExecutionHandoff(&planner.SelectPlan{
+		Query:    &planner.SelectQuery{TableName: "users"},
+		ScanType: planner.ScanTypeIndex,
+		IndexScan: &planner.IndexScan{
+			TableName:   "users",
+			ColumnName:  "name",
+			LookupValue: planner.StringValue("alice"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSelectExecutionHandoff() error = %v", err)
+	}
+
+	accessPath := handoff.AccessPath()
+	if accessPath.Kind != SelectAccessPathKindIndex {
+		t.Fatalf("handoff.AccessPath().Kind = %v, want %v", accessPath.Kind, SelectAccessPathKindIndex)
+	}
+	if accessPath.IndexLookup.TableName != "users" || accessPath.IndexLookup.ColumnName != "name" {
+		t.Fatalf("handoff.AccessPath().IndexLookup = %#v, want users/name", accessPath.IndexLookup)
+	}
+}
+
 func TestBridgeSelectPlanRejectsMismatchedIndexScanTable(t *testing.T) {
 	_, err := bridgeSelectPlan(&planner.SelectPlan{
 		Query:    &planner.SelectQuery{TableName: "users"},

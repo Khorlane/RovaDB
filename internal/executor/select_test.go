@@ -1296,6 +1296,38 @@ func TestSelectInvalidPlanMissingTableScan(t *testing.T) {
 	}
 }
 
+func TestSelectWithHandoffTableScan(t *testing.T) {
+	table := &Table{
+		Name:    "users",
+		Columns: typedCols(),
+		Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+		},
+	}
+
+	handoff, err := NewSelectExecutionHandoff(&planner.SelectPlan{
+		Query: &planner.SelectQuery{
+			TableName: "users",
+			Columns:   []string{"name"},
+			OrderBy:   &planner.OrderByClause{Column: "id"},
+		},
+		ScanType:  planner.ScanTypeTable,
+		TableScan: &planner.TableScan{TableName: "users"},
+	})
+	if err != nil {
+		t.Fatalf("NewSelectExecutionHandoff() error = %v", err)
+	}
+
+	rows, err := SelectWithHandoff(handoff, map[string]*Table{"users": table})
+	if err != nil {
+		t.Fatalf("SelectWithHandoff() error = %v", err)
+	}
+	if len(rows) != 2 || rows[0][0] != parser.StringValue("alice") || rows[1][0] != parser.StringValue("bob") {
+		t.Fatalf("SelectWithHandoff() rows = %#v, want [[alice] [bob]]", rows)
+	}
+}
+
 func TestSelectWithIndexScan(t *testing.T) {
 	table := &Table{
 		Name:    "users",
@@ -1420,6 +1452,43 @@ func TestSelectIndexScanBridgeAdaptsPlannerProjectionExpressions(t *testing.T) {
 	}
 }
 
+func TestSelectCandidateRowsWithHandoffIndexScan(t *testing.T) {
+	table := &Table{
+		Name:    "users",
+		Columns: typedCols(),
+	}
+
+	handoff, err := NewSelectExecutionHandoff(&planner.SelectPlan{
+		Query: &planner.SelectQuery{
+			TableName: "users",
+			Columns:   []string{"id"},
+			Where: &planner.WhereClause{Items: []planner.ConditionChainItem{{
+				Condition: planner.Condition{Left: "name", Operator: "=", Right: planner.StringValue("alice")},
+			}}},
+		},
+		ScanType: planner.ScanTypeIndex,
+		IndexScan: &planner.IndexScan{
+			TableName:   "users",
+			ColumnName:  "name",
+			LookupValue: planner.StringValue("alice"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSelectExecutionHandoff() error = %v", err)
+	}
+
+	rows, err := SelectCandidateRowsWithHandoff(handoff, table, [][]parser.Value{
+		{parser.Int64Value(1), parser.StringValue("alice")},
+		{parser.Int64Value(3), parser.StringValue("alice")},
+	})
+	if err != nil {
+		t.Fatalf("SelectCandidateRowsWithHandoff() error = %v", err)
+	}
+	if len(rows) != 2 || rows[0][0] != parser.Int64Value(1) || rows[1][0] != parser.Int64Value(3) {
+		t.Fatalf("SelectCandidateRowsWithHandoff() rows = %#v, want [[1] [3]]", rows)
+	}
+}
+
 func TestSelectJoinBridgeAdaptsPlannerPredicateAndProjection(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {Name: "users", Columns: []parser.ColumnDef{
@@ -1477,6 +1546,65 @@ func TestSelectJoinBridgeAdaptsPlannerPredicateAndProjection(t *testing.T) {
 	}
 	if len(rows) != 2 || rows[0][0] != parser.StringValue("alice") || rows[0][1] != parser.StringValue("ENG") || rows[1][0] != parser.StringValue("cara") || rows[1][1] != parser.StringValue("ENG") {
 		t.Fatalf("Select() rows = %#v, want [[alice ENG] [cara ENG]]", rows)
+	}
+}
+
+func TestSelectWithHandoffJoinScan(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "name", Type: parser.ColumnTypeText},
+			{Name: "dept_id", Type: parser.ColumnTypeInt},
+		}, Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("alice"), parser.Int64Value(10)},
+			{parser.Int64Value(2), parser.StringValue("bob"), parser.Int64Value(20)},
+			{parser.Int64Value(3), parser.StringValue("cara"), parser.Int64Value(10)},
+		}},
+		"departments": {Name: "departments", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "name", Type: parser.ColumnTypeText},
+		}, Rows: [][]parser.Value{
+			{parser.Int64Value(10), parser.StringValue("eng")},
+			{parser.Int64Value(20), parser.StringValue("ops")},
+		}},
+	}
+
+	handoff, err := NewSelectExecutionHandoff(&planner.SelectPlan{
+		Query: &planner.SelectQuery{
+			TableName: "users",
+			From:      []planner.TableRef{{Name: "users", Alias: "u"}},
+			Joins:     []planner.JoinClause{{Right: planner.TableRef{Name: "departments", Alias: "d"}}},
+			Columns:   []string{"u.name", "d.name"},
+			Predicate: &planner.PredicateExpr{
+				Kind: planner.PredicateKindComparison,
+				Comparison: &planner.Condition{
+					LeftExpr:  &planner.ValueExpr{Kind: planner.ValueExprKindColumnRef, Qualifier: "d", Column: "name"},
+					Operator:  "=",
+					RightExpr: &planner.ValueExpr{Kind: planner.ValueExprKindLiteral, Value: planner.StringValue("eng")},
+				},
+			},
+			OrderBy: &planner.OrderByClause{Column: "u.id"},
+		},
+		ScanType: planner.ScanTypeJoin,
+		JoinScan: &planner.JoinScan{
+			LeftTableName:   "users",
+			LeftTableAlias:  "u",
+			LeftColumnName:  "dept_id",
+			RightTableName:  "departments",
+			RightTableAlias: "d",
+			RightColumnName: "id",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSelectExecutionHandoff() error = %v", err)
+	}
+
+	rows, err := SelectWithHandoff(handoff, tables)
+	if err != nil {
+		t.Fatalf("SelectWithHandoff() error = %v", err)
+	}
+	if len(rows) != 2 || rows[0][0] != parser.StringValue("alice") || rows[0][1] != parser.StringValue("eng") || rows[1][0] != parser.StringValue("cara") || rows[1][1] != parser.StringValue("eng") {
+		t.Fatalf("SelectWithHandoff() rows = %#v, want [[alice eng] [cara eng]]", rows)
 	}
 }
 
