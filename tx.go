@@ -144,11 +144,15 @@ func (tx *Tx) Query(query string, args ...any) (*Rows, error) {
 			return &Rows{err: err, idx: -1}, nil
 		}
 		execTables := cloneTables(tx.tables)
-		rows, err := executor.Select(plan, execTables)
+		handoff, err := executor.NewSelectExecutionHandoff(plan)
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
-		columns, err := executor.ProjectedColumnNamesForPlan(plan, execTables)
+		rows, err := executor.SelectWithHandoff(handoff, execTables)
+		if err != nil {
+			return &Rows{err: err, idx: -1}, nil
+		}
+		columns, err := executor.ProjectedColumnNamesForHandoff(handoff, execTables)
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}

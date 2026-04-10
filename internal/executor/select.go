@@ -20,11 +20,21 @@ func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Valu
 }
 
 func SelectWithHandoff(handoff *SelectExecutionHandoff, tables map[string]*Table) ([][]parser.Value, error) {
+	bridge, err := selectBridgeFromHandoff(handoff)
+	if err != nil {
+		return nil, err
+	}
+	return selectWithBridge(bridge, tables)
+}
+
+func selectBridgeFromHandoff(handoff *SelectExecutionHandoff) (*selectPlanBridge, error) {
 	if handoff == nil || handoff.bridge == nil {
 		return nil, errInvalidSelectPlan
 	}
+	return handoff.bridge, nil
+}
 
-	bridge := handoff.bridge
+func selectWithBridge(bridge *selectPlanBridge, tables map[string]*Table) ([][]parser.Value, error) {
 	sel := bridge.query
 	if sel.tableName == "" {
 		return nil, errUnsupportedStatement
@@ -77,10 +87,10 @@ func SelectCandidateRows(plan *planner.SelectPlan, table *Table, candidateRows [
 // SelectCandidateRowsWithHandoff executes a planned single-table select against
 // caller-supplied candidate rows through the executor-owned handoff.
 func SelectCandidateRowsWithHandoff(handoff *SelectExecutionHandoff, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
-	if handoff == nil || handoff.bridge == nil || table == nil {
+	bridge, err := selectBridgeFromHandoff(handoff)
+	if err != nil || table == nil {
 		return nil, errInvalidSelectPlan
 	}
-	bridge := handoff.bridge
 	if bridge.scanKind == selectScanKindJoin {
 		return nil, errInvalidSelectPlan
 	}
@@ -230,10 +240,11 @@ func ProjectedColumnNames(plan *planner.SelectPlan, table *Table) ([]string, err
 }
 
 func ProjectedColumnNamesWithHandoff(handoff *SelectExecutionHandoff, table *Table) ([]string, error) {
-	if handoff == nil || handoff.bridge == nil || handoff.bridge.query == nil || table == nil {
+	bridge, err := selectBridgeFromHandoff(handoff)
+	if err != nil || table == nil || bridge.query == nil {
 		return nil, errUnsupportedStatement
 	}
-	return projectedColumnNames(handoff.bridge.query, table, validateProjectionExprs, resolveSelectColumnIndex)
+	return projectedColumnNames(bridge.query, table, validateProjectionExprs, resolveSelectColumnIndex)
 }
 
 type selectProjectionExprValidator func(sel *runtimeSelectQuery, table *Table) error

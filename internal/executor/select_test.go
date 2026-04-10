@@ -1238,7 +1238,7 @@ func TestSelectExplicitJoinWithAliases(t *testing.T) {
 	}
 }
 
-func TestProjectedColumnNamesForPlanJoin(t *testing.T) {
+func TestProjectedColumnNamesForHandoffJoin(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {Name: "users", Columns: []parser.ColumnDef{
 			{Name: "id", Type: parser.ColumnTypeInt},
@@ -1258,13 +1258,17 @@ func TestProjectedColumnNamesForPlanJoin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanSelect() error = %v", err)
 	}
-
-	got, err := ProjectedColumnNamesForPlan(plan, tables)
+	handoff, err := NewSelectExecutionHandoff(plan)
 	if err != nil {
-		t.Fatalf("ProjectedColumnNamesForPlan() error = %v", err)
+		t.Fatalf("NewSelectExecutionHandoff() error = %v", err)
+	}
+
+	got, err := ProjectedColumnNamesForHandoff(handoff, tables)
+	if err != nil {
+		t.Fatalf("ProjectedColumnNamesForHandoff() error = %v", err)
 	}
 	if len(got) != 2 || got[0] != "u.id" || got[1] != "d.name" {
-		t.Fatalf("ProjectedColumnNamesForPlan() = %#v, want [u.id d.name]", got)
+		t.Fatalf("ProjectedColumnNamesForHandoff() = %#v, want [u.id d.name]", got)
 	}
 }
 
@@ -1328,7 +1332,7 @@ func TestSelectWithHandoffTableScan(t *testing.T) {
 	}
 }
 
-func TestSelectWithIndexScan(t *testing.T) {
+func TestSelectWithHandoffIndexScan(t *testing.T) {
 	table := &Table{
 		Name:    "users",
 		Columns: typedCols(),
@@ -1339,7 +1343,7 @@ func TestSelectWithIndexScan(t *testing.T) {
 		},
 	}
 
-	rows, err := Select(&planner.SelectPlan{
+	handoff, err := NewSelectExecutionHandoff(&planner.SelectPlan{
 		Query: &planner.SelectQuery{
 			TableName: "users",
 			Columns:   []string{"id"},
@@ -1353,12 +1357,17 @@ func TestSelectWithIndexScan(t *testing.T) {
 			ColumnName:  "name",
 			LookupValue: planner.StringValue("alice"),
 		},
-	}, map[string]*Table{"users": table})
+	})
 	if err != nil {
-		t.Fatalf("Select() error = %v", err)
+		t.Fatalf("NewSelectExecutionHandoff() error = %v", err)
+	}
+
+	rows, err := SelectWithHandoff(handoff, map[string]*Table{"users": table})
+	if err != nil {
+		t.Fatalf("SelectWithHandoff() error = %v", err)
 	}
 	if len(rows) != 2 || rows[0][0] != parser.Int64Value(1) || rows[1][0] != parser.Int64Value(3) {
-		t.Fatalf("Select() rows = %#v, want [[1] [3]]", rows)
+		t.Fatalf("SelectWithHandoff() rows = %#v, want [[1] [3]]", rows)
 	}
 }
 
@@ -1400,6 +1409,46 @@ func TestSelectIndexScanDoesNotRequireRuntimeIndexShell(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0][0] != parser.Int64Value(1) || rows[0][1] != parser.StringValue("alice") {
 		t.Fatalf("Select() rows = %#v, want [[1 alice]]", rows)
+	}
+}
+
+func TestSelectPlanWrapperPreservesHandoffBehavior(t *testing.T) {
+	plan := &planner.SelectPlan{
+		Query: &planner.SelectQuery{
+			TableName: "users",
+			Columns:   []string{"name"},
+			OrderBy:   &planner.OrderByClause{Column: "id"},
+		},
+		ScanType:  planner.ScanTypeTable,
+		TableScan: &planner.TableScan{TableName: "users"},
+	}
+	tables := map[string]*Table{
+		"users": {
+			Name:    "users",
+			Columns: typedCols(),
+			Rows: [][]parser.Value{
+				{parser.Int64Value(1), parser.StringValue("alice")},
+				{parser.Int64Value(2), parser.StringValue("bob")},
+			},
+		},
+	}
+
+	handoff, err := NewSelectExecutionHandoff(plan)
+	if err != nil {
+		t.Fatalf("NewSelectExecutionHandoff() error = %v", err)
+	}
+
+	want, err := SelectWithHandoff(handoff, tables)
+	if err != nil {
+		t.Fatalf("SelectWithHandoff() error = %v", err)
+	}
+
+	got, err := Select(plan, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(got) != len(want) || got[0][0] != want[0][0] || got[1][0] != want[1][0] {
+		t.Fatalf("Select() rows = %#v, want %#v", got, want)
 	}
 }
 

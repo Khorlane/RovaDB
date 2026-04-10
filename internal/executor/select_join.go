@@ -136,10 +136,10 @@ func ProjectedColumnNamesForPlan(plan *planner.SelectPlan, tables map[string]*Ta
 }
 
 func ProjectedColumnNamesForHandoff(handoff *SelectExecutionHandoff, tables map[string]*Table) ([]string, error) {
-	if handoff == nil || handoff.bridge == nil {
-		return nil, errInvalidSelectPlan
+	bridge, err := selectBridgeFromHandoff(handoff)
+	if err != nil {
+		return nil, err
 	}
-	bridge := handoff.bridge
 	if bridge.scanKind != selectScanKindJoin {
 		table, err := bridge.singleTable(tables)
 		if err != nil {
