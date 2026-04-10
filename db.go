@@ -3182,6 +3182,15 @@ func executeDropIndex(stmt *parser.DropIndexStmt, tables map[string]*executor.Ta
 		if indexDef == nil {
 			continue
 		}
+		if ref := firstConstraintUsingIndex(tables, indexDef.IndexID); ref != nil {
+			return 0, nil, newExecError(fmt.Sprintf(
+				"index required by constraint: table=%s index=%s constraint=%s type=%s",
+				ref.tableName,
+				stmt.Name,
+				ref.constraintName,
+				ref.constraintType,
+			))
+		}
 		filtered := make([]storage.CatalogIndex, 0, len(table.IndexDefs)-1)
 		for _, existing := range table.IndexDefs {
 			if existing.Name != stmt.Name {
@@ -3199,11 +3208,75 @@ func executeDropTable(stmt *parser.DropTableStmt, tables map[string]*executor.Ta
 	if stmt == nil {
 		return 0, nil, newExecError("unsupported query form")
 	}
-	if _, ok := tables[stmt.Name]; !ok {
+	table, ok := tables[stmt.Name]
+	if !ok {
 		return 0, nil, newExecError("table not found: " + stmt.Name)
 	}
+	removeForeignKeysReferencingPrimaryKey(tables, table.TableID, "")
 	delete(tables, stmt.Name)
 	return 0, tables, nil
+}
+
+type indexConstraintReference struct {
+	tableName      string
+	constraintName string
+	constraintType string
+}
+
+func firstConstraintUsingIndex(tables map[string]*executor.Table, indexID uint32) *indexConstraintReference {
+	if indexID == 0 {
+		return nil
+	}
+	tableNames := make([]string, 0, len(tables))
+	for name, table := range tables {
+		if table == nil {
+			continue
+		}
+		tableNames = append(tableNames, name)
+	}
+	sort.Strings(tableNames)
+	for _, tableName := range tableNames {
+		table := tables[tableName]
+		if table == nil {
+			continue
+		}
+		if table.PrimaryKeyDef != nil && table.PrimaryKeyDef.IndexID == indexID {
+			return &indexConstraintReference{
+				tableName:      tableName,
+				constraintName: table.PrimaryKeyDef.Name,
+				constraintType: "primary_key",
+			}
+		}
+		for _, fk := range table.ForeignKeyDefs {
+			if fk.ChildIndexID == indexID {
+				return &indexConstraintReference{
+					tableName:      tableName,
+					constraintName: fk.Name,
+					constraintType: "foreign_key",
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func removeForeignKeysReferencingPrimaryKey(tables map[string]*executor.Table, parentTableID uint32, parentPrimaryKeyName string) {
+	if parentTableID == 0 {
+		return
+	}
+	for _, table := range tables {
+		if table == nil || len(table.ForeignKeyDefs) == 0 {
+			continue
+		}
+		filtered := table.ForeignKeyDefs[:0]
+		for _, fk := range table.ForeignKeyDefs {
+			if fk.ParentTableID == parentTableID && (parentPrimaryKeyName == "" || fk.ParentPrimaryKeyName == parentPrimaryKeyName) {
+				continue
+			}
+			filtered = append(filtered, fk)
+		}
+		table.ForeignKeyDefs = filtered
+	}
 }
 
 func droppedIndexRootForName(tables map[string]*executor.Table, indexName string) (string, storage.PageID) {

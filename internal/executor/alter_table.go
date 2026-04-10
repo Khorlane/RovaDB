@@ -1,6 +1,11 @@
 package executor
 
-import "github.com/Khorlane/RovaDB/internal/parser"
+import (
+	"fmt"
+
+	"github.com/Khorlane/RovaDB/internal/parser"
+	"github.com/Khorlane/RovaDB/internal/storage"
+)
 
 func executeAlterTableAddColumn(stmt *parser.AlterTableAddColumnStmt, tables map[string]*Table) (int64, error) {
 	table, ok := tables[stmt.TableName]
@@ -57,18 +62,55 @@ func executeAlterTableDropPrimaryKey(stmt *parser.AlterTableDropPrimaryKeyStmt, 
 	if stmt == nil {
 		return 0, errUnsupportedStatement
 	}
-	if _, ok := tables[stmt.TableName]; !ok {
+	table, ok := tables[stmt.TableName]
+	if !ok {
 		return 0, newTableNotFoundError(stmt.TableName)
 	}
-	return 0, errNotImplemented
+	if table.PrimaryKeyDef == nil {
+		return 0, newExecError(fmt.Sprintf("primary key not found: table=%s", stmt.TableName))
+	}
+
+	parentTableID := table.TableID
+	parentPrimaryKeyName := table.PrimaryKeyDef.Name
+	table.PrimaryKeyDef = nil
+
+	for _, other := range tables {
+		if other == nil || len(other.ForeignKeyDefs) == 0 {
+			continue
+		}
+		filtered := other.ForeignKeyDefs[:0]
+		for _, fk := range other.ForeignKeyDefs {
+			if fk.ParentTableID == parentTableID && fk.ParentPrimaryKeyName == parentPrimaryKeyName {
+				continue
+			}
+			filtered = append(filtered, fk)
+		}
+		other.ForeignKeyDefs = filtered
+	}
+
+	return 0, nil
 }
 
 func executeAlterTableDropForeignKey(stmt *parser.AlterTableDropForeignKeyStmt, tables map[string]*Table) (int64, error) {
 	if stmt == nil {
 		return 0, errUnsupportedStatement
 	}
-	if _, ok := tables[stmt.TableName]; !ok {
+	table, ok := tables[stmt.TableName]
+	if !ok {
 		return 0, newTableNotFoundError(stmt.TableName)
 	}
-	return 0, errNotImplemented
+	filtered := make([]storage.CatalogForeignKey, 0, len(table.ForeignKeyDefs))
+	removed := false
+	for _, fk := range table.ForeignKeyDefs {
+		if fk.Name == stmt.ConstraintName {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, fk)
+	}
+	if !removed {
+		return 0, newExecError(fmt.Sprintf("foreign key not found: table=%s constraint=%s", stmt.TableName, stmt.ConstraintName))
+	}
+	table.ForeignKeyDefs = filtered
+	return 0, nil
 }

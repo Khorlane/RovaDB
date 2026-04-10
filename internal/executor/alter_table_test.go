@@ -54,6 +54,9 @@ func TestExecuteAlterTableAddKeyForms(t *testing.T) {
 			Name:    "teams",
 			TableID: 9,
 			Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+			IndexDefs: []storage.CatalogIndex{
+				{Name: "idx_teams_pk", Unique: true, IndexID: 15, Columns: []storage.CatalogIndexColumn{{Name: "id"}}},
+			},
 			PrimaryKeyDef: &storage.CatalogPrimaryKey{
 				Name:       "pk_teams",
 				TableID:    9,
@@ -107,31 +110,101 @@ func TestExecuteAlterTableAddKeyForms(t *testing.T) {
 			},
 		},
 		{
-			name:  "drop primary key",
-			stmt:  &parser.AlterTableDropPrimaryKeyStmt{TableName: "users"},
-			check: func(t *testing.T, tables map[string]*Table) {},
+			name: "drop primary key",
+			stmt: &parser.AlterTableDropPrimaryKeyStmt{TableName: "users"},
+			check: func(t *testing.T, tables map[string]*Table) {
+				t.Helper()
+				if tables["users"].PrimaryKeyDef != nil {
+					t.Fatalf("users.PrimaryKeyDef = %#v, want nil after drop", tables["users"].PrimaryKeyDef)
+				}
+			},
 		},
 		{
-			name:  "drop foreign key",
-			stmt:  &parser.AlterTableDropForeignKeyStmt{TableName: "users", ConstraintName: "fk_users_team"},
-			check: func(t *testing.T, tables map[string]*Table) {},
+			name: "drop foreign key",
+			stmt: &parser.AlterTableDropForeignKeyStmt{TableName: "users", ConstraintName: "fk_users_team"},
+			check: func(t *testing.T, tables map[string]*Table) {
+				t.Helper()
+				if len(tables["users"].ForeignKeyDefs) != 0 {
+					t.Fatalf("users.ForeignKeyDefs = %#v, want empty after drop", tables["users"].ForeignKeyDefs)
+				}
+			},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Execute(tc.stmt, tables)
-			switch tc.stmt.(type) {
-			case *parser.AlterTableDropPrimaryKeyStmt, *parser.AlterTableDropForeignKeyStmt:
-				if err != errNotImplemented {
-					t.Fatalf("Execute() error = %v, want %v", err, errNotImplemented)
+			execTables := cloneAlterTableTestTables(tables)
+			switch tc.name {
+			case "drop primary key":
+				execTables["users"].PrimaryKeyDef = &storage.CatalogPrimaryKey{
+					Name:       "pk_users",
+					TableID:    7,
+					Columns:    []string{"id"},
+					IndexID:    11,
+					ImplicitNN: true,
 				}
-			default:
-				if err != nil {
-					t.Fatalf("Execute() error = %v, want nil", err)
-				}
-				tc.check(t, tables)
+				execTables["users"].ForeignKeyDefs = nil
+				execTables["teams"].ForeignKeyDefs = []storage.CatalogForeignKey{{
+					Name:                 "fk_teams_parent",
+					ChildTableID:         9,
+					ChildColumns:         []string{"id"},
+					ParentTableID:        7,
+					ParentColumns:        []string{"id"},
+					ParentPrimaryKeyName: "pk_users",
+					ChildIndexID:         15,
+					OnDeleteAction:       storage.CatalogForeignKeyDeleteActionRestrict,
+				}}
+			case "drop foreign key":
+				execTables["users"].PrimaryKeyDef = nil
+				execTables["users"].ForeignKeyDefs = []storage.CatalogForeignKey{{
+					Name:                 "fk_users_team",
+					ChildTableID:         7,
+					ChildColumns:         []string{"team_id"},
+					ParentTableID:        9,
+					ParentColumns:        []string{"id"},
+					ParentPrimaryKeyName: "pk_teams",
+					ChildIndexID:         13,
+					OnDeleteAction:       storage.CatalogForeignKeyDeleteActionCascade,
+				}}
 			}
+			_, err := Execute(tc.stmt, execTables)
+			if err != nil {
+				t.Fatalf("Execute() error = %v, want nil", err)
+			}
+			tc.check(t, execTables)
 		})
 	}
+}
+
+func cloneAlterTableTestTables(src map[string]*Table) map[string]*Table {
+	cloned := make(map[string]*Table, len(src))
+	for name, table := range src {
+		if table == nil {
+			cloned[name] = nil
+			continue
+		}
+		clonedTable := &Table{
+			Name:           table.Name,
+			TableID:        table.TableID,
+			IsSystem:       table.IsSystem,
+			Columns:        append([]parser.ColumnDef(nil), table.Columns...),
+			Rows:           append([][]parser.Value(nil), table.Rows...),
+			IndexDefs:      append([]storage.CatalogIndex(nil), table.IndexDefs...),
+			PrimaryKeyDef:  clonePrimaryKeyDefinition(table.PrimaryKeyDef),
+			ForeignKeyDefs: cloneAlterTableForeignKeyDefs(table.ForeignKeyDefs),
+		}
+		cloned[name] = clonedTable
+	}
+	return cloned
+}
+
+func cloneAlterTableForeignKeyDefs(src []storage.CatalogForeignKey) []storage.CatalogForeignKey {
+	if len(src) == 0 {
+		return nil
+	}
+	cloned := make([]storage.CatalogForeignKey, 0, len(src))
+	for _, fk := range src {
+		cloned = append(cloned, cloneForeignKeyDefinition(fk))
+	}
+	return cloned
 }
