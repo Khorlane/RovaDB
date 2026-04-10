@@ -32,7 +32,7 @@ func (p *createTableTokenParser) parse() (*CreateTableStmt, error) {
 		return nil, newParseError("unsupported query form")
 	}
 
-	columns, err := p.parseColumnDefs()
+	columns, primaryKey, foreignKeys, err := p.parseTableElements()
 	if err != nil {
 		return nil, err
 	}
@@ -45,32 +45,195 @@ func (p *createTableTokenParser) parse() (*CreateTableStmt, error) {
 		return nil, newParseError("unsupported query form")
 	}
 
-	return &CreateTableStmt{Name: nameTok.Lexeme, Columns: columns}, nil
+	return &CreateTableStmt{
+		Name:        nameTok.Lexeme,
+		Columns:     columns,
+		PrimaryKey:  primaryKey,
+		ForeignKeys: foreignKeys,
+	}, nil
 }
 
-func (p *createTableTokenParser) parseColumnDefs() ([]ColumnDef, error) {
+func (p *createTableTokenParser) parseTableElements() ([]ColumnDef, *PrimaryKeyDef, []ForeignKeyDef, error) {
+	if p.current().Kind == tokenRParen {
+		return nil, nil, nil, newParseError("unsupported query form")
+	}
+
+	columns := make([]ColumnDef, 0, 4)
+	var primaryKey *PrimaryKeyDef
+	foreignKeys := make([]ForeignKeyDef, 0, 1)
+	seen := make(map[string]struct{})
+
+	for {
+		if p.current().Kind == tokenKeywordConstraint {
+			p.pos++
+			constraintName, pk, fk, err := p.parseConstraintDef()
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			if constraintName == "" {
+				return nil, nil, nil, newParseError("unsupported query form")
+			}
+			if pk != nil {
+				pk.Name = constraintName
+				primaryKey = pk
+			}
+			if fk != nil {
+				fk.Name = constraintName
+				foreignKeys = append(foreignKeys, *fk)
+			}
+		} else {
+			column, err := p.parseColumnDef()
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			if _, ok := seen[column.Name]; ok {
+				return nil, nil, nil, newParseError("unsupported query form")
+			}
+			seen[column.Name] = struct{}{}
+			columns = append(columns, column)
+		}
+
+		if p.current().Kind != tokenComma {
+			return columns, primaryKey, foreignKeys, nil
+		}
+		p.pos++
+	}
+}
+
+func (p *createTableTokenParser) parseConstraintDef() (string, *PrimaryKeyDef, *ForeignKeyDef, error) {
+	nameTok, err := p.expect(tokenIdentifier)
+	if err != nil || !isIdentifier(nameTok.Lexeme) {
+		return "", nil, nil, newParseError("unsupported query form")
+	}
+
+	switch p.current().Kind {
+	case tokenKeywordPrimary:
+		pk, err := p.parsePrimaryKeyDef()
+		return nameTok.Lexeme, pk, nil, err
+	case tokenKeywordForeign:
+		fk, err := p.parseForeignKeyDef()
+		return nameTok.Lexeme, nil, fk, err
+	default:
+		return "", nil, nil, newParseError("unsupported query form")
+	}
+}
+
+func (p *createTableTokenParser) parsePrimaryKeyDef() (*PrimaryKeyDef, error) {
+	if _, err := p.expect(tokenKeywordPrimary); err != nil {
+		return nil, newParseError("unsupported query form")
+	}
+	if _, err := p.expect(tokenKeywordKey); err != nil {
+		return nil, newParseError("unsupported query form")
+	}
+	columns, err := p.parseIdentifierList()
+	if err != nil {
+		return nil, err
+	}
+	indexName, err := p.parseUsingIndexClause()
+	if err != nil {
+		return nil, err
+	}
+	return &PrimaryKeyDef{
+		Columns:   columns,
+		IndexName: indexName,
+	}, nil
+}
+
+func (p *createTableTokenParser) parseForeignKeyDef() (*ForeignKeyDef, error) {
+	if _, err := p.expect(tokenKeywordForeign); err != nil {
+		return nil, newParseError("unsupported query form")
+	}
+	if _, err := p.expect(tokenKeywordKey); err != nil {
+		return nil, newParseError("unsupported query form")
+	}
+	childColumns, err := p.parseIdentifierList()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tokenKeywordReferences); err != nil {
+		return nil, newParseError("unsupported query form")
+	}
+	parentTok, err := p.expect(tokenIdentifier)
+	if err != nil || !isIdentifier(parentTok.Lexeme) {
+		return nil, newParseError("unsupported query form")
+	}
+	parentColumns, err := p.parseIdentifierList()
+	if err != nil {
+		return nil, err
+	}
+	indexName, err := p.parseUsingIndexClause()
+	if err != nil {
+		return nil, err
+	}
+	onDelete, err := p.parseForeignKeyOnDeleteClause()
+	if err != nil {
+		return nil, err
+	}
+	return &ForeignKeyDef{
+		Columns:       childColumns,
+		ParentTable:   parentTok.Lexeme,
+		ParentColumns: parentColumns,
+		IndexName:     indexName,
+		OnDelete:      onDelete,
+	}, nil
+}
+
+func (p *createTableTokenParser) parseIdentifierList() ([]string, error) {
+	if _, err := p.expect(tokenLParen); err != nil {
+		return nil, newParseError("unsupported query form")
+	}
 	if p.current().Kind == tokenRParen {
 		return nil, newParseError("unsupported query form")
 	}
 
-	columns := make([]ColumnDef, 0, 4)
-	seen := make(map[string]struct{})
-
+	values := make([]string, 0, 2)
 	for {
-		column, err := p.parseColumnDef()
-		if err != nil {
-			return nil, err
-		}
-		if _, ok := seen[column.Name]; ok {
+		nameTok, err := p.expect(tokenIdentifier)
+		if err != nil || !isIdentifier(nameTok.Lexeme) {
 			return nil, newParseError("unsupported query form")
 		}
-		seen[column.Name] = struct{}{}
-		columns = append(columns, column)
-
+		values = append(values, nameTok.Lexeme)
 		if p.current().Kind != tokenComma {
-			return columns, nil
+			break
 		}
 		p.pos++
+	}
+	if _, err := p.expect(tokenRParen); err != nil {
+		return nil, newParseError("unsupported query form")
+	}
+	return values, nil
+}
+
+func (p *createTableTokenParser) parseUsingIndexClause() (string, error) {
+	if _, err := p.expect(tokenKeywordUsing); err != nil {
+		return "", newParseError("unsupported query form")
+	}
+	if _, err := p.expect(tokenKeywordIndex); err != nil {
+		return "", newParseError("unsupported query form")
+	}
+	nameTok, err := p.expect(tokenIdentifier)
+	if err != nil || !isIdentifier(nameTok.Lexeme) {
+		return "", newParseError("unsupported query form")
+	}
+	return nameTok.Lexeme, nil
+}
+
+func (p *createTableTokenParser) parseForeignKeyOnDeleteClause() (ForeignKeyDeleteAction, error) {
+	if _, err := p.expect(tokenKeywordOn); err != nil {
+		return "", newParseError("unsupported query form")
+	}
+	if _, err := p.expect(tokenKeywordDelete); err != nil {
+		return "", newParseError("unsupported query form")
+	}
+	switch p.current().Kind {
+	case tokenKeywordRestrict:
+		p.pos++
+		return ForeignKeyDeleteActionRestrict, nil
+	case tokenKeywordCascade:
+		p.pos++
+		return ForeignKeyDeleteActionCascade, nil
+	default:
+		return "", newParseError("unsupported query form")
 	}
 }
 

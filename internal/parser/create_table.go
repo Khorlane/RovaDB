@@ -54,10 +54,36 @@ type ColumnDef struct {
 	Type string
 }
 
+type ForeignKeyDeleteAction string
+
+const (
+	ForeignKeyDeleteActionRestrict ForeignKeyDeleteAction = "RESTRICT"
+	ForeignKeyDeleteActionCascade  ForeignKeyDeleteAction = "CASCADE"
+)
+
+// PrimaryKeyDef is the parsed named PRIMARY KEY table-constraint shape.
+type PrimaryKeyDef struct {
+	Name      string
+	Columns   []string
+	IndexName string
+}
+
+// ForeignKeyDef is the parsed named FOREIGN KEY table-constraint shape.
+type ForeignKeyDef struct {
+	Name          string
+	Columns       []string
+	ParentTable   string
+	ParentColumns []string
+	IndexName     string
+	OnDelete      ForeignKeyDeleteAction
+}
+
 // CreateTableStmt is the tiny parsed form for CREATE TABLE.
 type CreateTableStmt struct {
-	Name    string
-	Columns []ColumnDef
+	Name        string
+	Columns     []ColumnDef
+	PrimaryKey  *PrimaryKeyDef
+	ForeignKeys []ForeignKeyDef
 }
 
 // Parse dispatches the tiny Stage 1 statement shapes.

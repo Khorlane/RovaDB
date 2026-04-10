@@ -17,7 +17,9 @@ const (
 	tokenKeywordAnd
 	tokenKeywordAs
 	tokenKeywordColumn
+	tokenKeywordConstraint
 	tokenKeywordCreate
+	tokenKeywordCascade
 	tokenKeywordDelete
 	tokenKeywordDrop
 	tokenKeywordCommit
@@ -28,12 +30,18 @@ const (
 	tokenKeywordDesc
 	tokenKeywordInner
 	tokenKeywordJoin
+	tokenKeywordKey
 	tokenKeywordNot
 	tokenKeywordOn
+	tokenKeywordPrimary
+	tokenKeywordForeign
 	tokenKeywordFrom
 	tokenKeywordOr
+	tokenKeywordReferences
+	tokenKeywordRestrict
 	tokenKeywordInsert
 	tokenKeywordInto
+	tokenKeywordUsing
 	tokenKeywordBy
 	tokenKeywordOrder
 	tokenKeywordSelect
@@ -212,8 +220,12 @@ func classifyWord(word string) tokenKind {
 		return tokenKeywordAs
 	case "COLUMN":
 		return tokenKeywordColumn
+	case "CONSTRAINT":
+		return tokenKeywordConstraint
 	case "CREATE":
 		return tokenKeywordCreate
+	case "CASCADE":
+		return tokenKeywordCascade
 	case "DELETE":
 		return tokenKeywordDelete
 	case "DROP":
@@ -234,10 +246,16 @@ func classifyWord(word string) tokenKind {
 		return tokenKeywordInner
 	case "JOIN":
 		return tokenKeywordJoin
+	case "KEY":
+		return tokenKeywordKey
 	case "NOT":
 		return tokenKeywordNot
 	case "ON":
 		return tokenKeywordOn
+	case "PRIMARY":
+		return tokenKeywordPrimary
+	case "FOREIGN":
+		return tokenKeywordForeign
 	case "BY":
 		return tokenKeywordBy
 	case "FROM":
@@ -250,6 +268,10 @@ func classifyWord(word string) tokenKind {
 		return tokenKeywordOrder
 	case "OR":
 		return tokenKeywordOr
+	case "REFERENCES":
+		return tokenKeywordReferences
+	case "RESTRICT":
+		return tokenKeywordRestrict
 	case "SELECT":
 		return tokenKeywordSelect
 	case "SET":
@@ -258,6 +280,8 @@ func classifyWord(word string) tokenKind {
 		return tokenKeywordTable
 	case "UPDATE":
 		return tokenKeywordUpdate
+	case "USING":
+		return tokenKeywordUsing
 	case "VALUES":
 		return tokenKeywordValues
 	case "WHERE":

@@ -67,7 +67,7 @@ func (tx *Tx) Exec(query string, args ...any) (Result, error) {
 	switch stmt := stmt.(type) {
 	case *parser.SelectExpr:
 		return Result{}, ErrExecDisallowsSelect
-	case *parser.CreateTableStmt, *parser.InsertStmt, *parser.AlterTableAddColumnStmt, *parser.UpdateStmt, *parser.DeleteStmt:
+	case *parser.CreateTableStmt, *parser.InsertStmt, *parser.AlterTableAddColumnStmt, *parser.AlterTableAddPrimaryKeyStmt, *parser.AlterTableAddForeignKeyStmt, *parser.AlterTableDropPrimaryKeyStmt, *parser.AlterTableDropForeignKeyStmt, *parser.UpdateStmt, *parser.DeleteStmt:
 		rowsAffected, err := executor.Execute(stmt, tx.tables)
 		if err != nil {
 			return Result{}, err

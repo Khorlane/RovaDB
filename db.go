@@ -445,12 +445,13 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 			return Result{}, err
 		}
 		return Result{rowsAffected: rowsAffected}, nil
-	case *parser.AlterTableAddColumnStmt:
+	case *parser.AlterTableAddColumnStmt, *parser.AlterTableAddPrimaryKeyStmt, *parser.AlterTableAddForeignKeyStmt, *parser.AlterTableDropPrimaryKeyStmt, *parser.AlterTableDropForeignKeyStmt:
+		tableName := alterTableTargetName(stmt)
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table
 		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
-			if err := db.loadRowsIntoTables(stagedTables, stmt.TableName); err != nil {
+			if err := db.loadRowsIntoTables(stagedTables, tableName); err != nil {
 				return err
 			}
 
@@ -661,6 +662,22 @@ func rejectSystemTableMutationTables(tables map[string]*executor.Table, stmt any
 			return newExecError("system tables are read-only")
 		}
 	case *parser.AlterTableAddColumnStmt:
+		if isSystemCatalogTableName(typed.TableName) {
+			return newExecError("system tables are read-only")
+		}
+	case *parser.AlterTableAddPrimaryKeyStmt:
+		if isSystemCatalogTableName(typed.TableName) {
+			return newExecError("system tables are read-only")
+		}
+	case *parser.AlterTableAddForeignKeyStmt:
+		if isSystemCatalogTableName(typed.TableName) {
+			return newExecError("system tables are read-only")
+		}
+	case *parser.AlterTableDropPrimaryKeyStmt:
+		if isSystemCatalogTableName(typed.TableName) {
+			return newExecError("system tables are read-only")
+		}
+	case *parser.AlterTableDropForeignKeyStmt:
 		if isSystemCatalogTableName(typed.TableName) {
 			return newExecError("system tables are read-only")
 		}
@@ -1555,7 +1572,7 @@ func (db *DB) applyStagedCreate(stagedTables map[string]*executor.Table, tableNa
 	}
 	tableHeaderPageData := storage.InitTableHeaderPage(uint32(tableHeaderPageID), table.TableID)
 
-	if err := db.stageSchemaState(stagedTables, []stagedPage{
+	pages := []stagedPage{
 		{
 			id:    rootPageID,
 			data:  rootPageData,
@@ -1566,7 +1583,28 @@ func (db *DB) applyStagedCreate(stagedTables map[string]*executor.Table, tableNa
 			data:  tableHeaderPageData,
 			isNew: true,
 		},
-	}); err != nil {
+	}
+	for i := range table.IndexDefs {
+		indexDef := &table.IndexDefs[i]
+		if indexDef.IndexID == 0 {
+			indexDef.IndexID = nextIndexID(stagedTables)
+		}
+		if indexDef.RootPageID != 0 {
+			continue
+		}
+		indexRootPageID, indexIsNew, err := db.allocatePageIDFrom(&nextFreshID)
+		if err != nil {
+			return err
+		}
+		indexDef.RootPageID = uint32(indexRootPageID)
+		pages = append(pages, stagedPage{
+			id:    indexRootPageID,
+			data:  storage.InitIndexLeafPage(uint32(indexRootPageID)),
+			isNew: indexIsNew,
+		})
+	}
+
+	if err := db.stageSchemaState(stagedTables, pages); err != nil {
 		return err
 	}
 	return nil
@@ -3734,6 +3772,23 @@ func classifyQueryParseError(sql string) error {
 		return newParseError("invalid where clause")
 	}
 	return newParseError("unsupported query form")
+}
+
+func alterTableTargetName(stmt any) string {
+	switch typed := stmt.(type) {
+	case *parser.AlterTableAddColumnStmt:
+		return typed.TableName
+	case *parser.AlterTableAddPrimaryKeyStmt:
+		return typed.TableName
+	case *parser.AlterTableAddForeignKeyStmt:
+		return typed.TableName
+	case *parser.AlterTableDropPrimaryKeyStmt:
+		return typed.TableName
+	case *parser.AlterTableDropForeignKeyStmt:
+		return typed.TableName
+	default:
+		return ""
+	}
 }
 
 func wrapStorageError(err error) error {

@@ -12,6 +12,7 @@ var (
 	errColumnDoesNotExist      = newExecError("column not found")
 	errTypeMismatch            = newExecError("type mismatch")
 	errUnsupportedStatement    = newExecError("unsupported query form")
+	errNotImplemented          = newExecError("not implemented")
 	errCountOrderByUnsupported = newExecError("unsupported query form")
 	errInvalidSelectPlan       = newExecError("invalid select plan")
 )
@@ -115,15 +116,24 @@ func Execute(stmt any, tables map[string]*Table) (int64, error) {
 		if _, exists := tables[s.Name]; exists {
 			return 0, errTableAlreadyExists
 		}
-		tables[s.Name] = &Table{
-			Name:    s.Name,
-			Columns: append([]parser.ColumnDef(nil), s.Columns...),
+		table, err := buildCreateTableDefinition(s, tables)
+		if err != nil {
+			return 0, err
 		}
+		tables[s.Name] = table
 		return 0, nil
 	case *parser.InsertStmt:
 		return executeInsert(s, tables)
 	case *parser.AlterTableAddColumnStmt:
 		return executeAlterTableAddColumn(s, tables)
+	case *parser.AlterTableAddPrimaryKeyStmt:
+		return executeAlterTableAddPrimaryKey(s, tables)
+	case *parser.AlterTableAddForeignKeyStmt:
+		return executeAlterTableAddForeignKey(s, tables)
+	case *parser.AlterTableDropPrimaryKeyStmt:
+		return executeAlterTableDropPrimaryKey(s, tables)
+	case *parser.AlterTableDropForeignKeyStmt:
+		return executeAlterTableDropForeignKey(s, tables)
 	case *parser.DeleteStmt:
 		return executeDelete(s, tables)
 	case *parser.UpdateStmt:
@@ -131,4 +141,69 @@ func Execute(stmt any, tables map[string]*Table) (int64, error) {
 	default:
 		return 0, errUnsupportedStatement
 	}
+}
+
+func buildCreateTableDefinition(stmt *parser.CreateTableStmt, tables map[string]*Table) (*Table, error) {
+	if stmt == nil {
+		return nil, errUnsupportedStatement
+	}
+
+	table := &Table{
+		Name:    stmt.Name,
+		TableID: nextCreateTableID(tables),
+		Columns: append([]parser.ColumnDef(nil), stmt.Columns...),
+	}
+
+	nextIndexID := nextCreateIndexID(tables)
+	if stmt.PrimaryKey != nil {
+		indexDef := storage.CatalogIndex{
+			Name:    stmt.PrimaryKey.IndexName,
+			Unique:  true,
+			IndexID: nextIndexID,
+			Columns: make([]storage.CatalogIndexColumn, 0, len(stmt.PrimaryKey.Columns)),
+		}
+		nextIndexID++
+		for _, column := range stmt.PrimaryKey.Columns {
+			indexDef.Columns = append(indexDef.Columns, storage.CatalogIndexColumn{Name: column})
+		}
+		table.IndexDefs = append(table.IndexDefs, indexDef)
+		table.PrimaryKeyDef = &storage.CatalogPrimaryKey{
+			Name:       stmt.PrimaryKey.Name,
+			TableID:    table.TableID,
+			Columns:    append([]string(nil), stmt.PrimaryKey.Columns...),
+			IndexID:    indexDef.IndexID,
+			ImplicitNN: true,
+		}
+	}
+
+	if len(stmt.ForeignKeys) != 0 {
+		return nil, errNotImplemented
+	}
+
+	return table, nil
+}
+
+func nextCreateTableID(tables map[string]*Table) uint32 {
+	var maxID uint32
+	for _, table := range tables {
+		if table != nil && table.TableID > maxID {
+			maxID = table.TableID
+		}
+	}
+	return maxID + 1
+}
+
+func nextCreateIndexID(tables map[string]*Table) uint32 {
+	var maxID uint32
+	for _, table := range tables {
+		if table == nil {
+			continue
+		}
+		for _, indexDef := range table.IndexDefs {
+			if indexDef.IndexID > maxID {
+				maxID = indexDef.IndexID
+			}
+		}
+	}
+	return maxID + 1
 }

@@ -24,3 +24,43 @@ func executeAlterTableAddColumn(stmt *parser.AlterTableAddColumnStmt, tables map
 
 	return 0, nil
 }
+
+func executeAlterTableAddPrimaryKey(stmt *parser.AlterTableAddPrimaryKeyStmt, tables map[string]*Table) (int64, error) {
+	if stmt == nil {
+		return 0, errUnsupportedStatement
+	}
+	if _, ok := tables[stmt.TableName]; !ok {
+		return 0, newTableNotFoundError(stmt.TableName)
+	}
+	return 0, errNotImplemented
+}
+
+func executeAlterTableAddForeignKey(stmt *parser.AlterTableAddForeignKeyStmt, tables map[string]*Table) (int64, error) {
+	if stmt == nil {
+		return 0, errUnsupportedStatement
+	}
+	if _, ok := tables[stmt.TableName]; !ok {
+		return 0, newTableNotFoundError(stmt.TableName)
+	}
+	return 0, errNotImplemented
+}
+
+func executeAlterTableDropPrimaryKey(stmt *parser.AlterTableDropPrimaryKeyStmt, tables map[string]*Table) (int64, error) {
+	if stmt == nil {
+		return 0, errUnsupportedStatement
+	}
+	if _, ok := tables[stmt.TableName]; !ok {
+		return 0, newTableNotFoundError(stmt.TableName)
+	}
+	return 0, errNotImplemented
+}
+
+func executeAlterTableDropForeignKey(stmt *parser.AlterTableDropForeignKeyStmt, tables map[string]*Table) (int64, error) {
+	if stmt == nil {
+		return 0, errUnsupportedStatement
+	}
+	if _, ok := tables[stmt.TableName]; !ok {
+		return 0, newTableNotFoundError(stmt.TableName)
+	}
+	return 0, errNotImplemented
+}

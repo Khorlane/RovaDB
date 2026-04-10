@@ -46,6 +46,63 @@ func TestParseCreateTableTokens(t *testing.T) {
 	}
 }
 
+func TestParseCreateTableNamedPrimaryKey(t *testing.T) {
+	got, err := parseCreateTableTokens("CREATE TABLE users (id INT, org_id INT, CONSTRAINT pk_users PRIMARY KEY (id, org_id) USING INDEX idx_users_pk)")
+	if err != nil {
+		t.Fatalf("parseCreateTableTokens() error = %v", err)
+	}
+	if got.PrimaryKey == nil {
+		t.Fatal("PrimaryKey = nil, want parsed primary key")
+	}
+	if got.PrimaryKey.Name != "pk_users" || got.PrimaryKey.IndexName != "idx_users_pk" {
+		t.Fatalf("PrimaryKey = %#v, want pk_users using idx_users_pk", got.PrimaryKey)
+	}
+	if len(got.PrimaryKey.Columns) != 2 || got.PrimaryKey.Columns[0] != "id" || got.PrimaryKey.Columns[1] != "org_id" {
+		t.Fatalf("PrimaryKey.Columns = %#v, want [id org_id]", got.PrimaryKey.Columns)
+	}
+}
+
+func TestParseCreateTableNamedForeignKeyRestrictAndCascade(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		onDelete ForeignKeyDeleteAction
+	}{
+		{
+			name:     "restrict",
+			input:    "CREATE TABLE users (id INT, team_id INT, CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES teams (id) USING INDEX idx_users_team ON DELETE RESTRICT)",
+			onDelete: ForeignKeyDeleteActionRestrict,
+		},
+		{
+			name:     "cascade",
+			input:    "CREATE TABLE users (id INT, team_id INT, CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES teams (id) USING INDEX idx_users_team ON DELETE CASCADE)",
+			onDelete: ForeignKeyDeleteActionCascade,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseCreateTableTokens(tc.input)
+			if err != nil {
+				t.Fatalf("parseCreateTableTokens() error = %v", err)
+			}
+			if len(got.ForeignKeys) != 1 {
+				t.Fatalf("len(ForeignKeys) = %d, want 1", len(got.ForeignKeys))
+			}
+			fk := got.ForeignKeys[0]
+			if fk.Name != "fk_users_team" || fk.ParentTable != "teams" || fk.IndexName != "idx_users_team" || fk.OnDelete != tc.onDelete {
+				t.Fatalf("ForeignKeys[0] = %#v, want fk_users_team -> teams using idx_users_team with %s", fk, tc.onDelete)
+			}
+			if len(fk.Columns) != 1 || fk.Columns[0] != "team_id" {
+				t.Fatalf("ForeignKeys[0].Columns = %#v, want [team_id]", fk.Columns)
+			}
+			if len(fk.ParentColumns) != 1 || fk.ParentColumns[0] != "id" {
+				t.Fatalf("ForeignKeys[0].ParentColumns = %#v, want [id]", fk.ParentColumns)
+			}
+		})
+	}
+}
+
 func TestParseCreateTableBool(t *testing.T) {
 	got, err := parseCreateTable("CREATE TABLE t (flag BOOL)")
 	if err != nil {
@@ -166,6 +223,14 @@ func TestParseCreateTableTokensInvalid(t *testing.T) {
 		{name: "empty column list", input: "CREATE TABLE users ()"},
 		{name: "trailing comma", input: "CREATE TABLE users (id INT,)"},
 		{name: "extra trailing tokens", input: "CREATE TABLE users (id INT) extra"},
+		{name: "unnamed primary key", input: "CREATE TABLE users (id INT, PRIMARY KEY (id) USING INDEX idx_users_pk)"},
+		{name: "primary key missing using index", input: "CREATE TABLE users (id INT, CONSTRAINT pk_users PRIMARY KEY (id))"},
+		{name: "foreign key missing using index", input: "CREATE TABLE users (team_id INT, CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES teams (id) ON DELETE RESTRICT)"},
+		{name: "foreign key missing parent columns", input: "CREATE TABLE users (team_id INT, CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES teams USING INDEX idx_users_team ON DELETE RESTRICT)"},
+		{name: "foreign key missing on delete", input: "CREATE TABLE users (team_id INT, CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES teams (id) USING INDEX idx_users_team)"},
+		{name: "foreign key unsupported delete action", input: "CREATE TABLE users (team_id INT, CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES teams (id) USING INDEX idx_users_team ON DELETE SET NULL)"},
+		{name: "inline primary key unsupported", input: "CREATE TABLE users (id INT PRIMARY KEY)"},
+		{name: "inline foreign key unsupported", input: "CREATE TABLE users (team_id INT FOREIGN KEY REFERENCES teams (id))"},
 	}
 
 	for _, tc := range tests {
