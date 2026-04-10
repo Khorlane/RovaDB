@@ -143,46 +143,6 @@ func Execute(stmt any, tables map[string]*Table) (int64, error) {
 	}
 }
 
-func buildCreateTableDefinition(stmt *parser.CreateTableStmt, tables map[string]*Table) (*Table, error) {
-	if stmt == nil {
-		return nil, errUnsupportedStatement
-	}
-
-	table := &Table{
-		Name:    stmt.Name,
-		TableID: nextCreateTableID(tables),
-		Columns: append([]parser.ColumnDef(nil), stmt.Columns...),
-	}
-
-	nextIndexID := nextCreateIndexID(tables)
-	if stmt.PrimaryKey != nil {
-		indexDef := storage.CatalogIndex{
-			Name:    stmt.PrimaryKey.IndexName,
-			Unique:  true,
-			IndexID: nextIndexID,
-			Columns: make([]storage.CatalogIndexColumn, 0, len(stmt.PrimaryKey.Columns)),
-		}
-		nextIndexID++
-		for _, column := range stmt.PrimaryKey.Columns {
-			indexDef.Columns = append(indexDef.Columns, storage.CatalogIndexColumn{Name: column})
-		}
-		table.IndexDefs = append(table.IndexDefs, indexDef)
-		table.PrimaryKeyDef = &storage.CatalogPrimaryKey{
-			Name:       stmt.PrimaryKey.Name,
-			TableID:    table.TableID,
-			Columns:    append([]string(nil), stmt.PrimaryKey.Columns...),
-			IndexID:    indexDef.IndexID,
-			ImplicitNN: true,
-		}
-	}
-
-	if len(stmt.ForeignKeys) != 0 {
-		return nil, errNotImplemented
-	}
-
-	return table, nil
-}
-
 func nextCreateTableID(tables map[string]*Table) uint32 {
 	var maxID uint32
 	for _, table := range tables {

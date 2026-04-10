@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
+	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
 func TestExecuteCreateTable(t *testing.T) {
@@ -83,8 +84,21 @@ func TestExecuteCreateTableNamedPrimaryKeyBuildsConstraintMetadata(t *testing.T)
 	}
 }
 
-func TestExecuteCreateTableNamedForeignKeyNotImplementedYet(t *testing.T) {
-	tables := make(map[string]*Table)
+func TestExecuteCreateTableNamedForeignKeyBuildsConstraintMetadata(t *testing.T) {
+	tables := map[string]*Table{
+		"teams": {
+			Name:    "teams",
+			TableID: 1,
+			Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+			PrimaryKeyDef: &storage.CatalogPrimaryKey{
+				Name:       "pk_teams",
+				TableID:    1,
+				Columns:    []string{"id"},
+				IndexID:    3,
+				ImplicitNN: true,
+			},
+		},
+	}
 
 	_, err := Execute(&parser.CreateTableStmt{
 		Name:    "users",
@@ -98,7 +112,18 @@ func TestExecuteCreateTableNamedForeignKeyNotImplementedYet(t *testing.T) {
 			OnDelete:      parser.ForeignKeyDeleteActionRestrict,
 		}},
 	}, tables)
-	if err != errNotImplemented {
-		t.Fatalf("Execute() error = %v, want %v", err, errNotImplemented)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	got := tables["users"]
+	if got == nil {
+		t.Fatal("users table = nil, want created table")
+	}
+	if len(got.ForeignKeyDefs) != 1 || got.ForeignKeyDefs[0].Name != "fk_users_team" {
+		t.Fatalf("ForeignKeyDefs = %#v, want fk_users_team", got.ForeignKeyDefs)
+	}
+	if len(got.IndexDefs) != 1 || got.IndexDefs[0].Name != "idx_users_team" {
+		t.Fatalf("IndexDefs = %#v, want synthesized idx_users_team", got.IndexDefs)
 	}
 }

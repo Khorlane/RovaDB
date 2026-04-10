@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
+	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
 func TestExecuteAlterTableAddColumn(t *testing.T) {
@@ -38,18 +39,35 @@ func TestExecuteAlterTableAddColumn(t *testing.T) {
 	}
 }
 
-func TestExecuteAlterTableKeyFormsNotImplementedYet(t *testing.T) {
+func TestExecuteAlterTableAddKeyForms(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {
 			Name:    "users",
 			TableID: 7,
 			Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "team_id", Type: parser.ColumnTypeInt}},
+			IndexDefs: []storage.CatalogIndex{
+				{Name: "idx_users_pk", Unique: true, IndexID: 11, Columns: []storage.CatalogIndexColumn{{Name: "id"}}},
+				{Name: "idx_users_team", IndexID: 13, Columns: []storage.CatalogIndexColumn{{Name: "team_id"}}},
+			},
+		},
+		"teams": {
+			Name:    "teams",
+			TableID: 9,
+			Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+			PrimaryKeyDef: &storage.CatalogPrimaryKey{
+				Name:       "pk_teams",
+				TableID:    9,
+				Columns:    []string{"id"},
+				IndexID:    15,
+				ImplicitNN: true,
+			},
 		},
 	}
 
 	tests := []struct {
-		name string
-		stmt any
+		name  string
+		stmt  any
+		check func(t *testing.T, tables map[string]*Table)
 	}{
 		{
 			name: "add primary key",
@@ -60,6 +78,12 @@ func TestExecuteAlterTableKeyFormsNotImplementedYet(t *testing.T) {
 					Columns:   []string{"id"},
 					IndexName: "idx_users_pk",
 				},
+			},
+			check: func(t *testing.T, tables map[string]*Table) {
+				t.Helper()
+				if tables["users"].PrimaryKeyDef == nil || tables["users"].PrimaryKeyDef.Name != "pk_users" {
+					t.Fatalf("users.PrimaryKeyDef = %#v, want pk_users", tables["users"].PrimaryKeyDef)
+				}
 			},
 		},
 		{
@@ -75,22 +99,38 @@ func TestExecuteAlterTableKeyFormsNotImplementedYet(t *testing.T) {
 					OnDelete:      parser.ForeignKeyDeleteActionCascade,
 				},
 			},
+			check: func(t *testing.T, tables map[string]*Table) {
+				t.Helper()
+				if len(tables["users"].ForeignKeyDefs) != 1 || tables["users"].ForeignKeyDefs[0].Name != "fk_users_team" {
+					t.Fatalf("users.ForeignKeyDefs = %#v, want fk_users_team", tables["users"].ForeignKeyDefs)
+				}
+			},
 		},
 		{
-			name: "drop primary key",
-			stmt: &parser.AlterTableDropPrimaryKeyStmt{TableName: "users"},
+			name:  "drop primary key",
+			stmt:  &parser.AlterTableDropPrimaryKeyStmt{TableName: "users"},
+			check: func(t *testing.T, tables map[string]*Table) {},
 		},
 		{
-			name: "drop foreign key",
-			stmt: &parser.AlterTableDropForeignKeyStmt{TableName: "users", ConstraintName: "fk_users_team"},
+			name:  "drop foreign key",
+			stmt:  &parser.AlterTableDropForeignKeyStmt{TableName: "users", ConstraintName: "fk_users_team"},
+			check: func(t *testing.T, tables map[string]*Table) {},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Execute(tc.stmt, tables)
-			if err != errNotImplemented {
-				t.Fatalf("Execute() error = %v, want %v", err, errNotImplemented)
+			switch tc.stmt.(type) {
+			case *parser.AlterTableDropPrimaryKeyStmt, *parser.AlterTableDropForeignKeyStmt:
+				if err != errNotImplemented {
+					t.Fatalf("Execute() error = %v, want %v", err, errNotImplemented)
+				}
+			default:
+				if err != nil {
+					t.Fatalf("Execute() error = %v, want nil", err)
+				}
+				tc.check(t, tables)
 			}
 		})
 	}

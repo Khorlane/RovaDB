@@ -29,20 +29,28 @@ func executeAlterTableAddPrimaryKey(stmt *parser.AlterTableAddPrimaryKeyStmt, ta
 	if stmt == nil {
 		return 0, errUnsupportedStatement
 	}
-	if _, ok := tables[stmt.TableName]; !ok {
+	table, ok := tables[stmt.TableName]
+	if !ok {
 		return 0, newTableNotFoundError(stmt.TableName)
 	}
-	return 0, errNotImplemented
+	if err := applyPrimaryKeyConstraint(table, tables, &stmt.PrimaryKey); err != nil {
+		return 0, err
+	}
+	return 0, nil
 }
 
 func executeAlterTableAddForeignKey(stmt *parser.AlterTableAddForeignKeyStmt, tables map[string]*Table) (int64, error) {
 	if stmt == nil {
 		return 0, errUnsupportedStatement
 	}
-	if _, ok := tables[stmt.TableName]; !ok {
+	table, ok := tables[stmt.TableName]
+	if !ok {
 		return 0, newTableNotFoundError(stmt.TableName)
 	}
-	return 0, errNotImplemented
+	if err := applyForeignKeyConstraint(table, tables, &stmt.ForeignKey); err != nil {
+		return 0, err
+	}
+	return 0, nil
 }
 
 func executeAlterTableDropPrimaryKey(stmt *parser.AlterTableDropPrimaryKeyStmt, tables map[string]*Table) (int64, error) {

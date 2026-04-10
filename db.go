@@ -446,12 +446,11 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		}
 		return Result{rowsAffected: rowsAffected}, nil
 	case *parser.AlterTableAddColumnStmt, *parser.AlterTableAddPrimaryKeyStmt, *parser.AlterTableAddForeignKeyStmt, *parser.AlterTableDropPrimaryKeyStmt, *parser.AlterTableDropForeignKeyStmt:
-		tableName := alterTableTargetName(stmt)
 		var rowsAffected int64
 		var committedTables map[string]*executor.Table
 		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
-			if err := db.loadRowsIntoTables(stagedTables, tableName); err != nil {
+			if err := db.loadRowsIntoTables(stagedTables, alterTableLoadTargets(stagedTables, stmt)...); err != nil {
 				return err
 			}
 
@@ -3789,6 +3788,20 @@ func alterTableTargetName(stmt any) string {
 	default:
 		return ""
 	}
+}
+
+func alterTableLoadTargets(tables map[string]*executor.Table, stmt any) []string {
+	targets := make([]string, 0, 2)
+	if name := alterTableTargetName(stmt); name != "" {
+		targets = append(targets, name)
+	}
+	if typed, ok := stmt.(*parser.AlterTableAddForeignKeyStmt); ok && typed.ForeignKey.ParentTable != "" && typed.ForeignKey.ParentTable != typed.TableName {
+		if tables[typed.ForeignKey.ParentTable] == nil {
+			return targets
+		}
+		targets = append(targets, typed.ForeignKey.ParentTable)
+	}
+	return targets
 }
 
 func wrapStorageError(err error) error {
