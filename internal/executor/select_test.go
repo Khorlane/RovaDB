@@ -1370,3 +1370,152 @@ func TestSelectIndexScanDoesNotRequireRuntimeIndexShell(t *testing.T) {
 		t.Fatalf("Select() rows = %#v, want [[1 alice]]", rows)
 	}
 }
+
+func TestSelectIndexScanBridgeAdaptsPlannerProjectionExpressions(t *testing.T) {
+	table := &Table{
+		Name:    "users",
+		Columns: typedCols(),
+		Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("alice")},
+			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.Int64Value(3), parser.StringValue("alice")},
+		},
+	}
+
+	rows, err := Select(&planner.SelectPlan{
+		Query: &planner.SelectQuery{
+			TableName: "users",
+			ProjectionExprs: []*planner.ValueExpr{{
+				Kind: planner.ValueExprKindBinary,
+				Op:   planner.ValueExprBinaryOpAdd,
+				Left: &planner.ValueExpr{Kind: planner.ValueExprKindColumnRef, Column: "id"},
+				Right: &planner.ValueExpr{
+					Kind:  planner.ValueExprKindLiteral,
+					Value: planner.Int64Value(10),
+				},
+			}},
+			ProjectionLabels: []string{"id + 10"},
+			Predicate: &planner.PredicateExpr{
+				Kind: planner.PredicateKindComparison,
+				Comparison: &planner.Condition{
+					LeftExpr:  &planner.ValueExpr{Kind: planner.ValueExprKindColumnRef, Column: "name"},
+					Operator:  "=",
+					RightExpr: &planner.ValueExpr{Kind: planner.ValueExprKindLiteral, Value: planner.StringValue("alice")},
+				},
+			},
+			OrderBy: &planner.OrderByClause{Column: "id"},
+		},
+		ScanType: planner.ScanTypeIndex,
+		IndexScan: &planner.IndexScan{
+			TableName:   "users",
+			ColumnName:  "name",
+			LookupValue: planner.StringValue("alice"),
+		},
+	}, map[string]*Table{"users": table})
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 2 || rows[0][0] != parser.Int64Value(11) || rows[1][0] != parser.Int64Value(13) {
+		t.Fatalf("Select() rows = %#v, want [[11] [13]]", rows)
+	}
+}
+
+func TestSelectJoinBridgeAdaptsPlannerPredicateAndProjection(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "name", Type: parser.ColumnTypeText},
+			{Name: "dept_id", Type: parser.ColumnTypeInt},
+		}, Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.StringValue("alice"), parser.Int64Value(10)},
+			{parser.Int64Value(2), parser.StringValue("bob"), parser.Int64Value(20)},
+			{parser.Int64Value(3), parser.StringValue("cara"), parser.Int64Value(10)},
+		}},
+		"departments": {Name: "departments", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "name", Type: parser.ColumnTypeText},
+		}, Rows: [][]parser.Value{
+			{parser.Int64Value(10), parser.StringValue("eng")},
+			{parser.Int64Value(20), parser.StringValue("ops")},
+		}},
+	}
+
+	rows, err := Select(&planner.SelectPlan{
+		Query: &planner.SelectQuery{
+			TableName: "users",
+			From:      []planner.TableRef{{Name: "users", Alias: "u"}},
+			Joins: []planner.JoinClause{{
+				Right: planner.TableRef{Name: "departments", Alias: "d"},
+			}},
+			ProjectionExprs: []*planner.ValueExpr{
+				{Kind: planner.ValueExprKindColumnRef, Qualifier: "u", Column: "name"},
+				{Kind: planner.ValueExprKindFunctionCall, FuncName: "UPPER", Arg: &planner.ValueExpr{Kind: planner.ValueExprKindColumnRef, Qualifier: "d", Column: "name"}},
+			},
+			ProjectionLabels: []string{"u.name", "UPPER(d.name)"},
+			Predicate: &planner.PredicateExpr{
+				Kind: planner.PredicateKindComparison,
+				Comparison: &planner.Condition{
+					LeftExpr:  &planner.ValueExpr{Kind: planner.ValueExprKindColumnRef, Qualifier: "d", Column: "name"},
+					Operator:  "=",
+					RightExpr: &planner.ValueExpr{Kind: planner.ValueExprKindLiteral, Value: planner.StringValue("eng")},
+				},
+			},
+			OrderBy: &planner.OrderByClause{Column: "u.id"},
+		},
+		ScanType: planner.ScanTypeJoin,
+		JoinScan: &planner.JoinScan{
+			LeftTableName:   "users",
+			LeftTableAlias:  "u",
+			LeftColumnName:  "dept_id",
+			RightTableName:  "departments",
+			RightTableAlias: "d",
+			RightColumnName: "id",
+		},
+	}, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 2 || rows[0][0] != parser.StringValue("alice") || rows[0][1] != parser.StringValue("ENG") || rows[1][0] != parser.StringValue("cara") || rows[1][1] != parser.StringValue("ENG") {
+		t.Fatalf("Select() rows = %#v, want [[alice ENG] [cara ENG]]", rows)
+	}
+}
+
+func TestSelectAggregateBridgeAdaptsPlannerAggregateExpr(t *testing.T) {
+	tables := map[string]*Table{
+		"metrics": {Name: "metrics", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "score", Type: parser.ColumnTypeReal},
+		}, Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.RealValue(1.5)},
+			{parser.Int64Value(2), parser.RealValue(2.5)},
+			{parser.Int64Value(3), parser.RealValue(3.0)},
+		}},
+	}
+
+	rows, err := Select(&planner.SelectPlan{
+		Query: &planner.SelectQuery{
+			TableName: "metrics",
+			ProjectionExprs: []*planner.ValueExpr{
+				{Kind: planner.ValueExprKindAggregateCall, FuncName: "AVG", Arg: &planner.ValueExpr{Kind: planner.ValueExprKindColumnRef, Column: "score"}},
+				{Kind: planner.ValueExprKindAggregateCall, FuncName: "MAX", Arg: &planner.ValueExpr{Kind: planner.ValueExprKindColumnRef, Column: "score"}},
+			},
+			ProjectionLabels: []string{"AVG(score)", "MAX(score)"},
+			Predicate: &planner.PredicateExpr{
+				Kind: planner.PredicateKindComparison,
+				Comparison: &planner.Condition{
+					LeftExpr:  &planner.ValueExpr{Kind: planner.ValueExprKindColumnRef, Column: "id"},
+					Operator:  ">",
+					RightExpr: &planner.ValueExpr{Kind: planner.ValueExprKindLiteral, Value: planner.Int64Value(1)},
+				},
+			},
+		},
+		ScanType:  planner.ScanTypeTable,
+		TableScan: &planner.TableScan{TableName: "metrics"},
+	}, tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 1 || len(rows[0]) != 2 || rows[0][0] != parser.RealValue((2.5+3.0)/2.0) || rows[0][1] != parser.RealValue(3.0) {
+		t.Fatalf("Select() rows = %#v, want [[2.75 3.0]]", rows)
+	}
+}

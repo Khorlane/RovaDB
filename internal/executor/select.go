@@ -18,10 +18,10 @@ func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Valu
 	}
 
 	sel := bridge.query
-	if sel.TableName == "" {
+	if sel.tableName == "" {
 		return nil, errUnsupportedStatement
 	}
-	if len(sel.From) > 1 && bridge.scanType != planner.ScanTypeJoin {
+	if len(sel.from) > 1 && bridge.scanType != planner.ScanTypeJoin {
 		return nil, errUnsupportedStatement
 	}
 
@@ -69,15 +69,15 @@ func SelectCandidateRows(plan *planner.SelectPlan, table *Table, candidateRows [
 	return executeSelectRows(bridge.query, table, candidateRows)
 }
 
-func executeSelectRows(sel *planner.SelectQuery, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
+func executeSelectRows(sel *runtimeSelectQuery, table *Table, candidateRows [][]parser.Value) ([][]parser.Value, error) {
 	if err := validateSelectFilterColumns(sel, table); err != nil {
 		return nil, err
 	}
 	if err := validateProjectionExprs(sel, table); err != nil {
 		return nil, err
 	}
-	if sel.IsCountStar {
-		if len(sel.OrderBys) > 0 || sel.OrderBy != nil {
+	if sel.isCountStar {
+		if len(sel.orderBys) > 0 || sel.orderBy != nil {
 			return nil, errCountOrderByUnsupported
 		}
 		// COUNT(*) is reduced directly from matching base rows rather than flowing
@@ -130,14 +130,14 @@ func executeSelectRows(sel *planner.SelectQuery, table *Table, candidateRows [][
 	return rows, nil
 }
 
-func hasAggregateProjection(sel *planner.SelectQuery) bool {
+func hasAggregateProjection(sel *runtimeSelectQuery) bool {
 	if sel == nil {
 		return false
 	}
-	if sel.IsCountStar {
+	if sel.isCountStar {
 		return true
 	}
-	for _, expr := range sel.ProjectionExprs {
+	for _, expr := range sel.projectionExprs {
 		if isAggregateExpr(expr) {
 			return true
 		}
@@ -145,22 +145,22 @@ func hasAggregateProjection(sel *planner.SelectQuery) bool {
 	return false
 }
 
-func validateAggregateProjectionShape(sel *planner.SelectQuery) error {
+func validateAggregateProjectionShape(sel *runtimeSelectQuery) error {
 	if sel == nil {
 		return nil
 	}
 	// Current aggregate support is intentionally narrow: aggregate projections
 	// stand alone and do not combine with ORDER BY or mixed projection shapes.
-	if len(sel.OrderBys) > 0 || sel.OrderBy != nil {
+	if len(sel.orderBys) > 0 || sel.orderBy != nil {
 		return errUnsupportedStatement
 	}
-	if sel.IsCountStar {
+	if sel.isCountStar {
 		return nil
 	}
-	if len(sel.ProjectionExprs) == 0 {
+	if len(sel.projectionExprs) == 0 {
 		return errUnsupportedStatement
 	}
-	for _, expr := range sel.ProjectionExprs {
+	for _, expr := range sel.projectionExprs {
 		if !isAggregateExpr(expr) {
 			return errUnsupportedStatement
 		}
@@ -168,20 +168,20 @@ func validateAggregateProjectionShape(sel *planner.SelectQuery) error {
 	return nil
 }
 
-func executeAggregateSelectRows(sel *planner.SelectQuery, table *Table, rows [][]parser.Value) ([][]parser.Value, error) {
+func executeAggregateSelectRows(sel *runtimeSelectQuery, table *Table, rows [][]parser.Value) ([][]parser.Value, error) {
 	if err := validateAggregateProjectionShape(sel); err != nil {
 		return nil, err
 	}
-	if sel.IsCountStar {
+	if sel.isCountStar {
 		value, err := publicIntResult(int64(len(rows)))
 		if err != nil {
 			return nil, err
 		}
 		return [][]parser.Value{{value}}, nil
 	}
-	out := make([]parser.Value, 0, len(sel.ProjectionExprs))
-	for _, expr := range sel.ProjectionExprs {
-		value, err := evalAggregateExprRows(expr, rows, func(row []parser.Value, expr *planner.ValueExpr) (parser.Value, error) {
+	out := make([]parser.Value, 0, len(sel.projectionExprs))
+	for _, expr := range sel.projectionExprs {
+		value, err := evalAggregateExprRows(expr, rows, func(row []parser.Value, expr *runtimeValueExpr) (parser.Value, error) {
 			return evalSelectValueExpr(row, sel, table, expr)
 		})
 		if err != nil {
@@ -201,39 +201,39 @@ func ProjectedColumnNames(plan *planner.SelectPlan, table *Table) ([]string, err
 	if plan == nil || plan.Query == nil || table == nil {
 		return nil, errUnsupportedStatement
 	}
-	return projectedColumnNames(plan.Query, table, validateProjectionExprs, resolveSelectColumnIndex)
+	return projectedColumnNames(runtimeSelectQueryFromPlan(plan.Query), table, validateProjectionExprs, resolveSelectColumnIndex)
 }
 
-type selectProjectionExprValidator func(sel *planner.SelectQuery, table *Table) error
-type selectProjectionColumnResolver func(sel *planner.SelectQuery, name string, table *Table) (int, error)
+type selectProjectionExprValidator func(sel *runtimeSelectQuery, table *Table) error
+type selectProjectionColumnResolver func(sel *runtimeSelectQuery, name string, table *Table) (int, error)
 
-func projectedColumnNames(sel *planner.SelectQuery, table *Table, validateExprs selectProjectionExprValidator, resolveColumn selectProjectionColumnResolver) ([]string, error) {
-	if sel.IsCountStar {
+func projectedColumnNames(sel *runtimeSelectQuery, table *Table, validateExprs selectProjectionExprValidator, resolveColumn selectProjectionColumnResolver) ([]string, error) {
+	if sel.isCountStar {
 		return []string{"count"}, nil
 	}
-	if len(sel.ProjectionExprs) > 0 {
+	if len(sel.projectionExprs) > 0 {
 		if err := validateExprs(sel, table); err != nil {
 			return nil, err
 		}
-		names := make([]string, 0, len(sel.ProjectionExprs))
-		for i, expr := range sel.ProjectionExprs {
+		names := make([]string, 0, len(sel.projectionExprs))
+		for i, expr := range sel.projectionExprs {
 			if alias := projectionAliasAt(sel, i); alias != "" {
 				names = append(names, alias)
 				continue
 			}
-			if i < len(sel.ProjectionLabels) && sel.ProjectionLabels[i] != "" {
-				names = append(names, sel.ProjectionLabels[i])
+			if i < len(sel.projectionLabels) && sel.projectionLabels[i] != "" {
+				names = append(names, sel.projectionLabels[i])
 				continue
 			}
-			if expr != nil && expr.Kind == planner.ValueExprKindColumnRef {
-				names = append(names, expr.Column)
+			if expr != nil && expr.kind == runtimeValueExprKindColumnRef {
+				names = append(names, expr.column)
 			} else {
 				names = append(names, "expr")
 			}
 		}
 		return names, nil
 	}
-	if len(sel.Columns) == 0 {
+	if len(sel.columns) == 0 {
 		names := make([]string, 0, len(table.Columns))
 		for _, column := range table.Columns {
 			names = append(names, column.Name)
@@ -241,8 +241,8 @@ func projectedColumnNames(sel *planner.SelectQuery, table *Table, validateExprs 
 		return names, nil
 	}
 
-	names := make([]string, 0, len(sel.Columns))
-	for _, name := range sel.Columns {
+	names := make([]string, 0, len(sel.columns))
+	for _, name := range sel.columns {
 		if _, err := resolveColumn(sel, name, table); err != nil {
 			return nil, err
 		}
@@ -251,10 +251,10 @@ func projectedColumnNames(sel *planner.SelectQuery, table *Table, validateExprs 
 	return names, nil
 }
 
-func projectRow(sel *planner.SelectQuery, table *Table, row []parser.Value) ([]parser.Value, error) {
-	if len(sel.ProjectionExprs) > 0 {
-		out := make([]parser.Value, 0, len(sel.ProjectionExprs))
-		for _, expr := range sel.ProjectionExprs {
+func projectRow(sel *runtimeSelectQuery, table *Table, row []parser.Value) ([]parser.Value, error) {
+	if len(sel.projectionExprs) > 0 {
+		out := make([]parser.Value, 0, len(sel.projectionExprs))
+		for _, expr := range sel.projectionExprs {
 			value, err := evalSelectValueExpr(row, sel, table, expr)
 			if err != nil {
 				return nil, err
@@ -275,18 +275,18 @@ func projectRow(sel *planner.SelectQuery, table *Table, row []parser.Value) ([]p
 	return out, nil
 }
 
-func validateProjectionExprs(sel *planner.SelectQuery, table *Table) error {
+func validateProjectionExprs(sel *runtimeSelectQuery, table *Table) error {
 	if sel == nil {
 		return nil
 	}
-	if len(sel.ProjectionExprs) == 0 {
-		if len(sel.Columns) == 0 {
+	if len(sel.projectionExprs) == 0 {
+		if len(sel.columns) == 0 {
 			return nil
 		}
 		_, err := resolveSelectColumns(sel, table)
 		return err
 	}
-	for _, expr := range sel.ProjectionExprs {
+	for _, expr := range sel.projectionExprs {
 		if err := validateSelectValueExprColumns(sel, expr, table); err != nil {
 			return err
 		}
@@ -294,8 +294,8 @@ func validateProjectionExprs(sel *planner.SelectQuery, table *Table) error {
 	return nil
 }
 
-func resolveSelectColumns(sel *planner.SelectQuery, table *Table) ([]int, error) {
-	if len(sel.Columns) == 0 {
+func resolveSelectColumns(sel *runtimeSelectQuery, table *Table) ([]int, error) {
+	if len(sel.columns) == 0 {
 		indexes := make([]int, 0, len(table.Columns))
 		for i := range table.Columns {
 			indexes = append(indexes, i)
@@ -303,8 +303,8 @@ func resolveSelectColumns(sel *planner.SelectQuery, table *Table) ([]int, error)
 		return indexes, nil
 	}
 
-	indexes := make([]int, 0, len(sel.Columns))
-	for _, name := range sel.Columns {
+	indexes := make([]int, 0, len(sel.columns))
+	for _, name := range sel.columns {
 		idx, err := resolveSelectColumnIndex(sel, name, table)
 		if err != nil {
 			return nil, err
@@ -343,7 +343,7 @@ func normalizeQualifiedColumnName(name string, table *Table) (string, error) {
 	return parts[1], nil
 }
 
-func resolveSelectColumnIndex(sel *planner.SelectQuery, name string, table *Table) (int, error) {
+func resolveSelectColumnIndex(sel *runtimeSelectQuery, name string, table *Table) (int, error) {
 	baseName, err := normalizeSelectQualifiedColumnName(sel, name, table)
 	if err != nil {
 		return -1, err
@@ -356,7 +356,7 @@ func resolveSelectColumnIndex(sel *planner.SelectQuery, name string, table *Tabl
 	return -1, newColumnNotFoundError(name)
 }
 
-func normalizeSelectQualifiedColumnName(sel *planner.SelectQuery, name string, table *Table) (string, error) {
+func normalizeSelectQualifiedColumnName(sel *runtimeSelectQuery, name string, table *Table) (string, error) {
 	if !strings.Contains(name, ".") {
 		return name, nil
 	}
@@ -367,14 +367,14 @@ func normalizeSelectQualifiedColumnName(sel *planner.SelectQuery, name string, t
 	if table == nil {
 		return "", newColumnNotFoundError(name)
 	}
-	tableRef := sel.PrimaryTableRef()
+	tableRef := sel.primaryTableRef()
 	if tableRef == nil {
 		if parts[0] != table.Name {
 			return "", newColumnNotFoundError(name)
 		}
 		return parts[1], nil
 	}
-	if parts[0] != tableRef.Name && (tableRef.Alias == "" || parts[0] != tableRef.Alias) {
+	if parts[0] != tableRef.name && (tableRef.alias == "" || parts[0] != tableRef.alias) {
 		return "", newColumnNotFoundError(name)
 	}
 	return parts[1], nil
@@ -418,12 +418,12 @@ func evalFilter(row []parser.Value, table *Table, predicate *parser.PredicateExp
 	return evalWhere(row, table, where)
 }
 
-func evalSelectFilter(row []parser.Value, sel *planner.SelectQuery, table *Table) (bool, error) {
-	if sel != nil && sel.Predicate != nil {
-		return evalSelectPredicate(row, sel, table, sel.Predicate)
+func evalSelectFilter(row []parser.Value, sel *runtimeSelectQuery, table *Table) (bool, error) {
+	if sel != nil && sel.predicate != nil {
+		return evalSelectPredicate(row, sel, table, sel.predicate)
 	}
 	if sel != nil {
-		return evalSelectWhere(row, sel, table, sel.Where)
+		return evalSelectWhere(row, sel, table, sel.where)
 	}
 	return true, nil
 }
@@ -468,37 +468,37 @@ func evalPredicate(row []parser.Value, table *Table, predicate *parser.Predicate
 	}
 }
 
-func evalSelectPredicate(row []parser.Value, sel *planner.SelectQuery, table *Table, predicate *planner.PredicateExpr) (bool, error) {
+func evalSelectPredicate(row []parser.Value, sel *runtimeSelectQuery, table *Table, predicate *runtimePredicateExpr) (bool, error) {
 	if predicate == nil {
 		return true, nil
 	}
 
-	switch predicate.Kind {
-	case planner.PredicateKindComparison:
-		if predicate.Comparison == nil {
+	switch predicate.kind {
+	case runtimePredicateKindComparison:
+		if predicate.comparison == nil {
 			return false, errUnsupportedStatement
 		}
-		return evalSelectWhereCondition(row, sel, table, *predicate.Comparison)
-	case planner.PredicateKindAnd:
-		left, err := evalSelectPredicate(row, sel, table, predicate.Left)
+		return evalSelectWhereCondition(row, sel, table, *predicate.comparison)
+	case runtimePredicateKindAnd:
+		left, err := evalSelectPredicate(row, sel, table, predicate.left)
 		if err != nil {
 			return false, err
 		}
 		if !left {
 			return false, nil
 		}
-		return evalSelectPredicate(row, sel, table, predicate.Right)
-	case planner.PredicateKindOr:
-		left, err := evalSelectPredicate(row, sel, table, predicate.Left)
+		return evalSelectPredicate(row, sel, table, predicate.right)
+	case runtimePredicateKindOr:
+		left, err := evalSelectPredicate(row, sel, table, predicate.left)
 		if err != nil {
 			return false, err
 		}
 		if left {
 			return true, nil
 		}
-		return evalSelectPredicate(row, sel, table, predicate.Right)
-	case planner.PredicateKindNot:
-		inner, err := evalSelectPredicate(row, sel, table, predicate.Inner)
+		return evalSelectPredicate(row, sel, table, predicate.right)
+	case runtimePredicateKindNot:
+		inner, err := evalSelectPredicate(row, sel, table, predicate.inner)
 		if err != nil {
 			return false, err
 		}
@@ -537,28 +537,28 @@ func evalWhereCondition(row []parser.Value, table *Table, cond parser.Condition)
 	return compareValues(cond.Operator, row[idx], cond.Right)
 }
 
-func evalSelectWhere(row []parser.Value, sel *planner.SelectQuery, table *Table, where *planner.WhereClause) (bool, error) {
+func evalSelectWhere(row []parser.Value, sel *runtimeSelectQuery, table *Table, where *runtimeWhereClause) (bool, error) {
 	if where == nil {
 		return true, nil
 	}
-	if len(where.Items) == 0 {
+	if len(where.items) == 0 {
 		return true, nil
 	}
 
-	current, err := evalSelectWhereCondition(row, sel, table, where.Items[0].Condition)
+	current, err := evalSelectWhereCondition(row, sel, table, where.items[0].condition)
 	if err != nil {
 		return false, err
 	}
 
-	for _, item := range where.Items[1:] {
-		next, err := evalSelectWhereCondition(row, sel, table, item.Condition)
+	for _, item := range where.items[1:] {
+		next, err := evalSelectWhereCondition(row, sel, table, item.condition)
 		if err != nil {
 			return false, err
 		}
-		switch item.Op {
-		case planner.BooleanOpAnd:
+		switch item.op {
+		case runtimeBooleanOpAnd:
 			current = current && next
-		case planner.BooleanOpOr:
+		case runtimeBooleanOpOr:
 			current = current || next
 		default:
 			return false, errUnsupportedStatement
@@ -568,33 +568,33 @@ func evalSelectWhere(row []parser.Value, sel *planner.SelectQuery, table *Table,
 	return current, nil
 }
 
-func evalSelectWhereCondition(row []parser.Value, sel *planner.SelectQuery, table *Table, cond planner.Condition) (bool, error) {
-	if cond.LeftExpr != nil && cond.RightExpr != nil {
-		left, err := evalSelectValueExpr(row, sel, table, cond.LeftExpr)
+func evalSelectWhereCondition(row []parser.Value, sel *runtimeSelectQuery, table *Table, cond runtimeCondition) (bool, error) {
+	if cond.leftExpr != nil && cond.rightExpr != nil {
+		left, err := evalSelectValueExpr(row, sel, table, cond.leftExpr)
 		if err != nil {
 			return false, err
 		}
-		right, err := evalSelectValueExpr(row, sel, table, cond.RightExpr)
+		right, err := evalSelectValueExpr(row, sel, table, cond.rightExpr)
 		if err != nil {
 			return false, err
 		}
-		return compareValues(cond.Operator, left, right)
+		return compareValues(cond.operator, left, right)
 	}
 
-	idx, err := resolveSelectColumnIndex(sel, cond.Left, table)
+	idx, err := resolveSelectColumnIndex(sel, cond.left, table)
 	if err != nil {
 		return false, err
 	}
 
-	if cond.RightRef != "" {
-		rightIdx, err := resolveSelectColumnIndex(sel, cond.RightRef, table)
+	if cond.rightRef != "" {
+		rightIdx, err := resolveSelectColumnIndex(sel, cond.rightRef, table)
 		if err != nil {
 			return false, err
 		}
-		return compareValues(cond.Operator, row[idx], row[rightIdx])
+		return compareValues(cond.operator, row[idx], row[rightIdx])
 	}
 
-	return compareValues(cond.Operator, row[idx], parserValueFromPlan(cond.Right))
+	return compareValues(cond.operator, row[idx], cond.right)
 }
 
 func validateWhereColumns(where *parser.WhereClause, table *Table) error {
@@ -632,12 +632,12 @@ func validateFilterColumns(predicate *parser.PredicateExpr, where *parser.WhereC
 	return validateWhereColumns(where, table)
 }
 
-func validateSelectFilterColumns(sel *planner.SelectQuery, table *Table) error {
-	if sel != nil && sel.Predicate != nil {
-		return validateSelectPredicateColumns(sel, sel.Predicate, table)
+func validateSelectFilterColumns(sel *runtimeSelectQuery, table *Table) error {
+	if sel != nil && sel.predicate != nil {
+		return validateSelectPredicateColumns(sel, sel.predicate, table)
 	}
 	if sel != nil {
-		return validateSelectWhereColumns(sel, sel.Where, table)
+		return validateSelectWhereColumns(sel, sel.where, table)
 	}
 	return nil
 }
@@ -678,61 +678,61 @@ func validatePredicateColumns(predicate *parser.PredicateExpr, table *Table) err
 	}
 }
 
-func validateSelectPredicateColumns(sel *planner.SelectQuery, predicate *planner.PredicateExpr, table *Table) error {
+func validateSelectPredicateColumns(sel *runtimeSelectQuery, predicate *runtimePredicateExpr, table *Table) error {
 	if predicate == nil {
 		return nil
 	}
 
-	switch predicate.Kind {
-	case planner.PredicateKindComparison:
-		if predicate.Comparison == nil {
+	switch predicate.kind {
+	case runtimePredicateKindComparison:
+		if predicate.comparison == nil {
 			return errUnsupportedStatement
 		}
-		if predicate.Comparison.LeftExpr != nil && predicate.Comparison.RightExpr != nil {
-			if err := validateSelectValueExprColumns(sel, predicate.Comparison.LeftExpr, table); err != nil {
+		if predicate.comparison.leftExpr != nil && predicate.comparison.rightExpr != nil {
+			if err := validateSelectValueExprColumns(sel, predicate.comparison.leftExpr, table); err != nil {
 				return err
 			}
-			return validateSelectValueExprColumns(sel, predicate.Comparison.RightExpr, table)
+			return validateSelectValueExprColumns(sel, predicate.comparison.rightExpr, table)
 		}
-		_, err := resolveSelectColumnIndex(sel, predicate.Comparison.Left, table)
+		_, err := resolveSelectColumnIndex(sel, predicate.comparison.left, table)
 		if err != nil {
 			return err
 		}
-		if predicate.Comparison.RightRef != "" {
-			_, err = resolveSelectColumnIndex(sel, predicate.Comparison.RightRef, table)
+		if predicate.comparison.rightRef != "" {
+			_, err = resolveSelectColumnIndex(sel, predicate.comparison.rightRef, table)
 		}
 		return err
-	case planner.PredicateKindAnd, planner.PredicateKindOr:
-		if err := validateSelectPredicateColumns(sel, predicate.Left, table); err != nil {
+	case runtimePredicateKindAnd, runtimePredicateKindOr:
+		if err := validateSelectPredicateColumns(sel, predicate.left, table); err != nil {
 			return err
 		}
-		return validateSelectPredicateColumns(sel, predicate.Right, table)
-	case planner.PredicateKindNot:
-		return validateSelectPredicateColumns(sel, predicate.Inner, table)
+		return validateSelectPredicateColumns(sel, predicate.right, table)
+	case runtimePredicateKindNot:
+		return validateSelectPredicateColumns(sel, predicate.inner, table)
 	default:
 		return errUnsupportedStatement
 	}
 }
 
-func validateSelectWhereColumns(sel *planner.SelectQuery, where *planner.WhereClause, table *Table) error {
+func validateSelectWhereColumns(sel *runtimeSelectQuery, where *runtimeWhereClause, table *Table) error {
 	if where == nil {
 		return nil
 	}
-	for _, item := range where.Items {
-		if item.Condition.LeftExpr != nil && item.Condition.RightExpr != nil {
-			if err := validateSelectValueExprColumns(sel, item.Condition.LeftExpr, table); err != nil {
+	for _, item := range where.items {
+		if item.condition.leftExpr != nil && item.condition.rightExpr != nil {
+			if err := validateSelectValueExprColumns(sel, item.condition.leftExpr, table); err != nil {
 				return err
 			}
-			if err := validateSelectValueExprColumns(sel, item.Condition.RightExpr, table); err != nil {
+			if err := validateSelectValueExprColumns(sel, item.condition.rightExpr, table); err != nil {
 				return err
 			}
 			continue
 		}
-		if _, err := resolveSelectColumnIndex(sel, item.Condition.Left, table); err != nil {
+		if _, err := resolveSelectColumnIndex(sel, item.condition.left, table); err != nil {
 			return err
 		}
-		if item.Condition.RightRef != "" {
-			if _, err := resolveSelectColumnIndex(sel, item.Condition.RightRef, table); err != nil {
+		if item.condition.rightRef != "" {
+			if _, err := resolveSelectColumnIndex(sel, item.condition.rightRef, table); err != nil {
 				return err
 			}
 		}
@@ -781,42 +781,42 @@ func evalValueExpr(row []parser.Value, table *Table, expr *parser.ValueExpr) (pa
 	}
 }
 
-func evalSelectValueExpr(row []parser.Value, sel *planner.SelectQuery, table *Table, expr *planner.ValueExpr) (parser.Value, error) {
+func evalSelectValueExpr(row []parser.Value, sel *runtimeSelectQuery, table *Table, expr *runtimeValueExpr) (parser.Value, error) {
 	if expr == nil {
 		return parser.Value{}, errUnsupportedStatement
 	}
 
-	switch expr.Kind {
-	case planner.ValueExprKindLiteral:
-		return parserValueFromPlan(expr.Value), nil
-	case planner.ValueExprKindColumnRef:
-		name := expr.Column
-		if expr.Qualifier != "" {
-			name = expr.Qualifier + "." + expr.Column
+	switch expr.kind {
+	case runtimeValueExprKindLiteral:
+		return expr.value, nil
+	case runtimeValueExprKindColumnRef:
+		name := expr.column
+		if expr.qualifier != "" {
+			name = expr.qualifier + "." + expr.column
 		}
 		idx, err := resolveSelectColumnIndex(sel, name, table)
 		if err != nil {
 			return parser.Value{}, err
 		}
 		return row[idx], nil
-	case planner.ValueExprKindParen:
-		return evalSelectValueExpr(row, sel, table, expr.Inner)
-	case planner.ValueExprKindBinary:
-		left, err := evalSelectValueExpr(row, sel, table, expr.Left)
+	case runtimeValueExprKindParen:
+		return evalSelectValueExpr(row, sel, table, expr.inner)
+	case runtimeValueExprKindBinary:
+		left, err := evalSelectValueExpr(row, sel, table, expr.left)
 		if err != nil {
 			return parser.Value{}, err
 		}
-		right, err := evalSelectValueExpr(row, sel, table, expr.Right)
+		right, err := evalSelectValueExpr(row, sel, table, expr.right)
 		if err != nil {
 			return parser.Value{}, err
 		}
-		return evalBinaryValueExpr(int(expr.Op), left, right)
-	case planner.ValueExprKindFunctionCall:
-		arg, err := evalSelectValueExpr(row, sel, table, expr.Arg)
+		return evalBinaryValueExpr(int(expr.op), left, right)
+	case runtimeValueExprKindFunctionCall:
+		arg, err := evalSelectValueExpr(row, sel, table, expr.arg)
 		if err != nil {
 			return parser.Value{}, err
 		}
-		return evalScalarFunction(expr.FuncName, arg)
+		return evalScalarFunction(expr.funcName, arg)
 	default:
 		return parser.Value{}, errUnsupportedStatement
 	}
@@ -851,67 +851,67 @@ func validateValueExprColumns(expr *parser.ValueExpr, table *Table) error {
 	}
 }
 
-func validateSelectValueExprColumns(sel *planner.SelectQuery, expr *planner.ValueExpr, table *Table) error {
+func validateSelectValueExprColumns(sel *runtimeSelectQuery, expr *runtimeValueExpr, table *Table) error {
 	if expr == nil {
 		return nil
 	}
-	switch expr.Kind {
-	case planner.ValueExprKindLiteral:
+	switch expr.kind {
+	case runtimeValueExprKindLiteral:
 		return nil
-	case planner.ValueExprKindColumnRef:
-		name := expr.Column
-		if expr.Qualifier != "" {
-			name = expr.Qualifier + "." + expr.Column
+	case runtimeValueExprKindColumnRef:
+		name := expr.column
+		if expr.qualifier != "" {
+			name = expr.qualifier + "." + expr.column
 		}
 		_, err := resolveSelectColumnIndex(sel, name, table)
 		return err
-	case planner.ValueExprKindParen:
-		return validateSelectValueExprColumns(sel, expr.Inner, table)
-	case planner.ValueExprKindBinary:
-		if err := validateSelectValueExprColumns(sel, expr.Left, table); err != nil {
+	case runtimeValueExprKindParen:
+		return validateSelectValueExprColumns(sel, expr.inner, table)
+	case runtimeValueExprKindBinary:
+		if err := validateSelectValueExprColumns(sel, expr.left, table); err != nil {
 			return err
 		}
-		return validateSelectValueExprColumns(sel, expr.Right, table)
-	case planner.ValueExprKindFunctionCall:
-		return validateSelectValueExprColumns(sel, expr.Arg, table)
-	case planner.ValueExprKindAggregateCall:
-		if expr.StarArg {
-			if strings.EqualFold(expr.FuncName, "COUNT") {
+		return validateSelectValueExprColumns(sel, expr.right, table)
+	case runtimeValueExprKindFunctionCall:
+		return validateSelectValueExprColumns(sel, expr.arg, table)
+	case runtimeValueExprKindAggregateCall:
+		if expr.starArg {
+			if strings.EqualFold(expr.funcName, "COUNT") {
 				return nil
 			}
 			return errUnsupportedStatement
 		}
-		return validateSelectValueExprColumns(sel, expr.Arg, table)
+		return validateSelectValueExprColumns(sel, expr.arg, table)
 	default:
 		return errUnsupportedStatement
 	}
 }
 
-func selectOrderByList(sel *planner.SelectQuery) []planner.OrderByClause {
+func selectOrderByList(sel *runtimeSelectQuery) []runtimeOrderByClause {
 	if sel == nil {
 		return nil
 	}
-	if len(sel.OrderBys) > 0 {
-		return sel.OrderBys
+	if len(sel.orderBys) > 0 {
+		return sel.orderBys
 	}
-	if sel.OrderBy != nil {
-		return []planner.OrderByClause{*sel.OrderBy}
+	if sel.orderBy != nil {
+		return []runtimeOrderByClause{*sel.orderBy}
 	}
 	return nil
 }
 
-func projectionAliasAt(sel *planner.SelectQuery, idx int) string {
-	if sel == nil || idx < 0 || idx >= len(sel.ProjectionAliases) {
+func projectionAliasAt(sel *runtimeSelectQuery, idx int) string {
+	if sel == nil || idx < 0 || idx >= len(sel.projectionAliases) {
 		return ""
 	}
-	return sel.ProjectionAliases[idx]
+	return sel.projectionAliases[idx]
 }
 
-func projectionExprForOrderByAlias(sel *planner.SelectQuery, alias string) *planner.ValueExpr {
+func projectionExprForOrderByAlias(sel *runtimeSelectQuery, alias string) *runtimeValueExpr {
 	if sel == nil || alias == "" {
 		return nil
 	}
-	for i, expr := range sel.ProjectionExprs {
+	for i, expr := range sel.projectionExprs {
 		if projectionAliasAt(sel, i) == alias {
 			return expr
 		}
@@ -919,21 +919,21 @@ func projectionExprForOrderByAlias(sel *planner.SelectQuery, alias string) *plan
 	return nil
 }
 
-func sortSelectRows(rows [][]parser.Value, sel *planner.SelectQuery, table *Table, orderBys []planner.OrderByClause) error {
+func sortSelectRows(rows [][]parser.Value, sel *runtimeSelectQuery, table *Table, orderBys []runtimeOrderByClause) error {
 	if len(orderBys) == 0 {
 		return nil
 	}
 	type orderByResolver struct {
 		index int
-		expr  *planner.ValueExpr
+		expr  *runtimeValueExpr
 	}
 	resolvers := make([]orderByResolver, 0, len(orderBys))
 	for _, orderBy := range orderBys {
-		if expr := projectionExprForOrderByAlias(sel, orderBy.Column); expr != nil {
+		if expr := projectionExprForOrderByAlias(sel, orderBy.column); expr != nil {
 			resolvers = append(resolvers, orderByResolver{index: -1, expr: expr})
 			continue
 		}
-		idx, err := resolveSelectColumnIndex(sel, orderBy.Column, table)
+		idx, err := resolveSelectColumnIndex(sel, orderBy.column, table)
 		if err != nil {
 			return err
 		}
@@ -972,7 +972,7 @@ func sortSelectRows(rows [][]parser.Value, sel *planner.SelectQuery, table *Tabl
 			if cmp == 0 {
 				continue
 			}
-			if orderBys[idxPos].Desc {
+			if orderBys[idxPos].desc {
 				return cmp > 0
 			}
 			return cmp < 0

@@ -5,12 +5,128 @@ import (
 	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
-func parserValueFromPlan(value planner.Value) parser.Value {
-	return value.ParserValue()
+type runtimeValueExprKind int
+
+const (
+	runtimeValueExprKindInvalid runtimeValueExprKind = iota
+	runtimeValueExprKindLiteral
+	runtimeValueExprKindColumnRef
+	runtimeValueExprKindBinary
+	runtimeValueExprKindFunctionCall
+	runtimeValueExprKindAggregateCall
+	runtimeValueExprKindParen
+)
+
+type runtimeValueExprBinaryOp int
+
+const (
+	runtimeValueExprBinaryOpInvalid runtimeValueExprBinaryOp = iota
+	runtimeValueExprBinaryOpAdd
+	runtimeValueExprBinaryOpSub
+)
+
+type runtimeValueExpr struct {
+	kind      runtimeValueExprKind
+	value     parser.Value
+	qualifier string
+	column    string
+	op        runtimeValueExprBinaryOp
+	left      *runtimeValueExpr
+	right     *runtimeValueExpr
+	funcName  string
+	arg       *runtimeValueExpr
+	starArg   bool
+	inner     *runtimeValueExpr
+}
+
+type runtimePredicateKind int
+
+const (
+	runtimePredicateKindInvalid runtimePredicateKind = iota
+	runtimePredicateKindComparison
+	runtimePredicateKindAnd
+	runtimePredicateKindOr
+	runtimePredicateKindNot
+)
+
+type runtimeCondition struct {
+	left      string
+	leftExpr  *runtimeValueExpr
+	operator  string
+	right     parser.Value
+	rightRef  string
+	rightExpr *runtimeValueExpr
+}
+
+type runtimeBooleanOp string
+
+const (
+	runtimeBooleanOpAnd runtimeBooleanOp = "AND"
+	runtimeBooleanOpOr  runtimeBooleanOp = "OR"
+)
+
+type runtimeConditionChainItem struct {
+	op        runtimeBooleanOp
+	condition runtimeCondition
+}
+
+type runtimeWhereClause struct {
+	items []runtimeConditionChainItem
+}
+
+type runtimePredicateExpr struct {
+	kind       runtimePredicateKind
+	comparison *runtimeCondition
+	left       *runtimePredicateExpr
+	right      *runtimePredicateExpr
+	inner      *runtimePredicateExpr
+}
+
+type runtimeOrderByClause struct {
+	column string
+	desc   bool
+}
+
+type runtimeTableRef struct {
+	name  string
+	alias string
+}
+
+type runtimeJoinClause struct {
+	right     runtimeTableRef
+	predicate *runtimePredicateExpr
+}
+
+type runtimeSelectQuery struct {
+	tableName         string
+	from              []runtimeTableRef
+	joins             []runtimeJoinClause
+	columns           []string
+	projectionExprs   []*runtimeValueExpr
+	projectionLabels  []string
+	projectionAliases []string
+	where             *runtimeWhereClause
+	predicate         *runtimePredicateExpr
+	orderBy           *runtimeOrderByClause
+	orderBys          []runtimeOrderByClause
+	isCountStar       bool
+}
+
+func (q *runtimeSelectQuery) primaryTableRef() *runtimeTableRef {
+	if q == nil {
+		return nil
+	}
+	if len(q.from) > 0 {
+		return &q.from[0]
+	}
+	if q.tableName == "" {
+		return nil
+	}
+	return &runtimeTableRef{name: q.tableName}
 }
 
 type selectPlanBridge struct {
-	query    *planner.SelectQuery
+	query    *runtimeSelectQuery
 	scanType planner.ScanType
 	table    selectPlanTableScan
 	index    selectPlanIndexScan
@@ -41,21 +157,21 @@ func bridgeSelectPlan(plan *planner.SelectPlan) (*selectPlanBridge, error) {
 	}
 
 	bridge := &selectPlanBridge{
-		query:    plan.Query,
+		query:    runtimeSelectQueryFromPlan(plan.Query),
 		scanType: plan.ScanType,
 	}
-	if bridge.query.TableName == "" {
+	if bridge.query.tableName == "" {
 		return bridge, nil
 	}
 
 	switch plan.ScanType {
 	case planner.ScanTypeTable:
-		if plan.TableScan == nil || plan.TableScan.TableName != plan.Query.TableName {
+		if plan.TableScan == nil || plan.TableScan.TableName != bridge.query.tableName {
 			return nil, errInvalidSelectPlan
 		}
 		bridge.table = selectPlanTableScan{tableName: plan.TableScan.TableName}
 	case planner.ScanTypeIndex:
-		if plan.IndexScan == nil || plan.IndexScan.TableName != plan.Query.TableName || plan.IndexScan.ColumnName == "" {
+		if plan.IndexScan == nil || plan.IndexScan.TableName != bridge.query.tableName || plan.IndexScan.ColumnName == "" {
 			return nil, errInvalidSelectPlan
 		}
 		bridge.index = selectPlanIndexScan{
@@ -78,6 +194,145 @@ func bridgeSelectPlan(plan *planner.SelectPlan) (*selectPlanBridge, error) {
 		return nil, errInvalidSelectPlan
 	}
 	return bridge, nil
+}
+
+func runtimeSelectQueryFromPlan(query *planner.SelectQuery) *runtimeSelectQuery {
+	if query == nil {
+		return nil
+	}
+	return &runtimeSelectQuery{
+		tableName:         query.TableName,
+		from:              runtimeTableRefsFromPlan(query.From),
+		joins:             runtimeJoinClausesFromPlan(query.Joins),
+		columns:           append([]string(nil), query.Columns...),
+		projectionExprs:   runtimeValueExprsFromPlan(query.ProjectionExprs),
+		projectionLabels:  append([]string(nil), query.ProjectionLabels...),
+		projectionAliases: append([]string(nil), query.ProjectionAliases...),
+		where:             runtimeWhereClauseFromPlan(query.Where),
+		predicate:         runtimePredicateExprFromPlan(query.Predicate),
+		orderBy:           runtimeOrderByClauseFromPlan(query.OrderBy),
+		orderBys:          runtimeOrderBysFromPlan(query.OrderBys),
+		isCountStar:       query.IsCountStar,
+	}
+}
+
+func runtimeTableRefsFromPlan(refs []planner.TableRef) []runtimeTableRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]runtimeTableRef, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, runtimeTableRef{name: ref.Name, alias: ref.Alias})
+	}
+	return out
+}
+
+func runtimeJoinClausesFromPlan(joins []planner.JoinClause) []runtimeJoinClause {
+	if len(joins) == 0 {
+		return nil
+	}
+	out := make([]runtimeJoinClause, 0, len(joins))
+	for _, join := range joins {
+		out = append(out, runtimeJoinClause{
+			right:     runtimeTableRef{name: join.Right.Name, alias: join.Right.Alias},
+			predicate: runtimePredicateExprFromPlan(join.Predicate),
+		})
+	}
+	return out
+}
+
+func runtimeOrderByClauseFromPlan(orderBy *planner.OrderByClause) *runtimeOrderByClause {
+	if orderBy == nil {
+		return nil
+	}
+	return &runtimeOrderByClause{column: orderBy.Column, desc: orderBy.Desc}
+}
+
+func runtimeOrderBysFromPlan(orderBys []planner.OrderByClause) []runtimeOrderByClause {
+	if len(orderBys) == 0 {
+		return nil
+	}
+	out := make([]runtimeOrderByClause, 0, len(orderBys))
+	for _, orderBy := range orderBys {
+		out = append(out, runtimeOrderByClause{column: orderBy.Column, desc: orderBy.Desc})
+	}
+	return out
+}
+
+func runtimeWhereClauseFromPlan(where *planner.WhereClause) *runtimeWhereClause {
+	if where == nil {
+		return nil
+	}
+	items := make([]runtimeConditionChainItem, 0, len(where.Items))
+	for _, item := range where.Items {
+		items = append(items, runtimeConditionChainItem{
+			op:        runtimeBooleanOp(item.Op),
+			condition: runtimeConditionFromPlan(item.Condition),
+		})
+	}
+	return &runtimeWhereClause{items: items}
+}
+
+func runtimePredicateExprFromPlan(predicate *planner.PredicateExpr) *runtimePredicateExpr {
+	if predicate == nil {
+		return nil
+	}
+	return &runtimePredicateExpr{
+		kind:       runtimePredicateKind(predicate.Kind),
+		comparison: runtimeConditionPtrFromPlan(predicate.Comparison),
+		left:       runtimePredicateExprFromPlan(predicate.Left),
+		right:      runtimePredicateExprFromPlan(predicate.Right),
+		inner:      runtimePredicateExprFromPlan(predicate.Inner),
+	}
+}
+
+func runtimeConditionPtrFromPlan(cond *planner.Condition) *runtimeCondition {
+	if cond == nil {
+		return nil
+	}
+	converted := runtimeConditionFromPlan(*cond)
+	return &converted
+}
+
+func runtimeConditionFromPlan(cond planner.Condition) runtimeCondition {
+	return runtimeCondition{
+		left:      cond.Left,
+		leftExpr:  runtimeValueExprFromPlan(cond.LeftExpr),
+		operator:  cond.Operator,
+		right:     cond.Right.ParserValue(),
+		rightRef:  cond.RightRef,
+		rightExpr: runtimeValueExprFromPlan(cond.RightExpr),
+	}
+}
+
+func runtimeValueExprsFromPlan(exprs []*planner.ValueExpr) []*runtimeValueExpr {
+	if len(exprs) == 0 {
+		return nil
+	}
+	out := make([]*runtimeValueExpr, 0, len(exprs))
+	for _, expr := range exprs {
+		out = append(out, runtimeValueExprFromPlan(expr))
+	}
+	return out
+}
+
+func runtimeValueExprFromPlan(expr *planner.ValueExpr) *runtimeValueExpr {
+	if expr == nil {
+		return nil
+	}
+	return &runtimeValueExpr{
+		kind:      runtimeValueExprKind(expr.Kind),
+		value:     expr.Value.ParserValue(),
+		qualifier: expr.Qualifier,
+		column:    expr.Column,
+		op:        runtimeValueExprBinaryOp(expr.Op),
+		left:      runtimeValueExprFromPlan(expr.Left),
+		right:     runtimeValueExprFromPlan(expr.Right),
+		funcName:  expr.FuncName,
+		arg:       runtimeValueExprFromPlan(expr.Arg),
+		starArg:   expr.StarArg,
+		inner:     runtimeValueExprFromPlan(expr.Inner),
+	}
 }
 
 func (b *selectPlanBridge) singleTable(tableMap map[string]*Table) (*Table, error) {
