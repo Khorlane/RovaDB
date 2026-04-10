@@ -193,6 +193,65 @@ func TestArchitectureIndexedReadBoundaryGuardrails(t *testing.T) {
 	}
 }
 
+func TestPlannerExecutionBoundaryPlanTypeGuardrails(t *testing.T) {
+	t.Parallel()
+
+	scanFile := parseGoFile(t, filepath.Join("internal", "planner", "scan.go"))
+	indexScan := findStructType(t, scanFile, "IndexScan")
+	assertStructFieldType(
+		t,
+		indexScan,
+		"LookupValue",
+		func(expr ast.Expr) bool {
+			ident, ok := expr.(*ast.Ident)
+			return ok && ident.Name == "Value"
+		},
+		"planner.IndexScan.LookupValue must stay planner.Value instead of a parser-owned payload",
+	)
+	assertStructHasNoSelectorType(
+		t,
+		indexScan,
+		"parser",
+		"Value",
+		"planner.IndexScan must not carry parser.Value directly",
+	)
+
+	selectPlanFile := parseGoFile(t, filepath.Join("internal", "planner", "select_plan.go"))
+	selectPlan := findStructType(t, selectPlanFile, "SelectPlan")
+	assertStructHasNoSelectorType(
+		t,
+		selectPlan,
+		"parser",
+		"SelectExpr",
+		"planner.SelectPlan must not carry parser.SelectExpr directly",
+	)
+}
+
+func TestPlannerExecutionBoundaryExecutorHotPathGuardrails(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range []string{
+		filepath.Join("internal", "executor", "select.go"),
+		filepath.Join("internal", "executor", "select_join.go"),
+	} {
+		path := path
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+
+			file := parseGoFile(t, path)
+			assertFileHasNoSelectorExpr(t, file, "planner", "SelectQuery", path+" must not directly operate on planner.SelectQuery in hot SELECT paths")
+			assertFileHasNoSelectorExpr(t, file, "planner", "ValueExpr", path+" must not directly operate on planner.ValueExpr in hot SELECT paths")
+			assertFileHasNoSelectorExpr(t, file, "planner", "PredicateExpr", path+" must not directly operate on planner.PredicateExpr in hot SELECT paths")
+			assertFileHasNoSelectorExpr(t, file, "planner", "WhereClause", path+" must not directly operate on planner.WhereClause in hot SELECT paths")
+
+			assertFileHasNoSelectorExpr(t, file, "planner", "ScanTypeTable", path+" must not branch on raw planner scan constants in hot SELECT paths")
+			assertFileHasNoSelectorExpr(t, file, "planner", "ScanTypeIndex", path+" must not branch on raw planner scan constants in hot SELECT paths")
+			assertFileHasNoSelectorExpr(t, file, "planner", "TableScan", path+" must not depend on planner.TableScan in hot SELECT paths")
+			assertFileHasNoSelectorExpr(t, file, "planner", "IndexScan", path+" must not depend on planner.IndexScan in hot SELECT paths")
+		})
+	}
+}
+
 func packageGoFiles(t *testing.T, dir string) []string {
 	t.Helper()
 
@@ -237,6 +296,96 @@ func parseGoFile(t *testing.T, path string) *ast.File {
 		t.Fatalf("ParseFile(%q) error = %v", path, err)
 	}
 	return file
+}
+
+func findStructType(t *testing.T, file *ast.File, typeName string) *ast.StructType {
+	t.Helper()
+
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok || typeSpec.Name == nil || typeSpec.Name.Name != typeName {
+				continue
+			}
+			structType, ok := typeSpec.Type.(*ast.StructType)
+			if !ok {
+				t.Fatalf("type %s is not a struct", typeName)
+			}
+			return structType
+		}
+	}
+
+	t.Fatalf("struct type %s not found", typeName)
+	return nil
+}
+
+func assertStructFieldType(t *testing.T, st *ast.StructType, fieldName string, match func(ast.Expr) bool, message string) {
+	t.Helper()
+
+	for _, field := range st.Fields.List {
+		for _, name := range field.Names {
+			if name.Name != fieldName {
+				continue
+			}
+			if !match(field.Type) {
+				t.Fatal(message)
+			}
+			return
+		}
+	}
+
+	t.Fatalf("field %s not found", fieldName)
+}
+
+func assertStructHasNoSelectorType(t *testing.T, st *ast.StructType, pkgName, typeName, message string) {
+	t.Helper()
+
+	for _, field := range st.Fields.List {
+		if selectorExprMatches(field.Type, pkgName, typeName) {
+			t.Fatal(message)
+		}
+	}
+}
+
+func assertFileHasNoSelectorExpr(t *testing.T, file *ast.File, pkgName, selectorName, message string) {
+	t.Helper()
+
+	found := false
+	ast.Inspect(file, func(node ast.Node) bool {
+		if found {
+			return false
+		}
+		sel, ok := node.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if selectorExprMatches(sel, pkgName, selectorName) {
+			found = true
+			return false
+		}
+		return true
+	})
+	if found {
+		t.Fatal(message)
+	}
+}
+
+func selectorExprMatches(expr ast.Expr, pkgName, selectorName string) bool {
+	switch node := expr.(type) {
+	case *ast.SelectorExpr:
+		ident, ok := node.X.(*ast.Ident)
+		return ok && ident.Name == pkgName && node.Sel != nil && node.Sel.Name == selectorName
+	case *ast.StarExpr:
+		return selectorExprMatches(node.X, pkgName, selectorName)
+	case *ast.ArrayType:
+		return selectorExprMatches(node.Elt, pkgName, selectorName)
+	default:
+		return false
+	}
 }
 
 func hasInternalImport(imports []string) bool {

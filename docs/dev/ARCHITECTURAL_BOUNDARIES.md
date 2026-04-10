@@ -66,15 +66,15 @@ The following rules are locked:
 
 ## Current Hardening Focus
 
-- The next boundary hardening focus is planner to execution.
+- The current boundary hardening focus is planner to execution.
 - Planner owns plan construction and stable plan shapes.
-- Execution owns runtime flow and runtime state.
-- This boundary should be enforced through a data contract, not shared concrete runtime shapes.
+- Execution owns runtime flow, runtime state, and executor-owned adapted SELECT query/value shapes.
+- This boundary is enforced through a data contract and bridge adaptation, not shared concrete runtime shapes.
 
 ## Enforcement
 
 - Package docs and root-layer comments must describe the same ownership model.
-- Architectural guardrail tests enforce dependency direction and the current root/storage boundary contracts.
+- Architectural guardrail tests enforce dependency direction, the current root/storage boundary contracts, and the planner/executor SELECT boundary seam.
 
 ## Non-Goals
 

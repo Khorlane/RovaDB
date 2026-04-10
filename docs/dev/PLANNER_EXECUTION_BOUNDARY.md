@@ -26,9 +26,10 @@ This note locks the planner and execution ownership split for milestone `v0.40.0
 - Planner outputs plan data only.
 - Execution consumes plan data only.
 - Planner must not depend on executor concrete structs.
-- Execution must not depend on parser/planner internals beyond stable plan shapes.
-- Parser-owned statement and value structures should not flow deeper than necessary.
+- Execution must not depend on planner query/expression tree structs in SELECT runtime hot paths; those paths run through executor-owned adapted shapes.
+- Parser-owned statement and value structures should not flow past planner translation unless a narrower boundary explicitly requires it.
 - Execution-time helper state must not live in planner types.
+- SELECT access-path interpretation in executor should stay centralized through the planner-to-executor bridge rather than scattered raw plan-shape branching.
 
 ## Non-Goals For This Milestone
 
@@ -37,8 +38,9 @@ This note locks the planner and execution ownership split for milestone `v0.40.0
 - No package-count increase.
 - No broad executor rewrite.
 
-## Likely Pressure Points For Later Slices
+## Enforced In This Milestone
 
-- `SelectPlan` and `IndexScan` currently carry parser-owned structures.
-- Executor paths currently consume planner/parser-owned shapes directly in several places.
-- Some runtime-only concerns are still represented too close to planner-owned structs.
+- `SelectPlan` no longer carries parser-owned `SelectExpr` payload.
+- `IndexScan` no longer carries parser-owned `parser.Value` payload.
+- SELECT runtime hot paths adapt planner query/expression trees into executor-owned runtime shapes before evaluation.
+- Architectural tests protect the bridge-owned access-path seam and the current planner/executor contract.
