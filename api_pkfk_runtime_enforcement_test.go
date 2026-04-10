@@ -1,7 +1,6 @@
 package rovadb
 
 import (
-	"errors"
 	"strings"
 	"testing"
 )
@@ -96,7 +95,7 @@ func TestForeignKeyRuntimeEnforcement(t *testing.T) {
 	})
 }
 
-func TestDeleteRestrictAndCascadeBoundary(t *testing.T) {
+func TestDeleteRestrictAndCascadeBehavior(t *testing.T) {
 	t.Run("restrict deletes are enforced atomically", func(t *testing.T) {
 		db := openTestDB(t)
 		defer db.Close()
@@ -128,7 +127,7 @@ func TestDeleteRestrictAndCascadeBoundary(t *testing.T) {
 		}
 	})
 
-	t.Run("cascade delete path stays deferred", func(t *testing.T) {
+	t.Run("cascade delete removes direct child rows", func(t *testing.T) {
 		db := openTestDB(t)
 		defer db.Close()
 
@@ -137,14 +136,147 @@ func TestDeleteRestrictAndCascadeBoundary(t *testing.T) {
 		mustExec(t, db, "INSERT INTO parents VALUES (1)")
 		mustExec(t, db, "INSERT INTO children VALUES (10, 1)")
 
-		if _, err := db.Exec("DELETE FROM parents WHERE id = 1"); err == nil || !errors.Is(err, ErrNotImplemented) || !strings.Contains(err.Error(), "table=children") || !strings.Contains(err.Error(), "constraint=fk_children_parent") || !strings.Contains(err.Error(), "type=foreign_key_delete_cascade_deferred") {
-			t.Fatalf("Exec(delete cascade parent) error = %v, want ErrNotImplemented cascade boundary", err)
+		if _, err := db.Exec("DELETE FROM parents WHERE id = 1"); err != nil {
+			t.Fatalf("Exec(delete cascade parent) error = %v, want nil", err)
+		}
+		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM parents WHERE id = 1"); got != 0 {
+			t.Fatalf("parent count after cascade delete = %d, want 0", got)
+		}
+		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM children WHERE parent_id = 1"); got != 0 {
+			t.Fatalf("child count after cascade delete = %d, want 0", got)
+		}
+	})
+
+	t.Run("cascade delete removes full grandchild chain and multi-row target set", func(t *testing.T) {
+		db := openTestDB(t)
+		defer db.Close()
+
+		mustExec(t, db, "CREATE TABLE parents (id INT, CONSTRAINT pk_parents PRIMARY KEY (id) USING INDEX idx_parents_pk)")
+		mustExec(t, db, "CREATE TABLE children (id INT, parent_id INT, CONSTRAINT pk_children PRIMARY KEY (id) USING INDEX idx_children_pk, CONSTRAINT fk_children_parent FOREIGN KEY (parent_id) REFERENCES parents (id) USING INDEX idx_children_parent ON DELETE CASCADE)")
+		mustExec(t, db, "CREATE TABLE grandchildren (id INT, child_id INT, CONSTRAINT pk_grandchildren PRIMARY KEY (id) USING INDEX idx_grandchildren_pk, CONSTRAINT fk_grandchildren_child FOREIGN KEY (child_id) REFERENCES children (id) USING INDEX idx_grandchildren_child ON DELETE CASCADE)")
+		for _, sql := range []string{
+			"INSERT INTO parents VALUES (1)",
+			"INSERT INTO parents VALUES (2)",
+			"INSERT INTO parents VALUES (3)",
+			"INSERT INTO children VALUES (10, 1)",
+			"INSERT INTO children VALUES (11, 1)",
+			"INSERT INTO children VALUES (20, 2)",
+			"INSERT INTO grandchildren VALUES (100, 10)",
+			"INSERT INTO grandchildren VALUES (101, 11)",
+			"INSERT INTO grandchildren VALUES (200, 20)",
+		} {
+			mustExec(t, db, sql)
+		}
+
+		if _, err := db.Exec("DELETE FROM parents WHERE id = 1 OR id = 2"); err != nil {
+			t.Fatalf("Exec(delete parent cascade chain) error = %v, want nil", err)
+		}
+		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM parents"); got != 1 {
+			t.Fatalf("parent count after cascading multi-delete = %d, want 1", got)
+		}
+		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM children"); got != 0 {
+			t.Fatalf("child count after cascading multi-delete = %d, want 0", got)
+		}
+		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM grandchildren"); got != 0 {
+			t.Fatalf("grandchild count after cascading multi-delete = %d, want 0", got)
+		}
+	})
+
+	t.Run("mixed restrict and cascade validate against final state", func(t *testing.T) {
+		db := openTestDB(t)
+		defer db.Close()
+
+		mustExec(t, db, "CREATE TABLE parents (id INT, CONSTRAINT pk_parents PRIMARY KEY (id) USING INDEX idx_parents_pk)")
+		mustExec(t, db, "CREATE TABLE children (id INT, parent_id INT, CONSTRAINT pk_children PRIMARY KEY (id) USING INDEX idx_children_pk, CONSTRAINT fk_children_parent FOREIGN KEY (parent_id) REFERENCES parents (id) USING INDEX idx_children_parent ON DELETE CASCADE)")
+		mustExec(t, db, "CREATE TABLE audits (id INT, child_id INT, parent_id INT, CONSTRAINT pk_audits PRIMARY KEY (id) USING INDEX idx_audits_pk, CONSTRAINT fk_audits_child FOREIGN KEY (child_id) REFERENCES children (id) USING INDEX idx_audits_child ON DELETE RESTRICT, CONSTRAINT fk_audits_parent FOREIGN KEY (parent_id) REFERENCES parents (id) USING INDEX idx_audits_parent ON DELETE RESTRICT)")
+
+		for _, sql := range []string{
+			"INSERT INTO parents VALUES (1)",
+			"INSERT INTO parents VALUES (2)",
+			"INSERT INTO children VALUES (10, 1)",
+			"INSERT INTO children VALUES (20, 2)",
+			"INSERT INTO audits VALUES (100, 10, 1)",
+		} {
+			mustExec(t, db, sql)
+		}
+
+		if _, err := db.Exec("DELETE FROM parents WHERE id = 1"); err == nil || !isConstraintError(err, "table=audits", "constraint=fk_audits_child", "type=foreign_key_restrict") {
+			t.Fatalf("Exec(delete mixed restrict/cascade) error = %v, want final-state restrict violation", err)
 		}
 		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM parents WHERE id = 1"); got != 1 {
-			t.Fatalf("parent count after deferred cascade delete = %d, want 1", got)
+			t.Fatalf("parent count after failed mixed delete = %d, want 1", got)
 		}
-		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM children WHERE parent_id = 1"); got != 1 {
-			t.Fatalf("child count after deferred cascade delete = %d, want 1", got)
+		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM children WHERE id = 10"); got != 1 {
+			t.Fatalf("child count after failed mixed delete = %d, want 1", got)
+		}
+
+		mustExec(t, db, "DELETE FROM audits WHERE id = 100")
+		if _, err := db.Exec("DELETE FROM parents WHERE id = 1"); err != nil {
+			t.Fatalf("Exec(delete final-state-clean mixed graph) error = %v, want nil", err)
+		}
+		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM parents WHERE id = 1"); got != 0 {
+			t.Fatalf("parent count after successful mixed delete = %d, want 0", got)
+		}
+		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM children WHERE id = 10"); got != 0 {
+			t.Fatalf("child count after successful mixed delete = %d, want 0", got)
+		}
+		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM parents WHERE id = 2"); got != 1 {
+			t.Fatalf("unrelated parent count after mixed delete = %d, want 1", got)
+		}
+		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM children WHERE id = 20"); got != 1 {
+			t.Fatalf("unrelated child count after mixed delete = %d, want 1", got)
+		}
+	})
+
+	t.Run("self-referencing cascade and repeated reachability delete correctly", func(t *testing.T) {
+		db := openTestDB(t)
+		defer db.Close()
+
+		mustExec(t, db, "CREATE TABLE nodes (id INT, parent_id INT, alt_parent_id INT, CONSTRAINT pk_nodes PRIMARY KEY (id) USING INDEX idx_nodes_pk)")
+		mustExec(t, db, "CREATE INDEX idx_nodes_parent ON nodes(parent_id)")
+		mustExec(t, db, "CREATE INDEX idx_nodes_alt_parent ON nodes(alt_parent_id)")
+		mustExec(t, db, "ALTER TABLE nodes ADD CONSTRAINT fk_nodes_parent FOREIGN KEY (parent_id) REFERENCES nodes (id) USING INDEX idx_nodes_parent ON DELETE CASCADE")
+		mustExec(t, db, "ALTER TABLE nodes ADD CONSTRAINT fk_nodes_alt_parent FOREIGN KEY (alt_parent_id) REFERENCES nodes (id) USING INDEX idx_nodes_alt_parent ON DELETE CASCADE")
+		for _, sql := range []string{
+			"INSERT INTO nodes VALUES (1, 1, 1)",
+			"INSERT INTO nodes VALUES (2, 1, 1)",
+			"INSERT INTO nodes VALUES (3, 2, 1)",
+			"INSERT INTO nodes VALUES (4, 3, 2)",
+		} {
+			mustExec(t, db, sql)
+		}
+
+		if _, err := db.Exec("DELETE FROM nodes WHERE id = 1"); err != nil {
+			t.Fatalf("Exec(delete self-referencing root) error = %v, want nil", err)
+		}
+		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM nodes"); got != 0 {
+			t.Fatalf("node count after self-referencing cascade delete = %d, want 0", got)
+		}
+	})
+
+	t.Run("self-referencing surviving restrict row still blocks delete", func(t *testing.T) {
+		db := openTestDB(t)
+		defer db.Close()
+
+		mustExec(t, db, "CREATE TABLE nodes (id INT, parent_id INT, owner_id INT, CONSTRAINT pk_nodes PRIMARY KEY (id) USING INDEX idx_nodes_pk)")
+		mustExec(t, db, "CREATE INDEX idx_nodes_parent ON nodes(parent_id)")
+		mustExec(t, db, "CREATE INDEX idx_nodes_owner ON nodes(owner_id)")
+		mustExec(t, db, "ALTER TABLE nodes ADD CONSTRAINT fk_nodes_parent FOREIGN KEY (parent_id) REFERENCES nodes (id) USING INDEX idx_nodes_parent ON DELETE CASCADE")
+		mustExec(t, db, "ALTER TABLE nodes ADD CONSTRAINT fk_nodes_owner FOREIGN KEY (owner_id) REFERENCES nodes (id) USING INDEX idx_nodes_owner ON DELETE RESTRICT")
+		for _, sql := range []string{
+			"INSERT INTO nodes VALUES (1, 1, 1)",
+			"INSERT INTO nodes VALUES (2, 1, 1)",
+			"INSERT INTO nodes VALUES (3, 2, 1)",
+			"INSERT INTO nodes VALUES (4, 4, 1)",
+		} {
+			mustExec(t, db, sql)
+		}
+
+		if _, err := db.Exec("DELETE FROM nodes WHERE id = 1"); err == nil || !isConstraintError(err, "table=nodes", "constraint=fk_nodes_owner", "type=foreign_key_restrict") {
+			t.Fatalf("Exec(delete self-referencing root with surviving restrict row) error = %v, want restrict violation", err)
+		}
+		if got := mustQueryInt(t, db, "SELECT COUNT(*) FROM nodes"); got != 4 {
+			t.Fatalf("node count after failed self-referencing mixed delete = %d, want 4", got)
 		}
 	})
 }

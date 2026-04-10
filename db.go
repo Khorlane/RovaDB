@@ -614,16 +614,27 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 				return err
 			}
 
-			var err error
-			rowsAffected, err = executor.Execute(stmt, stagedTables)
+			deletePlan, err := executeDeleteWithCascade(stagedTables, stmt)
 			if err != nil {
 				return err
+			}
+			rowsAffected = deletePlan.rowsAffected
+			for _, tableName := range deletePlan.affected {
+				table := stagedTables[tableName]
+				if table == nil {
+					continue
+				}
+				if tableName == stmt.TableName {
+					table.Rows = cloneRows(deletePlan.targetRows)
+					continue
+				}
+				table.Rows = filterRowsByIndexSet(table.Rows, deletePlan.deletedRows[tableName])
 			}
 
 			if err := validateWriteConstraints(stagedTables, stmt, nil); err != nil {
 				return err
 			}
-			if err := db.applyStagedTableRewrite(stagedTables, stmt.TableName); err != nil {
+			if err := db.applyStagedTableRewrites(stagedTables, deletePlan.affected); err != nil {
 				return err
 			}
 			committedTables = stagedTables

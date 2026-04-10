@@ -13,32 +13,65 @@ import (
 // package ownership and behavior.
 
 func (db *DB) applyStagedTableRewrite(stagedTables map[string]*executor.Table, tableName string) error {
+	return db.applyStagedTableRewrites(stagedTables, []string{tableName})
+}
+
+func (db *DB) applyStagedTableRewrites(stagedTables map[string]*executor.Table, tableNames []string) error {
 	if db == nil || db.pager == nil {
 		return nil
 	}
-
-	table := stagedTables[tableName]
-	if table == nil {
+	if len(tableNames) == 0 {
 		return nil
 	}
 
-	// DELETE and wider persisted row-content rewrites still use a full physical
-	// table rewrite through the committed TableHeader/SpaceMap/Data model when a
-	// narrower path is not in play.
-	table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
 	originalFreeListHead := db.freeListHead
-	pages, locators, err := db.stageTableRewriteViaPhysicalStorage(table, table.Rows, false, db.pager.NextPageID(), true)
-	if err != nil {
-		db.freeListHead = originalFreeListHead
-		return err
+	pages := make([]stagedPage, 0)
+	nextFreshID := db.pager.NextPageID()
+	replacedPageIDs := make([]storage.PageID, 0)
+
+	for _, tableName := range tableNames {
+		table := stagedTables[tableName]
+		if table == nil {
+			continue
+		}
+
+		// DELETE and wider persisted row-content rewrites still use a full physical
+		// table rewrite through the committed TableHeader/SpaceMap/Data model when a
+		// narrower path is not in play.
+		table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
+		spaceMapPageIDs, dataPageIDs, err := committedTablePhysicalStorageInventory(db.pool, table)
+		if err != nil {
+			db.freeListHead = originalFreeListHead
+			return err
+		}
+		replacedPageIDs = append(replacedPageIDs, spaceMapPageIDs...)
+		replacedPageIDs = append(replacedPageIDs, dataPageIDs...)
+
+		tablePages, locators, err := db.stageTableRewriteViaPhysicalStorage(table, table.Rows, false, nextFreshID, false)
+		if err != nil {
+			db.freeListHead = originalFreeListHead
+			return err
+		}
+		pages = append(pages, tablePages...)
+		nextFreshID = nextFreshPageIDAfter(pages, db.pager.NextPageID())
+
+		indexPages, err := db.buildRebuiltIndexPages(table, table.Rows, locators, nextFreshID)
+		if err != nil {
+			db.freeListHead = originalFreeListHead
+			return err
+		}
+		pages = append(pages, indexPages...)
+		nextFreshID = nextFreshPageIDAfter(pages, db.pager.NextPageID())
 	}
 
-	indexPages, err := db.buildRebuiltIndexPages(table, table.Rows, locators, nextFreshPageIDAfter(pages, db.pager.NextPageID()))
-	if err != nil {
-		db.freeListHead = originalFreeListHead
-		return err
+	if len(replacedPageIDs) != 0 {
+		freedPages, err := db.buildFreedPages(replacedPageIDs...)
+		if err != nil {
+			db.freeListHead = originalFreeListHead
+			return err
+		}
+		pages = append(pages, freedPages...)
 	}
-	pages = append(pages, indexPages...)
 
 	catalogData, err := db.buildCatalogPageData(stagedTables, pages)
 	if err != nil {

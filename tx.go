@@ -67,7 +67,7 @@ func (tx *Tx) Exec(query string, args ...any) (Result, error) {
 	switch stmt := stmt.(type) {
 	case *parser.SelectExpr:
 		return Result{}, ErrExecDisallowsSelect
-	case *parser.CreateTableStmt, *parser.InsertStmt, *parser.AlterTableAddColumnStmt, *parser.AlterTableAddPrimaryKeyStmt, *parser.AlterTableAddForeignKeyStmt, *parser.AlterTableDropPrimaryKeyStmt, *parser.AlterTableDropForeignKeyStmt, *parser.UpdateStmt, *parser.DeleteStmt:
+	case *parser.CreateTableStmt, *parser.InsertStmt, *parser.AlterTableAddColumnStmt, *parser.AlterTableAddPrimaryKeyStmt, *parser.AlterTableAddForeignKeyStmt, *parser.AlterTableDropPrimaryKeyStmt, *parser.AlterTableDropForeignKeyStmt, *parser.UpdateStmt:
 		rowsAffected, err := executor.Execute(stmt, tx.tables)
 		if err != nil {
 			return Result{}, err
@@ -76,6 +76,26 @@ func (tx *Tx) Exec(query string, args ...any) (Result, error) {
 			return Result{}, err
 		}
 		return Result{rowsAffected: rowsAffected}, nil
+	case *parser.DeleteStmt:
+		deletePlan, err := executeDeleteWithCascade(tx.tables, stmt)
+		if err != nil {
+			return Result{}, err
+		}
+		for _, tableName := range deletePlan.affected {
+			table := tx.tables[tableName]
+			if table == nil {
+				continue
+			}
+			if tableName == stmt.TableName {
+				table.Rows = cloneRows(deletePlan.targetRows)
+				continue
+			}
+			table.Rows = filterRowsByIndexSet(table.Rows, deletePlan.deletedRows[tableName])
+		}
+		if err := validateTables(tx.tables); err != nil {
+			return Result{}, err
+		}
+		return Result{rowsAffected: deletePlan.rowsAffected}, nil
 	case *parser.CreateIndexStmt:
 		rowsAffected, updated, err := executeCreateIndex(stmt, tx.tables)
 		if err != nil {

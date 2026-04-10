@@ -19,7 +19,6 @@ const (
 	relViolationForeignKeyNull            = "foreign_key_null"
 	relViolationForeignKeyMissingParent   = "foreign_key_missing_parent"
 	relViolationForeignKeyRestrict        = "foreign_key_restrict"
-	relBoundaryForeignKeyCascadeDeferred  = "foreign_key_delete_cascade_deferred"
 )
 
 func writeValidationLoadTargets(tables map[string]*executor.Table, stmt any) []string {
@@ -45,7 +44,7 @@ func writeValidationLoadTargets(tables map[string]*executor.Table, stmt any) []s
 		addParentValidationTargets(tables, typed.TableName, add)
 	case *parser.DeleteStmt:
 		add(typed.TableName)
-		addReferencingChildTargets(tables, typed.TableName, add)
+		addReferencingChildTargetsRecursive(tables, typed.TableName, add)
 	}
 	return targets
 }
@@ -78,6 +77,38 @@ func addReferencingChildTargets(tables map[string]*executor.Table, tableName str
 			}
 		}
 	}
+}
+
+func addReferencingChildTargetsRecursive(tables map[string]*executor.Table, tableName string, add func(string)) {
+	seen := make(map[string]struct{})
+	var walk func(string)
+	walk = func(parentName string) {
+		if parentName == "" {
+			return
+		}
+		if _, exists := seen[parentName]; exists {
+			return
+		}
+		seen[parentName] = struct{}{}
+		add(parentName)
+		parent := tables[parentName]
+		if parent == nil || parent.PrimaryKeyDef == nil {
+			return
+		}
+		for _, childName := range sortedTableNames(tables) {
+			child := tables[childName]
+			if child == nil {
+				continue
+			}
+			for _, fk := range child.ForeignKeyDefs {
+				if fk.ParentTableID == parent.TableID && fk.ParentPrimaryKeyName == parent.PrimaryKeyDef.Name {
+					walk(childName)
+					break
+				}
+			}
+		}
+	}
+	walk(tableName)
 }
 
 func validateWriteConstraints(stagedTables map[string]*executor.Table, stmt any, originalTargetRows [][]parser.Value) error {
@@ -157,9 +188,6 @@ func validateDeleteWriteConstraints(tables map[string]*executor.Table, tableName
 				}
 				if _, exists := parentKeys[key]; exists {
 					continue
-				}
-				if fk.OnDeleteAction == storage.CatalogForeignKeyDeleteActionCascade {
-					return newDeferredCascadeDeleteError(childTable.Name, fk.Name)
 				}
 				return newRelationalConstraintViolation(childTable.Name, fk.Name, relViolationForeignKeyRestrict)
 			}
@@ -319,15 +347,11 @@ type relationalConstraintError struct {
 	tableName      string
 	constraintName string
 	violationType  string
-	deferred       bool
 }
 
 func (e *relationalConstraintError) Error() string {
 	if e == nil {
 		return ""
-	}
-	if e.deferred {
-		return fmt.Sprintf("constraint deferred: table=%s constraint=%s type=%s", e.tableName, e.constraintName, e.violationType)
 	}
 	return fmt.Sprintf("constraint violation: table=%s constraint=%s type=%s", e.tableName, e.constraintName, e.violationType)
 }
@@ -337,15 +361,6 @@ func newRelationalConstraintViolation(tableName, constraintName, violationType s
 		tableName:      tableName,
 		constraintName: constraintName,
 		violationType:  violationType,
-	}).Error())
-}
-
-func newDeferredCascadeDeleteError(tableName, constraintName string) error {
-	return fmt.Errorf("%w: %s", ErrNotImplemented, (&relationalConstraintError{
-		tableName:      tableName,
-		constraintName: constraintName,
-		violationType:  relBoundaryForeignKeyCascadeDeferred,
-		deferred:       true,
 	}).Error())
 }
 
@@ -394,4 +409,251 @@ func sortedReferencingForeignKeys(childTable, parentTable *executor.Table) []sto
 		return fks[i].Name < fks[j].Name
 	})
 	return fks
+}
+
+type deleteExecutionPlan struct {
+	rowsAffected int64
+	targetRows   [][]parser.Value
+	deletedRows  map[string]map[int]struct{}
+	affected     []string
+}
+
+func executeDeleteWithCascade(tables map[string]*executor.Table, stmt *parser.DeleteStmt) (*deleteExecutionPlan, error) {
+	if stmt == nil {
+		return nil, ErrInvalidArgument
+	}
+	targetTable := tables[stmt.TableName]
+	if targetTable == nil {
+		return nil, newExecError("table not found: " + stmt.TableName)
+	}
+
+	originalTargetRows := cloneRows(targetTable.Rows)
+	simulatedTables := map[string]*executor.Table{
+		stmt.TableName: cloneTable(targetTable),
+	}
+	rowsAffected, err := executor.Execute(stmt, simulatedTables)
+	if err != nil {
+		return nil, err
+	}
+	targetSurvivors := cloneRows(simulatedTables[stmt.TableName].Rows)
+
+	plan := &deleteExecutionPlan{
+		rowsAffected: rowsAffected,
+		targetRows:   targetSurvivors,
+		deletedRows:  make(map[string]map[int]struct{}),
+	}
+	if targetTable.PrimaryKeyDef == nil {
+		plan.affected = []string{stmt.TableName}
+		return plan, nil
+	}
+
+	targetPositions, err := tableColumnPositions(targetTable)
+	if err != nil {
+		return nil, err
+	}
+	initialDeleted, deletedParentKeys, err := deletedPrimaryKeyRowsFromSurvivors(originalTargetRows, targetSurvivors, targetPositions, targetTable.PrimaryKeyDef.Columns)
+	if err != nil {
+		return nil, err
+	}
+	if len(initialDeleted) != 0 {
+		plan.deletedRows[stmt.TableName] = initialDeleted
+	}
+
+	deletedKeys := map[string]map[string]struct{}{}
+	if len(deletedParentKeys) != 0 {
+		deletedKeys[stmt.TableName] = deletedParentKeys
+	}
+	if err := expandDeleteCascadeClosure(tables, deletedKeys, plan.deletedRows); err != nil {
+		return nil, err
+	}
+	if err := validateDeleteFinalState(tables, deletedKeys, plan.deletedRows); err != nil {
+		return nil, err
+	}
+
+	plan.targetRows = filterRowsByIndexSet(originalTargetRows, plan.deletedRows[stmt.TableName])
+	plan.affected = sortedDeleteAffectedTables(stmt.TableName, plan.deletedRows)
+	return plan, nil
+}
+
+func deletedPrimaryKeyRowsFromSurvivors(originalRows, survivingRows [][]parser.Value, positions map[string]int, pkColumns []string) (map[int]struct{}, map[string]struct{}, error) {
+	survivingKeys := make(map[string]struct{}, len(survivingRows))
+	for _, row := range survivingRows {
+		key, err := buildRuntimeConstraintTupleKey(row, positions, pkColumns, relViolationPrimaryKeyNull)
+		if err != nil {
+			return nil, nil, err
+		}
+		survivingKeys[key] = struct{}{}
+	}
+
+	deletedRows := make(map[int]struct{})
+	deletedKeys := make(map[string]struct{})
+	for rowIndex, row := range originalRows {
+		key, err := buildRuntimeConstraintTupleKey(row, positions, pkColumns, relViolationPrimaryKeyNull)
+		if err != nil {
+			return nil, nil, err
+		}
+		if _, exists := survivingKeys[key]; exists {
+			continue
+		}
+		deletedRows[rowIndex] = struct{}{}
+		deletedKeys[key] = struct{}{}
+	}
+	return deletedRows, deletedKeys, nil
+}
+
+func expandDeleteCascadeClosure(tables map[string]*executor.Table, deletedKeys map[string]map[string]struct{}, deletedRows map[string]map[int]struct{}) error {
+	queue := make([]string, 0, len(deletedKeys))
+	queued := make(map[string]struct{}, len(deletedKeys))
+	for _, tableName := range sortedTableNames(tables) {
+		keys := deletedKeys[tableName]
+		if len(keys) == 0 {
+			continue
+		}
+		queue = append(queue, tableName)
+		queued[tableName] = struct{}{}
+	}
+
+	for len(queue) != 0 {
+		parentName := queue[0]
+		queue = queue[1:]
+		delete(queued, parentName)
+
+		parentTable := tables[parentName]
+		if parentTable == nil || parentTable.PrimaryKeyDef == nil {
+			continue
+		}
+		parentDeletedKeys := deletedKeys[parentName]
+		if len(parentDeletedKeys) == 0 {
+			continue
+		}
+
+		for _, childName := range sortedTableNames(tables) {
+			childTable := tables[childName]
+			if childTable == nil {
+				continue
+			}
+			childPositions, err := tableColumnPositions(childTable)
+			if err != nil {
+				return err
+			}
+			for _, fk := range sortedReferencingForeignKeys(childTable, parentTable) {
+				if fk.OnDeleteAction != storage.CatalogForeignKeyDeleteActionCascade {
+					continue
+				}
+				for rowIndex, row := range childTable.Rows {
+					if rowDeleted(deletedRows, childName, rowIndex) {
+						continue
+					}
+					key, err := buildRuntimeConstraintTupleKey(row, childPositions, fk.ChildColumns, "")
+					if err != nil {
+						return err
+					}
+					if _, exists := parentDeletedKeys[key]; !exists {
+						continue
+					}
+					if deletedRows[childName] == nil {
+						deletedRows[childName] = make(map[int]struct{})
+					}
+					deletedRows[childName][rowIndex] = struct{}{}
+
+					if childTable.PrimaryKeyDef == nil {
+						continue
+					}
+					childKey, err := buildRuntimeConstraintTupleKey(row, childPositions, childTable.PrimaryKeyDef.Columns, relViolationPrimaryKeyNull)
+					if err != nil {
+						return err
+					}
+					if deletedKeys[childName] == nil {
+						deletedKeys[childName] = make(map[string]struct{})
+					}
+					if _, exists := deletedKeys[childName][childKey]; exists {
+						continue
+					}
+					deletedKeys[childName][childKey] = struct{}{}
+					if _, exists := queued[childName]; !exists {
+						queue = append(queue, childName)
+						queued[childName] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateDeleteFinalState(tables map[string]*executor.Table, deletedKeys map[string]map[string]struct{}, deletedRows map[string]map[int]struct{}) error {
+	for _, parentName := range sortedTableNames(tables) {
+		parentDeletedKeys := deletedKeys[parentName]
+		if len(parentDeletedKeys) == 0 {
+			continue
+		}
+		parentTable := tables[parentName]
+		if parentTable == nil || parentTable.PrimaryKeyDef == nil {
+			continue
+		}
+		for _, childName := range sortedTableNames(tables) {
+			childTable := tables[childName]
+			if childTable == nil {
+				continue
+			}
+			childPositions, err := tableColumnPositions(childTable)
+			if err != nil {
+				return err
+			}
+			for _, fk := range sortedReferencingForeignKeys(childTable, parentTable) {
+				for rowIndex, row := range childTable.Rows {
+					if rowDeleted(deletedRows, childName, rowIndex) {
+						continue
+					}
+					key, err := buildRuntimeConstraintTupleKey(row, childPositions, fk.ChildColumns, "")
+					if err != nil {
+						return err
+					}
+					if _, exists := parentDeletedKeys[key]; !exists {
+						continue
+					}
+					if fk.OnDeleteAction == storage.CatalogForeignKeyDeleteActionRestrict {
+						return newRelationalConstraintViolation(childTable.Name, fk.Name, relViolationForeignKeyRestrict)
+					}
+					return newExecError("delete cascade final-state mismatch")
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func sortedDeleteAffectedTables(targetTable string, deletedRows map[string]map[int]struct{}) []string {
+	affected := []string{targetTable}
+	for tableName, rows := range deletedRows {
+		if tableName == targetTable || len(rows) == 0 {
+			continue
+		}
+		affected = append(affected, tableName)
+	}
+	sort.Strings(affected)
+	return affected
+}
+
+func filterRowsByIndexSet(rows [][]parser.Value, deleted map[int]struct{}) [][]parser.Value {
+	if len(deleted) == 0 {
+		return cloneRows(rows)
+	}
+	filtered := make([][]parser.Value, 0, len(rows)-len(deleted))
+	for rowIndex, row := range rows {
+		if _, exists := deleted[rowIndex]; exists {
+			continue
+		}
+		filtered = append(filtered, append([]parser.Value(nil), row...))
+	}
+	return filtered
+}
+
+func rowDeleted(deletedRows map[string]map[int]struct{}, tableName string, rowIndex int) bool {
+	rows := deletedRows[tableName]
+	if len(rows) == 0 {
+		return false
+	}
+	_, exists := rows[rowIndex]
+	return exists
 }
