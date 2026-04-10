@@ -418,7 +418,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		var committedTables map[string]*executor.Table
 		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
-			if err := db.loadRowsIntoTables(stagedTables, stmt.TableName); err != nil {
+			if err := db.loadRowsIntoTables(stagedTables, writeValidationLoadTargets(stagedTables, stmt)...); err != nil {
 				return err
 			}
 
@@ -428,6 +428,9 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 				return err
 			}
 
+			if err := validateWriteConstraints(stagedTables, stmt, nil); err != nil {
+				return err
+			}
 			if err := db.applyStagedInsert(stagedTables, stmt.TableName); err != nil {
 				return err
 			}
@@ -571,9 +574,10 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		var committedTables map[string]*executor.Table
 		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
-			if err := db.loadRowsIntoTables(stagedTables, stmt.TableName); err != nil {
+			if err := db.loadRowsIntoTables(stagedTables, writeValidationLoadTargets(stagedTables, stmt)...); err != nil {
 				return err
 			}
+			originalTargetRows := cloneRows(stagedTables[stmt.TableName].Rows)
 
 			var err error
 			rowsAffected, err = executor.Execute(stmt, stagedTables)
@@ -581,6 +585,9 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 				return err
 			}
 
+			if err := validateWriteConstraints(stagedTables, stmt, originalTargetRows); err != nil {
+				return err
+			}
 			if err := db.applyStagedUpdate(stagedTables, stmt.TableName); err != nil {
 				return err
 			}
@@ -603,7 +610,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 		var committedTables map[string]*executor.Table
 		committed, err := db.execMutatingStatement(func() error {
 			stagedTables := cloneTables(db.tables)
-			if err := db.loadRowsIntoTables(stagedTables, stmt.TableName); err != nil {
+			if err := db.loadRowsIntoTables(stagedTables, writeValidationLoadTargets(stagedTables, stmt)...); err != nil {
 				return err
 			}
 
@@ -613,6 +620,9 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 				return err
 			}
 
+			if err := validateWriteConstraints(stagedTables, stmt, nil); err != nil {
+				return err
+			}
 			if err := db.applyStagedTableRewrite(stagedTables, stmt.TableName); err != nil {
 				return err
 			}
@@ -925,12 +935,14 @@ func (db *DB) tablesForSelectHandoff(handoff *executor.SelectExecutionHandoff) (
 			return nil, err
 		}
 		execTables[table.Name] = &executor.Table{
-			Name:      table.Name,
-			TableID:   table.TableID,
-			IsSystem:  table.IsSystem,
-			Columns:   append([]parser.ColumnDef(nil), table.Columns...),
-			Rows:      rows,
-			IndexDefs: cloneIndexDefs(table.IndexDefs),
+			Name:           table.Name,
+			TableID:        table.TableID,
+			IsSystem:       table.IsSystem,
+			Columns:        append([]parser.ColumnDef(nil), table.Columns...),
+			Rows:           rows,
+			IndexDefs:      cloneIndexDefs(table.IndexDefs),
+			PrimaryKeyDef:  clonePrimaryKeyDef(table.PrimaryKeyDef),
+			ForeignKeyDefs: cloneForeignKeyDefs(table.ForeignKeyDefs),
 		}
 		execTables[table.Name].SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
 		execTables[table.Name].SetPhysicalTableRootMeta(table.TableHeaderPageID(), table.TableStorageFormatVersion(), table.FirstSpaceMapPageID(), table.OwnedDataPageCount(), table.OwnedSpaceMapPageCount())

@@ -35,6 +35,9 @@ func validateUniqueIndexes(table *Table, rows [][]parser.Value) error {
 		if !indexDef.Unique {
 			continue
 		}
+		if table.PrimaryKeyDef != nil && table.PrimaryKeyDef.IndexID == indexDef.IndexID {
+			continue
+		}
 
 		seen := make(map[string]struct{}, len(rows))
 		for _, row := range rows {

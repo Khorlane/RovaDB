@@ -73,15 +73,16 @@ func TestArchitectureRootInternalImportAllowlist(t *testing.T) {
 	t.Parallel()
 
 	allowed := map[string]struct{}{
-		"api_errors.go":              {},
-		"catalog_api.go":             {},
-		"db.go":                      {},
-		"physical_table_mutation.go": {},
-		"query_trace_api.go":         {},
-		"status_api.go":              {},
-		"storage_value_adapter.go":   {},
-		"system_catalog.go":          {},
-		"tx.go":                      {},
+		"api_errors.go":                    {},
+		"catalog_api.go":                   {},
+		"constraint_runtime_validation.go": {},
+		"db.go":                            {},
+		"physical_table_mutation.go":       {},
+		"query_trace_api.go":               {},
+		"status_api.go":                    {},
+		"storage_value_adapter.go":         {},
+		"system_catalog.go":                {},
+		"tx.go":                            {},
 	}
 
 	rootFiles := packageGoFiles(t, ".")
