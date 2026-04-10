@@ -417,3 +417,49 @@ func TestPlanSelectIsDeterministicForIndexedEquality(t *testing.T) {
 		t.Fatalf("index scans differ: %#v vs %#v", plan1.IndexScan, plan2.IndexScan)
 	}
 }
+
+func TestChooseIndexScanUsesPlannerQueryTranslation(t *testing.T) {
+	stmt, ok := parser.ParseSelectExpr("SELECT u.id FROM users AS u WHERE u.id = 7")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+
+	scan := chooseIndexScan(queryFromParser(stmt), testPlannerTables("id"))
+	if scan == nil {
+		t.Fatal("chooseIndexScan() = nil, want value")
+	}
+	if scan.TableName != "users" || scan.ColumnName != "id" || scan.LookupValue != Int64Value(7) {
+		t.Fatalf("chooseIndexScan() = %#v, want users.id = 7", scan)
+	}
+}
+
+func TestChooseIndexOnlyScanUsesPlannerQueryTranslation(t *testing.T) {
+	stmt, ok := parser.ParseSelectExpr("SELECT users.id FROM users")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+
+	scan := chooseIndexOnlyScan(queryFromParser(stmt), testPlannerTables("id"))
+	if scan == nil {
+		t.Fatal("chooseIndexOnlyScan() = nil, want value")
+	}
+	if scan.TableName != "users" || scan.CountStar || len(scan.ColumnNames) != 1 || scan.ColumnNames[0] != "id" {
+		t.Fatalf("chooseIndexOnlyScan() = %#v, want users indexed projection on id", scan)
+	}
+}
+
+func TestChooseJoinScanUsesPlannerQueryTranslation(t *testing.T) {
+	stmt, ok := parser.ParseSelectExpr("SELECT u.id FROM users u JOIN accounts a ON u.id = a.id")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+
+	scan, ok := chooseJoinScan(queryFromParser(stmt))
+	if !ok {
+		t.Fatal("chooseJoinScan() ok = false, want true")
+	}
+	if scan.LeftTableName != "users" || scan.LeftTableAlias != "u" || scan.LeftColumnName != "id" ||
+		scan.RightTableName != "accounts" || scan.RightTableAlias != "a" || scan.RightColumnName != "id" {
+		t.Fatalf("chooseJoinScan() = %#v, want users(u).id = accounts(a).id", scan)
+	}
+}

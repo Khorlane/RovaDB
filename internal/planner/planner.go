@@ -31,51 +31,52 @@ func PlanSelect(stmt *parser.SelectExpr, tables ...map[string]*TableMetadata) (*
 		return nil, newPlanError("unsupported query form")
 	}
 
+	query := queryFromParser(stmt)
 	plan := &SelectPlan{
-		Query: queryFromParser(stmt),
+		Query: query,
 	}
-	if joinScan, ok := chooseJoinScan(stmt); ok {
+	if joinScan, ok := chooseJoinScan(query); ok {
 		plan.ScanType = ScanTypeJoin
 		plan.JoinScan = joinScan
 		return plan, nil
 	}
-	if len(stmt.From) > 1 || len(stmt.Joins) > 0 {
+	if len(query.From) > 1 || len(query.Joins) > 0 {
 		return nil, newPlanError("unsupported query form")
 	}
-	if stmt != nil && stmt.TableName != "" {
-		if indexOnlyScan := chooseIndexOnlyScan(stmt, firstTableMetadata(tables)); indexOnlyScan != nil {
+	if query != nil && query.TableName != "" {
+		if indexOnlyScan := chooseIndexOnlyScan(query, firstTableMetadata(tables)); indexOnlyScan != nil {
 			plan.ScanType = ScanTypeIndexOnly
 			plan.IndexOnlyScan = indexOnlyScan
 			return plan, nil
 		}
-		if indexScan := chooseIndexScan(stmt, firstTableMetadata(tables)); indexScan != nil {
+		if indexScan := chooseIndexScan(query, firstTableMetadata(tables)); indexScan != nil {
 			plan.ScanType = ScanTypeIndex
 			plan.IndexScan = indexScan
 			return plan, nil
 		}
 		plan.ScanType = ScanTypeTable
-		plan.TableScan = &TableScan{TableName: stmt.TableName}
+		plan.TableScan = &TableScan{TableName: query.TableName}
 	}
 	return plan, nil
 }
 
-func chooseIndexOnlyScan(stmt *parser.SelectExpr, tables map[string]*TableMetadata) *IndexOnlyScan {
+func chooseIndexOnlyScan(query *SelectQuery, tables map[string]*TableMetadata) *IndexOnlyScan {
 	// Index-only remains a special seam path in this milestone line and is
 	// intentionally isolated until the outer seam is regularized.
-	if stmt == nil || stmt.TableName == "" || tables == nil {
+	if query == nil || query.TableName == "" || tables == nil {
 		return nil
 	}
-	if len(stmt.From) > 1 || len(stmt.Joins) > 0 {
+	if len(query.From) > 1 || len(query.Joins) > 0 {
 		return nil
 	}
 
-	table := tables[stmt.TableName]
+	table := tables[query.TableName]
 	if table == nil {
 		return nil
 	}
 
-	if stmt.IsCountStar {
-		if stmt.Where != nil || stmt.Predicate != nil || len(stmt.OrderBys) > 0 || stmt.OrderBy != nil {
+	if query.IsCountStar {
+		if query.Where != nil || query.Predicate != nil || len(query.OrderBys) > 0 || query.OrderBy != nil {
 			return nil
 		}
 		columnName, ok := firstEligibleSimpleIndexName(table)
@@ -83,21 +84,21 @@ func chooseIndexOnlyScan(stmt *parser.SelectExpr, tables map[string]*TableMetada
 			return nil
 		}
 		return &IndexOnlyScan{
-			TableName:   stmt.TableName,
+			TableName:   query.TableName,
 			ColumnNames: []string{columnName},
 			CountStar:   true,
 		}
 	}
 
-	columnName, ok := simpleIndexOnlyProjectionColumn(stmt)
+	columnName, ok := simpleIndexOnlyProjectionColumn(query)
 	if !ok {
 		return nil
 	}
-	if _, ok := eligibleSimpleIndexForColumn(table, stmt.TableName, columnName); !ok {
+	if _, ok := eligibleSimpleIndexForColumn(table, query.TableName, columnName); !ok {
 		return nil
 	}
 	return &IndexOnlyScan{
-		TableName:   stmt.TableName,
+		TableName:   query.TableName,
 		ColumnNames: []string{columnName},
 	}
 }
@@ -121,34 +122,34 @@ func firstEligibleSimpleIndexName(table *TableMetadata) (string, bool) {
 	return best, true
 }
 
-func simpleIndexOnlyProjectionColumn(stmt *parser.SelectExpr) (string, bool) {
-	if stmt == nil || stmt.IsCountStar {
+func simpleIndexOnlyProjectionColumn(query *SelectQuery) (string, bool) {
+	if query == nil || query.IsCountStar {
 		return "", false
 	}
-	if stmt.Where != nil || stmt.Predicate != nil {
+	if query.Where != nil || query.Predicate != nil {
 		return "", false
 	}
-	if len(stmt.OrderBys) > 0 || stmt.OrderBy != nil {
+	if len(query.OrderBys) > 0 || query.OrderBy != nil {
 		return "", false
 	}
-	if len(stmt.ProjectionExprs) != 1 {
+	if len(query.ProjectionExprs) != 1 {
 		return "", false
 	}
-	if len(stmt.ProjectionAliases) > 0 && stmt.ProjectionAliases[0] != "" {
+	if len(query.ProjectionAliases) > 0 && query.ProjectionAliases[0] != "" {
 		return "", false
 	}
-	expr := stmt.ProjectionExprs[0]
-	if expr == nil || expr.Kind != parser.ValueExprKindColumnRef || expr.Column == "" {
+	expr := query.ProjectionExprs[0]
+	if expr == nil || expr.Kind != ValueExprKindColumnRef || expr.Column == "" {
 		return "", false
 	}
-	normalized, ok := normalizePlannerColumnName(columnRefName(expr), stmt.PrimaryTableRef())
+	normalized, ok := normalizePlannerColumnName(columnRefName(expr), query.PrimaryTableRef())
 	if !ok || normalized == "" {
 		return "", false
 	}
 	return normalized, true
 }
 
-func columnRefName(expr *parser.ValueExpr) string {
+func columnRefName(expr *ValueExpr) string {
 	if expr == nil {
 		return ""
 	}
@@ -158,14 +159,14 @@ func columnRefName(expr *parser.ValueExpr) string {
 	return expr.Column
 }
 
-func chooseJoinScan(stmt *parser.SelectExpr) (*JoinScan, bool) {
-	if stmt == nil {
+func chooseJoinScan(query *SelectQuery) (*JoinScan, bool) {
+	if query == nil {
 		return nil, false
 	}
 
-	if len(stmt.From) == 1 && len(stmt.Joins) == 1 {
-		join := stmt.Joins[0]
-		if join.Predicate == nil || join.Predicate.Kind != parser.PredicateKindComparison || join.Predicate.Comparison == nil {
+	if len(query.From) == 1 && len(query.Joins) == 1 {
+		join := query.Joins[0]
+		if join.Predicate == nil || join.Predicate.Kind != PredicateKindComparison || join.Predicate.Comparison == nil {
 			return nil, false
 		}
 		cond := join.Predicate.Comparison
@@ -181,15 +182,15 @@ func chooseJoinScan(stmt *parser.SelectExpr) (*JoinScan, bool) {
 			return nil, false
 		}
 
-		leftRef := stmt.From[0]
+		leftRef := query.From[0]
 		rightRef := join.Right
 		return joinScanFromColumnPair(leftRef, rightRef, leftName, rightName)
 	}
 
-	if len(stmt.From) == 2 && len(stmt.Joins) == 0 {
-		leftRef := stmt.From[0]
-		rightRef := stmt.From[1]
-		leftName, rightName, ok := commaJoinEqualityColumns(stmt)
+	if len(query.From) == 2 && len(query.Joins) == 0 {
+		leftRef := query.From[0]
+		rightRef := query.From[1]
+		leftName, rightName, ok := commaJoinEqualityColumns(query)
 		if !ok {
 			return nil, false
 		}
@@ -199,41 +200,41 @@ func chooseJoinScan(stmt *parser.SelectExpr) (*JoinScan, bool) {
 	return nil, false
 }
 
-func commaJoinEqualityColumns(stmt *parser.SelectExpr) (string, string, bool) {
-	if stmt == nil {
+func commaJoinEqualityColumns(query *SelectQuery) (string, string, bool) {
+	if query == nil {
 		return "", "", false
 	}
-	if stmt.Predicate != nil {
-		if left, right, ok := findJoinEqualityInPredicate(stmt.Predicate); ok {
+	if query.Predicate != nil {
+		if left, right, ok := findJoinEqualityInPredicate(query.Predicate); ok {
 			return left, right, true
 		}
 	}
-	return findJoinEqualityInWhere(stmt.Where)
+	return findJoinEqualityInWhere(query.Where)
 }
 
-func findJoinEqualityInPredicate(predicate *parser.PredicateExpr) (string, string, bool) {
+func findJoinEqualityInPredicate(predicate *PredicateExpr) (string, string, bool) {
 	if predicate == nil {
 		return "", "", false
 	}
 	switch predicate.Kind {
-	case parser.PredicateKindComparison:
+	case PredicateKindComparison:
 		if predicate.Comparison == nil || predicate.Comparison.Operator != "=" {
 			return "", "", false
 		}
 		return joinEqualityColumnsFromCondition(*predicate.Comparison)
-	case parser.PredicateKindAnd, parser.PredicateKindOr:
+	case PredicateKindAnd, PredicateKindOr:
 		if left, right, ok := findJoinEqualityInPredicate(predicate.Left); ok {
 			return left, right, true
 		}
 		return findJoinEqualityInPredicate(predicate.Right)
-	case parser.PredicateKindNot:
+	case PredicateKindNot:
 		return findJoinEqualityInPredicate(predicate.Inner)
 	default:
 		return "", "", false
 	}
 }
 
-func findJoinEqualityInWhere(where *parser.WhereClause) (string, string, bool) {
+func findJoinEqualityInWhere(where *WhereClause) (string, string, bool) {
 	if where == nil {
 		return "", "", false
 	}
@@ -246,7 +247,7 @@ func findJoinEqualityInWhere(where *parser.WhereClause) (string, string, bool) {
 	return "", "", false
 }
 
-func joinEqualityColumnsFromCondition(cond parser.Condition) (string, string, bool) {
+func joinEqualityColumnsFromCondition(cond Condition) (string, string, bool) {
 	if cond.Operator != "=" {
 		return "", "", false
 	}
@@ -267,7 +268,7 @@ func joinEqualityColumnsFromCondition(cond parser.Condition) (string, string, bo
 	return cond.Left, cond.RightRef, true
 }
 
-func joinScanFromColumnPair(leftRef, rightRef parser.TableRef, leftName, rightName string) (*JoinScan, bool) {
+func joinScanFromColumnPair(leftRef, rightRef TableRef, leftName, rightName string) (*JoinScan, bool) {
 	leftColumn, okLeft := normalizeJoinColumnName(leftName, leftRef)
 	rightColumn, okRight := normalizeJoinColumnName(rightName, rightRef)
 	if okLeft && okRight {
@@ -297,7 +298,7 @@ func joinScanFromColumnPair(leftRef, rightRef parser.TableRef, leftName, rightNa
 	return nil, false
 }
 
-func normalizeJoinColumnName(name string, tableRef parser.TableRef) (string, bool) {
+func normalizeJoinColumnName(name string, tableRef TableRef) (string, bool) {
 	parts := strings.Split(name, ".")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", false
@@ -315,21 +316,21 @@ func firstTableMetadata(tables []map[string]*TableMetadata) map[string]*TableMet
 	return tables[0]
 }
 
-func chooseIndexScan(stmt *parser.SelectExpr, tables map[string]*TableMetadata) *IndexScan {
-	if stmt == nil || stmt.TableName == "" || tables == nil {
+func chooseIndexScan(query *SelectQuery, tables map[string]*TableMetadata) *IndexScan {
+	if query == nil || query.TableName == "" || tables == nil {
 		return nil
 	}
 
-	columnName, value, ok := indexedEquality(stmt)
+	columnName, value, ok := indexedEquality(query)
 	if !ok {
 		return nil
 	}
 
-	table := tables[stmt.TableName]
+	table := tables[query.TableName]
 	if table == nil {
 		return nil
 	}
-	index, ok := eligibleSimpleIndexForColumn(table, stmt.TableName, columnName)
+	index, ok := eligibleSimpleIndexForColumn(table, query.TableName, columnName)
 	if !ok {
 		return nil
 	}
@@ -337,7 +338,7 @@ func chooseIndexScan(stmt *parser.SelectExpr, tables map[string]*TableMetadata) 
 	return &IndexScan{
 		TableName:   index.TableName,
 		ColumnName:  index.ColumnName,
-		LookupValue: valueFromParser(value),
+		LookupValue: value,
 	}
 }
 
@@ -355,70 +356,70 @@ func eligibleSimpleIndexForColumn(table *TableMetadata, tableName, columnName st
 	return index, true
 }
 
-func indexedEquality(stmt *parser.SelectExpr) (string, parser.Value, bool) {
-	if stmt == nil {
-		return "", parser.Value{}, false
+func indexedEquality(query *SelectQuery) (string, Value, bool) {
+	if query == nil {
+		return "", Value{}, false
 	}
-	tableRef := stmt.PrimaryTableRef()
-	if stmt.Predicate != nil {
-		return indexedEqualityFromPredicate(stmt.Predicate, tableRef)
+	tableRef := query.PrimaryTableRef()
+	if query.Predicate != nil {
+		return indexedEqualityFromPredicate(query.Predicate, tableRef)
 	}
-	return indexedEqualityFromWhere(stmt.Where, tableRef)
+	return indexedEqualityFromWhere(query.Where, tableRef)
 }
 
-func indexedEqualityFromPredicate(predicate *parser.PredicateExpr, tableRef *parser.TableRef) (string, parser.Value, bool) {
-	if predicate == nil || predicate.Kind != parser.PredicateKindComparison || predicate.Comparison == nil {
-		return "", parser.Value{}, false
+func indexedEqualityFromPredicate(predicate *PredicateExpr, tableRef *TableRef) (string, Value, bool) {
+	if predicate == nil || predicate.Kind != PredicateKindComparison || predicate.Comparison == nil {
+		return "", Value{}, false
 	}
 	if predicate.Comparison.Operator != "=" {
-		return "", parser.Value{}, false
+		return "", Value{}, false
 	}
 	if predicate.Comparison.LeftExpr != nil && predicate.Comparison.RightExpr != nil {
 		leftValue, leftColumn, ok := valueExprOperandShape(predicate.Comparison.LeftExpr)
-		if !ok || leftColumn == "" || leftValue.Kind != parser.ValueKindInvalid {
-			return "", parser.Value{}, false
+		if !ok || leftColumn == "" || leftValue.Kind != ValueKindInvalid {
+			return "", Value{}, false
 		}
 		rightValue, rightColumn, ok := valueExprOperandShape(predicate.Comparison.RightExpr)
 		if !ok || rightColumn != "" {
-			return "", parser.Value{}, false
+			return "", Value{}, false
 		}
 		normalized, ok := normalizePlannerColumnName(leftColumn, tableRef)
 		if !ok {
-			return "", parser.Value{}, false
+			return "", Value{}, false
 		}
 		return normalized, rightValue, true
 	}
 	if predicate.Comparison.RightRef != "" {
-		return "", parser.Value{}, false
+		return "", Value{}, false
 	}
 	normalized, ok := normalizePlannerColumnName(predicate.Comparison.Left, tableRef)
 	if !ok {
-		return "", parser.Value{}, false
+		return "", Value{}, false
 	}
 	return normalized, predicate.Comparison.Right, true
 }
 
-func valueExprOperandShape(expr *parser.ValueExpr) (parser.Value, string, bool) {
+func valueExprOperandShape(expr *ValueExpr) (Value, string, bool) {
 	if expr == nil {
-		return parser.Value{}, "", false
+		return Value{}, "", false
 	}
 
 	switch expr.Kind {
-	case parser.ValueExprKindLiteral:
+	case ValueExprKindLiteral:
 		return expr.Value, "", true
-	case parser.ValueExprKindColumnRef:
+	case ValueExprKindColumnRef:
 		if expr.Qualifier != "" {
-			return parser.Value{}, expr.Qualifier + "." + expr.Column, true
+			return Value{}, expr.Qualifier + "." + expr.Column, true
 		}
-		return parser.Value{}, expr.Column, true
-	case parser.ValueExprKindParen:
+		return Value{}, expr.Column, true
+	case ValueExprKindParen:
 		return valueExprOperandShape(expr.Inner)
 	default:
-		return parser.Value{}, "", false
+		return Value{}, "", false
 	}
 }
 
-func normalizePlannerColumnName(name string, tableRef *parser.TableRef) (string, bool) {
+func normalizePlannerColumnName(name string, tableRef *TableRef) (string, bool) {
 	if !strings.Contains(name, ".") {
 		return name, true
 	}
@@ -435,19 +436,19 @@ func normalizePlannerColumnName(name string, tableRef *parser.TableRef) (string,
 	return parts[1], true
 }
 
-func indexedEqualityFromWhere(where *parser.WhereClause, tableRef *parser.TableRef) (string, parser.Value, bool) {
+func indexedEqualityFromWhere(where *WhereClause, tableRef *TableRef) (string, Value, bool) {
 	if where == nil || len(where.Items) != 1 {
-		return "", parser.Value{}, false
+		return "", Value{}, false
 	}
 
 	item := where.Items[0]
 	if item.Op != "" || item.Condition.Operator != "=" {
-		return "", parser.Value{}, false
+		return "", Value{}, false
 	}
 
 	normalized, ok := normalizePlannerColumnName(item.Condition.Left, tableRef)
 	if !ok {
-		return "", parser.Value{}, false
+		return "", Value{}, false
 	}
 	return normalized, item.Condition.Right, true
 }
