@@ -734,24 +734,28 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 			return rows, nil
 		}
 		plan = downgradeIndexOnlyPlanForExecution(plan)
-		if plan.ScanType == planner.ScanTypeIndex {
-			table := db.tables[plan.IndexScan.TableName]
+		accessPath, err := executor.DescribeSelectAccessPath(plan)
+		if err != nil {
+			return &Rows{err: err, idx: -1}, nil
+		}
+		if accessPath.Kind == executor.SelectAccessPathKindIndex {
+			table := db.tables[accessPath.IndexLookup.TableName]
 			if table == nil {
-				return &Rows{err: newExecError("table not found: " + plan.IndexScan.TableName), idx: -1}, nil
+				return &Rows{err: newExecError("table not found: " + accessPath.IndexLookup.TableName), idx: -1}, nil
 			}
-			indexDef, err := db.resolveSimpleLogicalIndex(table, plan.IndexScan.ColumnName)
+			indexDef, err := db.resolveSimpleLogicalIndex(table, accessPath.IndexLookup.ColumnName)
 			if err != nil {
 				return &Rows{err: err, idx: -1}, nil
 			}
 			execTable := cloneSelectTableMeta(table)
 			if sel.IsCountStar {
-				count, err := db.countIndexedRows(execTable, indexDef, plan.IndexScan.LookupValue)
+				count, err := db.countIndexedRows(execTable, indexDef, accessPath.IndexLookup.LookupValue)
 				if err != nil {
 					return &Rows{err: err, idx: -1}, nil
 				}
 				return newRows([]string{"count"}, [][]any{{count}}), nil
 			}
-			candidateRows, err := db.lookupIndexedRows(table, indexDef, plan.IndexScan.LookupValue)
+			candidateRows, err := db.lookupIndexedRows(table, indexDef, accessPath.IndexLookup.LookupValue)
 			if err != nil {
 				return &Rows{err: err, idx: -1}, nil
 			}
@@ -964,7 +968,7 @@ func (db *DB) scanTableRows(table *executor.Table) ([][]parser.Value, error) {
 	return cloneRows(rows), nil
 }
 
-func (db *DB) lookupIndexedRows(table *executor.Table, indexDef *storage.CatalogIndex, searchValue planner.Value) ([][]parser.Value, error) {
+func (db *DB) lookupIndexedRows(table *executor.Table, indexDef *storage.CatalogIndex, searchValue parser.Value) ([][]parser.Value, error) {
 	locators, err := db.lookupIndexedLocators(table, indexDef, searchValue)
 	if err != nil {
 		return nil, err
@@ -981,7 +985,7 @@ func (db *DB) lookupIndexedRows(table *executor.Table, indexDef *storage.Catalog
 	return rows, nil
 }
 
-func (db *DB) lookupIndexedLocators(table *executor.Table, indexDef *storage.CatalogIndex, searchValue planner.Value) ([]storage.RowLocator, error) {
+func (db *DB) lookupIndexedLocators(table *executor.Table, indexDef *storage.CatalogIndex, searchValue parser.Value) ([]storage.RowLocator, error) {
 	if db == nil || table == nil || indexDef == nil {
 		return nil, ErrInvalidArgument
 	}
@@ -990,14 +994,14 @@ func (db *DB) lookupIndexedLocators(table *executor.Table, indexDef *storage.Cat
 		return nil, err
 	}
 
-	locators, err := storage.LookupSimpleIndexExact(db.pageReaderForLookup, indexDef.RootPageID, storageValueFromParser(searchValue.ParserValue()))
+	locators, err := storage.LookupSimpleIndexExact(db.pageReaderForLookup, indexDef.RootPageID, storageValueFromParser(searchValue))
 	if err != nil {
 		return nil, wrapStorageError(err)
 	}
 	return locators, nil
 }
 
-func (db *DB) countIndexedRows(table *executor.Table, indexDef *storage.CatalogIndex, searchValue planner.Value) (int, error) {
+func (db *DB) countIndexedRows(table *executor.Table, indexDef *storage.CatalogIndex, searchValue parser.Value) (int, error) {
 	locators, err := db.lookupIndexedLocators(table, indexDef, searchValue)
 	if err != nil {
 		return 0, err
@@ -1254,17 +1258,18 @@ func (db *DB) committedTableLocators(table *executor.Table) ([]storage.RowLocato
 }
 
 func tableNamesForSelect(plan *planner.SelectPlan) []string {
-	if plan == nil || plan.Query == nil {
+	accessPath, err := executor.DescribeSelectAccessPath(plan)
+	if err != nil {
 		return nil
 	}
-	switch plan.ScanType {
-	case planner.ScanTypeJoin:
-		if plan.JoinScan == nil {
+	switch accessPath.Kind {
+	case executor.SelectAccessPathKindJoin:
+		return []string{accessPath.JoinLeftTable, accessPath.JoinRightTable}
+	case executor.SelectAccessPathKindTable, executor.SelectAccessPathKindIndex:
+		if accessPath.SingleTableName == "" {
 			return nil
 		}
-		return []string{plan.JoinScan.LeftTableName, plan.JoinScan.RightTableName}
-	case planner.ScanTypeTable, planner.ScanTypeIndex:
-		return []string{plan.Query.TableName}
+		return []string{accessPath.SingleTableName}
 	default:
 		return nil
 	}

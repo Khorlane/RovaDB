@@ -5,6 +5,15 @@ import (
 	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
+type selectScanKind int
+
+const (
+	selectScanKindInvalid selectScanKind = iota
+	selectScanKindTable
+	selectScanKindIndex
+	selectScanKindJoin
+)
+
 type runtimeValueExprKind int
 
 const (
@@ -125,21 +134,34 @@ func (q *runtimeSelectQuery) primaryTableRef() *runtimeTableRef {
 	return &runtimeTableRef{name: q.tableName}
 }
 
+type SelectAccessPathKind int
+
+const (
+	SelectAccessPathKindInvalid SelectAccessPathKind = iota
+	SelectAccessPathKindTable
+	SelectAccessPathKindIndex
+	SelectAccessPathKindJoin
+)
+
+type SelectIndexLookup struct {
+	TableName   string
+	ColumnName  string
+	LookupValue parser.Value
+}
+
+type SelectAccessPath struct {
+	Kind            SelectAccessPathKind
+	SingleTableName string
+	JoinLeftTable   string
+	JoinRightTable  string
+	IndexLookup     SelectIndexLookup
+}
+
 type selectPlanBridge struct {
-	query    *runtimeSelectQuery
-	scanType planner.ScanType
-	table    selectPlanTableScan
-	index    selectPlanIndexScan
-	join     selectPlanJoinScan
-}
-
-type selectPlanTableScan struct {
-	tableName string
-}
-
-type selectPlanIndexScan struct {
-	tableName  string
-	columnName string
+	query      *runtimeSelectQuery
+	scanKind   selectScanKind
+	accessPath SelectAccessPath
+	join       selectPlanJoinScan
 }
 
 type selectPlanJoinScan struct {
@@ -157,8 +179,7 @@ func bridgeSelectPlan(plan *planner.SelectPlan) (*selectPlanBridge, error) {
 	}
 
 	bridge := &selectPlanBridge{
-		query:    runtimeSelectQueryFromPlan(plan.Query),
-		scanType: plan.ScanType,
+		query: runtimeSelectQueryFromPlan(plan.Query),
 	}
 	if bridge.query.tableName == "" {
 		return bridge, nil
@@ -169,18 +190,34 @@ func bridgeSelectPlan(plan *planner.SelectPlan) (*selectPlanBridge, error) {
 		if plan.TableScan == nil || plan.TableScan.TableName != bridge.query.tableName {
 			return nil, errInvalidSelectPlan
 		}
-		bridge.table = selectPlanTableScan{tableName: plan.TableScan.TableName}
+		bridge.scanKind = selectScanKindTable
+		bridge.accessPath = SelectAccessPath{
+			Kind:            SelectAccessPathKindTable,
+			SingleTableName: plan.TableScan.TableName,
+		}
 	case planner.ScanTypeIndex:
 		if plan.IndexScan == nil || plan.IndexScan.TableName != bridge.query.tableName || plan.IndexScan.ColumnName == "" {
 			return nil, errInvalidSelectPlan
 		}
-		bridge.index = selectPlanIndexScan{
-			tableName:  plan.IndexScan.TableName,
-			columnName: plan.IndexScan.ColumnName,
+		bridge.scanKind = selectScanKindIndex
+		bridge.accessPath = SelectAccessPath{
+			Kind:            SelectAccessPathKindIndex,
+			SingleTableName: plan.IndexScan.TableName,
+			IndexLookup: SelectIndexLookup{
+				TableName:   plan.IndexScan.TableName,
+				ColumnName:  plan.IndexScan.ColumnName,
+				LookupValue: plan.IndexScan.LookupValue.ParserValue(),
+			},
 		}
 	case planner.ScanTypeJoin:
 		if plan.JoinScan == nil || plan.JoinScan.LeftTableName == "" || plan.JoinScan.RightTableName == "" || plan.JoinScan.LeftColumnName == "" || plan.JoinScan.RightColumnName == "" {
 			return nil, errInvalidSelectPlan
+		}
+		bridge.scanKind = selectScanKindJoin
+		bridge.accessPath = SelectAccessPath{
+			Kind:           SelectAccessPathKindJoin,
+			JoinLeftTable:  plan.JoinScan.LeftTableName,
+			JoinRightTable: plan.JoinScan.RightTableName,
 		}
 		bridge.join = selectPlanJoinScan{
 			leftTableName:   plan.JoinScan.LeftTableName,
@@ -194,6 +231,14 @@ func bridgeSelectPlan(plan *planner.SelectPlan) (*selectPlanBridge, error) {
 		return nil, errInvalidSelectPlan
 	}
 	return bridge, nil
+}
+
+func DescribeSelectAccessPath(plan *planner.SelectPlan) (SelectAccessPath, error) {
+	bridge, err := bridgeSelectPlan(plan)
+	if err != nil {
+		return SelectAccessPath{}, err
+	}
+	return bridge.accessPath, nil
 }
 
 func runtimeSelectQueryFromPlan(query *planner.SelectQuery) *runtimeSelectQuery {
@@ -340,12 +385,9 @@ func (b *selectPlanBridge) singleTable(tableMap map[string]*Table) (*Table, erro
 		return nil, errInvalidSelectPlan
 	}
 
-	tableName := ""
-	switch b.scanType {
-	case planner.ScanTypeTable:
-		tableName = b.table.tableName
-	case planner.ScanTypeIndex:
-		tableName = b.index.tableName
+	tableName := b.accessPath.SingleTableName
+	switch b.scanKind {
+	case selectScanKindTable, selectScanKindIndex:
 	default:
 		return nil, errInvalidSelectPlan
 	}
@@ -358,17 +400,17 @@ func (b *selectPlanBridge) singleTable(tableMap map[string]*Table) (*Table, erro
 }
 
 func (b *selectPlanBridge) joinTables(tableMap map[string]*Table) (*Table, *Table, error) {
-	if b == nil || b.scanType != planner.ScanTypeJoin {
+	if b == nil || b.scanKind != selectScanKindJoin {
 		return nil, nil, errInvalidSelectPlan
 	}
 
-	leftTable := tableMap[b.join.leftTableName]
+	leftTable := tableMap[b.accessPath.JoinLeftTable]
 	if leftTable == nil {
-		return nil, nil, newTableNotFoundError(b.join.leftTableName)
+		return nil, nil, newTableNotFoundError(b.accessPath.JoinLeftTable)
 	}
-	rightTable := tableMap[b.join.rightTableName]
+	rightTable := tableMap[b.accessPath.JoinRightTable]
 	if rightTable == nil {
-		return nil, nil, newTableNotFoundError(b.join.rightTableName)
+		return nil, nil, newTableNotFoundError(b.accessPath.JoinRightTable)
 	}
 	return leftTable, rightTable, nil
 }

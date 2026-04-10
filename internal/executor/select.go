@@ -21,20 +21,20 @@ func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Valu
 	if sel.tableName == "" {
 		return nil, errUnsupportedStatement
 	}
-	if len(sel.from) > 1 && bridge.scanType != planner.ScanTypeJoin {
+	if len(sel.from) > 1 && bridge.scanKind != selectScanKindJoin {
 		return nil, errUnsupportedStatement
 	}
 
-	switch bridge.scanType {
-	case planner.ScanTypeJoin:
+	switch bridge.scanKind {
+	case selectScanKindJoin:
 		return executeJoinSelect(bridge, tables)
-	case planner.ScanTypeTable:
+	case selectScanKindTable:
 		table, err := bridge.singleTable(tables)
 		if err != nil {
 			return nil, err
 		}
 		return executeSelectRows(sel, table, table.Rows)
-	case planner.ScanTypeIndex:
+	case selectScanKindIndex:
 		table, err := bridge.singleTable(tables)
 		if err != nil {
 			return nil, err
@@ -46,10 +46,10 @@ func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Valu
 }
 
 func executeIndexSelect(plan *selectPlanBridge, table *Table) ([][]parser.Value, error) {
-	if plan == nil || plan.scanType != planner.ScanTypeIndex || plan.query == nil || table == nil {
+	if plan == nil || plan.scanKind != selectScanKindIndex || plan.query == nil || table == nil {
 		return nil, errInvalidSelectPlan
 	}
-	if plan.index.columnName == "" {
+	if plan.accessPath.IndexLookup.ColumnName == "" {
 		return nil, errInvalidSelectPlan
 	}
 	// Public indexed query execution now lives in the DB-owned page-backed path.
@@ -63,7 +63,7 @@ func SelectCandidateRows(plan *planner.SelectPlan, table *Table, candidateRows [
 	if err != nil || table == nil {
 		return nil, errInvalidSelectPlan
 	}
-	if bridge.scanType == planner.ScanTypeJoin {
+	if bridge.scanKind == selectScanKindJoin {
 		return nil, errInvalidSelectPlan
 	}
 	return executeSelectRows(bridge.query, table, candidateRows)

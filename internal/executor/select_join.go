@@ -23,7 +23,7 @@ type joinSelectResolver struct {
 }
 
 func executeJoinSelect(plan *selectPlanBridge, tables map[string]*Table) ([][]parser.Value, error) {
-	if plan == nil || plan.query == nil || plan.scanType != planner.ScanTypeJoin {
+	if plan == nil || plan.query == nil || plan.scanKind != selectScanKindJoin {
 		return nil, errInvalidSelectPlan
 	}
 	if !isSupportedJoinSelectShape(plan.query) {
@@ -132,7 +132,7 @@ func ProjectedColumnNamesForPlan(plan *planner.SelectPlan, tables map[string]*Ta
 	if err != nil {
 		return nil, err
 	}
-	if bridge.scanType != planner.ScanTypeJoin {
+	if bridge.scanKind != selectScanKindJoin {
 		table, err := bridge.singleTable(tables)
 		if err != nil {
 			return nil, err

@@ -17,11 +17,14 @@ func TestBridgeSelectPlanTableScan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bridgeSelectPlan() error = %v", err)
 	}
-	if bridge.scanType != planner.ScanTypeTable {
-		t.Fatalf("bridge.scanType = %q, want %q", bridge.scanType, planner.ScanTypeTable)
+	if bridge.scanKind != selectScanKindTable {
+		t.Fatalf("bridge.scanKind = %v, want %v", bridge.scanKind, selectScanKindTable)
 	}
-	if bridge.table.tableName != "users" {
-		t.Fatalf("bridge.table.tableName = %q, want users", bridge.table.tableName)
+	if bridge.accessPath.Kind != SelectAccessPathKindTable {
+		t.Fatalf("bridge.accessPath.Kind = %v, want %v", bridge.accessPath.Kind, SelectAccessPathKindTable)
+	}
+	if bridge.accessPath.SingleTableName != "users" {
+		t.Fatalf("bridge.accessPath.SingleTableName = %q, want users", bridge.accessPath.SingleTableName)
 	}
 }
 
@@ -38,11 +41,17 @@ func TestBridgeSelectPlanIndexScan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bridgeSelectPlan() error = %v", err)
 	}
-	if bridge.scanType != planner.ScanTypeIndex {
-		t.Fatalf("bridge.scanType = %q, want %q", bridge.scanType, planner.ScanTypeIndex)
+	if bridge.scanKind != selectScanKindIndex {
+		t.Fatalf("bridge.scanKind = %v, want %v", bridge.scanKind, selectScanKindIndex)
 	}
-	if bridge.index.tableName != "users" || bridge.index.columnName != "name" {
-		t.Fatalf("bridge.index = %#v, want users/name", bridge.index)
+	if bridge.accessPath.Kind != SelectAccessPathKindIndex {
+		t.Fatalf("bridge.accessPath.Kind = %v, want %v", bridge.accessPath.Kind, SelectAccessPathKindIndex)
+	}
+	if bridge.accessPath.IndexLookup.TableName != "users" || bridge.accessPath.IndexLookup.ColumnName != "name" {
+		t.Fatalf("bridge.accessPath.IndexLookup = %#v, want users/name", bridge.accessPath.IndexLookup)
+	}
+	if got := bridge.accessPath.IndexLookup.LookupValue; got.Kind != planner.StringValue("alice").ParserValue().Kind || got.Str != "alice" {
+		t.Fatalf("bridge.accessPath.IndexLookup.LookupValue = %#v, want alice", got)
 	}
 }
 
@@ -62,14 +71,39 @@ func TestBridgeSelectPlanJoinScan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bridgeSelectPlan() error = %v", err)
 	}
-	if bridge.scanType != planner.ScanTypeJoin {
-		t.Fatalf("bridge.scanType = %q, want %q", bridge.scanType, planner.ScanTypeJoin)
+	if bridge.scanKind != selectScanKindJoin {
+		t.Fatalf("bridge.scanKind = %v, want %v", bridge.scanKind, selectScanKindJoin)
 	}
-	if bridge.join.leftTableName != "users" || bridge.join.rightTableName != "departments" {
-		t.Fatalf("bridge.join = %#v, want users/departments", bridge.join)
+	if bridge.accessPath.Kind != SelectAccessPathKindJoin {
+		t.Fatalf("bridge.accessPath.Kind = %v, want %v", bridge.accessPath.Kind, SelectAccessPathKindJoin)
+	}
+	if bridge.accessPath.JoinLeftTable != "users" || bridge.accessPath.JoinRightTable != "departments" {
+		t.Fatalf("bridge.accessPath = %#v, want users/departments", bridge.accessPath)
 	}
 	if bridge.join.leftTableAlias != "u" || bridge.join.rightTableAlias != "d" {
 		t.Fatalf("bridge.join aliases = %#v, want u/d", bridge.join)
+	}
+}
+
+func TestDescribeSelectAccessPathReturnsJoinTables(t *testing.T) {
+	accessPath, err := DescribeSelectAccessPath(&planner.SelectPlan{
+		Query:    &planner.SelectQuery{TableName: "users"},
+		ScanType: planner.ScanTypeJoin,
+		JoinScan: &planner.JoinScan{
+			LeftTableName:   "users",
+			LeftColumnName:  "dept_id",
+			RightTableName:  "departments",
+			RightColumnName: "id",
+		},
+	})
+	if err != nil {
+		t.Fatalf("DescribeSelectAccessPath() error = %v", err)
+	}
+	if accessPath.Kind != SelectAccessPathKindJoin {
+		t.Fatalf("DescribeSelectAccessPath().Kind = %v, want %v", accessPath.Kind, SelectAccessPathKindJoin)
+	}
+	if accessPath.JoinLeftTable != "users" || accessPath.JoinRightTable != "departments" {
+		t.Fatalf("DescribeSelectAccessPath() = %#v, want users/departments", accessPath)
 	}
 }
 

@@ -3,7 +3,9 @@ package rovadb
 import (
 	"testing"
 
+	"github.com/Khorlane/RovaDB/internal/executor"
 	"github.com/Khorlane/RovaDB/internal/parser"
+	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
 func TestQueryReloadsRowsFromStorageInsteadOfStaleTableCache(t *testing.T) {
@@ -56,5 +58,36 @@ func TestQueryReloadsRowsFromStorageInsteadOfStaleTableCache(t *testing.T) {
 	}
 	if rows.Next() {
 		t.Fatal("Next() after rows = true, want false")
+	}
+}
+
+func TestTableNamesForSelectUsesExecutorAccessPathForIndexScan(t *testing.T) {
+	plan := &planner.SelectPlan{
+		Query:    &planner.SelectQuery{TableName: "users"},
+		ScanType: planner.ScanTypeIndex,
+		IndexScan: &planner.IndexScan{
+			TableName:   "users",
+			ColumnName:  "name",
+			LookupValue: planner.StringValue("alice"),
+		},
+	}
+
+	names := tableNamesForSelect(plan)
+	if len(names) != 1 || names[0] != "users" {
+		t.Fatalf("tableNamesForSelect() = %#v, want [users]", names)
+	}
+
+	accessPath, err := executor.DescribeSelectAccessPath(plan)
+	if err != nil {
+		t.Fatalf("DescribeSelectAccessPath() error = %v", err)
+	}
+	if accessPath.Kind != executor.SelectAccessPathKindIndex {
+		t.Fatalf("DescribeSelectAccessPath().Kind = %v, want %v", accessPath.Kind, executor.SelectAccessPathKindIndex)
+	}
+	if accessPath.IndexLookup.TableName != "users" || accessPath.IndexLookup.ColumnName != "name" {
+		t.Fatalf("DescribeSelectAccessPath() = %#v, want users/name", accessPath)
+	}
+	if accessPath.IndexLookup.LookupValue != parser.StringValue("alice") {
+		t.Fatalf("DescribeSelectAccessPath().IndexLookup.LookupValue = %#v, want %#v", accessPath.IndexLookup.LookupValue, parser.StringValue("alice"))
 	}
 }
