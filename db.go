@@ -2235,12 +2235,14 @@ func cloneTable(table *executor.Table) *executor.Table {
 	rows := cloneRows(table.Rows)
 
 	cloned := &executor.Table{
-		Name:      table.Name,
-		TableID:   table.TableID,
-		IsSystem:  table.IsSystem,
-		Columns:   columns,
-		Rows:      rows,
-		IndexDefs: cloneIndexDefs(table.IndexDefs),
+		Name:           table.Name,
+		TableID:        table.TableID,
+		IsSystem:       table.IsSystem,
+		Columns:        columns,
+		Rows:           rows,
+		IndexDefs:      cloneIndexDefs(table.IndexDefs),
+		PrimaryKeyDef:  clonePrimaryKeyDef(table.PrimaryKeyDef),
+		ForeignKeyDefs: cloneForeignKeyDefs(table.ForeignKeyDefs),
 	}
 	cloned.SetStorageMeta(table.RootPageID(), table.PersistedRowCount())
 	cloned.SetPhysicalTableRootMeta(table.TableHeaderPageID(), table.TableStorageFormatVersion(), table.FirstSpaceMapPageID(), table.OwnedDataPageCount(), table.OwnedSpaceMapPageCount())
@@ -2261,6 +2263,29 @@ func cloneIndexDefs(indexDefs []storage.CatalogIndex) []storage.CatalogIndex {
 			RootPageID: indexDef.RootPageID,
 			Columns:    append([]storage.CatalogIndexColumn(nil), indexDef.Columns...),
 		})
+	}
+	return cloned
+}
+
+func clonePrimaryKeyDef(pk *storage.CatalogPrimaryKey) *storage.CatalogPrimaryKey {
+	if pk == nil {
+		return nil
+	}
+	cloned := *pk
+	cloned.Columns = append([]string(nil), pk.Columns...)
+	return &cloned
+}
+
+func cloneForeignKeyDefs(fks []storage.CatalogForeignKey) []storage.CatalogForeignKey {
+	if len(fks) == 0 {
+		return nil
+	}
+	cloned := make([]storage.CatalogForeignKey, 0, len(fks))
+	for _, fk := range fks {
+		clonedFK := fk
+		clonedFK.ChildColumns = append([]string(nil), fk.ChildColumns...)
+		clonedFK.ParentColumns = append([]string(nil), fk.ParentColumns...)
+		cloned = append(cloned, clonedFK)
 	}
 	return cloned
 }
@@ -2868,12 +2893,14 @@ func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
 	for _, name := range names {
 		table := tables[name]
 		entry := storage.CatalogTable{
-			Name:       table.Name,
-			TableID:    table.TableID,
-			RootPageID: uint32(table.RootPageID()),
-			RowCount:   table.PersistedRowCount(),
-			Columns:    make([]storage.CatalogColumn, 0, len(table.Columns)),
-			Indexes:    make([]storage.CatalogIndex, 0, len(table.IndexDefs)),
+			Name:        table.Name,
+			TableID:     table.TableID,
+			RootPageID:  uint32(table.RootPageID()),
+			RowCount:    table.PersistedRowCount(),
+			Columns:     make([]storage.CatalogColumn, 0, len(table.Columns)),
+			Indexes:     make([]storage.CatalogIndex, 0, len(table.IndexDefs)),
+			PrimaryKey:  clonePrimaryKeyDef(table.PrimaryKeyDef),
+			ForeignKeys: cloneForeignKeyDefs(table.ForeignKeyDefs),
 		}
 		for _, column := range table.Columns {
 			entry.Columns = append(entry.Columns, storage.CatalogColumn{
@@ -2890,6 +2917,11 @@ func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
 		sort.Strings(indexNames)
 		for _, indexName := range indexNames {
 			entry.Indexes = append(entry.Indexes, indexByName[indexName])
+		}
+		if len(entry.ForeignKeys) > 1 {
+			sort.Slice(entry.ForeignKeys, func(i, j int) bool {
+				return entry.ForeignKeys[i].Name < entry.ForeignKeys[j].Name
+			})
 		}
 		catalog.Tables = append(catalog.Tables, entry)
 	}
@@ -2981,11 +3013,13 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 			columns = append(columns, parser.ColumnDef{Name: column.Name, Type: columnType})
 		}
 		tables[table.Name] = &executor.Table{
-			Name:      table.Name,
-			TableID:   table.TableID,
-			IsSystem:  isSystemCatalogTableName(table.Name),
-			Columns:   columns,
-			IndexDefs: cloneIndexDefs(table.Indexes),
+			Name:           table.Name,
+			TableID:        table.TableID,
+			IsSystem:       isSystemCatalogTableName(table.Name),
+			Columns:        columns,
+			IndexDefs:      cloneIndexDefs(table.Indexes),
+			PrimaryKeyDef:  clonePrimaryKeyDef(table.PrimaryKey),
+			ForeignKeyDefs: cloneForeignKeyDefs(table.ForeignKeys),
 		}
 		tables[table.Name].SetStorageMeta(rootPageID, table.RowCount)
 		for _, index := range table.Indexes {
@@ -3730,6 +3764,12 @@ func validateTables(tables map[string]*executor.Table) error {
 		if err := validateIndexConsistency(table); err != nil {
 			return err
 		}
+		if err := validateTableConstraintConsistency(table); err != nil {
+			return err
+		}
+	}
+	if err := validateForeignKeyDependencies(tables); err != nil {
+		return err
 	}
 	return nil
 }
@@ -3760,6 +3800,118 @@ func validateIndexConsistency(table *executor.Table) error {
 		}
 	}
 	return nil
+}
+
+func validateTableConstraintConsistency(table *executor.Table) error {
+	if table == nil {
+		return nil
+	}
+
+	indexesByID := make(map[uint32]storage.CatalogIndex, len(table.IndexDefs))
+	for _, indexDef := range table.IndexDefs {
+		if indexDef.IndexID != 0 {
+			indexesByID[indexDef.IndexID] = indexDef
+		}
+	}
+	columnNames := make(map[string]struct{}, len(table.Columns))
+	for _, column := range table.Columns {
+		columnNames[column.Name] = struct{}{}
+	}
+
+	constraintNames := make(map[string]struct{}, 1+len(table.ForeignKeyDefs))
+	if table.PrimaryKeyDef != nil {
+		pk := table.PrimaryKeyDef
+		if pk.Name == "" || pk.TableID == 0 || pk.TableID != table.TableID || len(pk.Columns) == 0 || pk.IndexID == 0 {
+			return newExecError("constraint/table mismatch")
+		}
+		constraintNames[pk.Name] = struct{}{}
+		if _, ok := indexesByID[pk.IndexID]; !ok {
+			return newExecError("constraint/table mismatch")
+		}
+		if hasDuplicateStrings(pk.Columns) || !allColumnsExist(pk.Columns, columnNames) {
+			return newExecError("constraint/table mismatch")
+		}
+	}
+	for _, fk := range table.ForeignKeyDefs {
+		if fk.Name == "" || fk.ChildTableID == 0 || fk.ChildTableID != table.TableID || len(fk.ChildColumns) == 0 || fk.ParentTableID == 0 || len(fk.ParentColumns) == 0 || fk.ParentPrimaryKeyName == "" || fk.ChildIndexID == 0 {
+			return newExecError("constraint/table mismatch")
+		}
+		if fk.OnDeleteAction != storage.CatalogForeignKeyDeleteActionRestrict && fk.OnDeleteAction != storage.CatalogForeignKeyDeleteActionCascade {
+			return newExecError("constraint/table mismatch")
+		}
+		if _, exists := constraintNames[fk.Name]; exists {
+			return newExecError("constraint/table mismatch")
+		}
+		constraintNames[fk.Name] = struct{}{}
+		if _, ok := indexesByID[fk.ChildIndexID]; !ok {
+			return newExecError("constraint/table mismatch")
+		}
+		if hasDuplicateStrings(fk.ChildColumns) || !allColumnsExist(fk.ChildColumns, columnNames) {
+			return newExecError("constraint/table mismatch")
+		}
+		if hasDuplicateStrings(fk.ParentColumns) {
+			return newExecError("constraint/table mismatch")
+		}
+	}
+	return nil
+}
+
+func validateForeignKeyDependencies(tables map[string]*executor.Table) error {
+	tablesByID := make(map[uint32]*executor.Table, len(tables))
+	for _, table := range tables {
+		if table == nil || table.TableID == 0 {
+			continue
+		}
+		if _, exists := tablesByID[table.TableID]; exists {
+			return newExecError("constraint/table mismatch")
+		}
+		tablesByID[table.TableID] = table
+	}
+	for _, table := range tables {
+		if table == nil {
+			continue
+		}
+		for _, fk := range table.ForeignKeyDefs {
+			parentTable := tablesByID[fk.ParentTableID]
+			if parentTable == nil || parentTable.PrimaryKeyDef == nil {
+				return newExecError("constraint/table mismatch")
+			}
+			if parentTable.PrimaryKeyDef.Name != fk.ParentPrimaryKeyName {
+				return newExecError("constraint/table mismatch")
+			}
+			parentColumns := make(map[string]struct{}, len(parentTable.Columns))
+			for _, column := range parentTable.Columns {
+				parentColumns[column.Name] = struct{}{}
+			}
+			if !allColumnsExist(fk.ParentColumns, parentColumns) {
+				return newExecError("constraint/table mismatch")
+			}
+		}
+	}
+	return nil
+}
+
+func hasDuplicateStrings(values []string) bool {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if value == "" {
+			return true
+		}
+		if _, exists := seen[value]; exists {
+			return true
+		}
+		seen[value] = struct{}{}
+	}
+	return false
+}
+
+func allColumnsExist(values []string, columns map[string]struct{}) bool {
+	for _, value := range values {
+		if _, ok := columns[value]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (db *DB) validateTxnState() error {

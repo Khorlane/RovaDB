@@ -186,7 +186,7 @@ func TestCorruptedIndexMetadataDetected(t *testing.T) {
 
 func corruptedIndexCatalogBytes(_ uint32) []byte {
 	buf := make([]byte, 0, storage.PageSize)
-	buf = appendUint32LE(buf, 6)
+	buf = appendUint32LE(buf, 7)
 	buf = appendUint32LE(buf, 1)
 	buf = appendStringLE(buf, "users")
 	buf = appendUint32LE(buf, 7)
@@ -201,6 +201,8 @@ func corruptedIndexCatalogBytes(_ uint32) []byte {
 	buf = appendUint16LE(buf, 1)
 	buf = appendStringLE(buf, "missing")
 	buf = append(buf, 0)
+	buf = append(buf, 0)
+	buf = appendUint16LE(buf, 0)
 	return buf
 }
 

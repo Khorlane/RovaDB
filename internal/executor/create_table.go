@@ -24,6 +24,8 @@ type Table struct {
 	Columns           []parser.ColumnDef
 	Rows              [][]parser.Value // transient operation rows; persisted storage is authoritative
 	IndexDefs         []storage.CatalogIndex
+	PrimaryKeyDef     *storage.CatalogPrimaryKey
+	ForeignKeyDefs    []storage.CatalogForeignKey
 	rootPageID        storage.PageID
 	persistedRowCount uint32
 	tableHeaderPageID storage.PageID

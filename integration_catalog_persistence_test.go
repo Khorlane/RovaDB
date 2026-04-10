@@ -740,7 +740,7 @@ type currentCatalogIndexColumnForTest struct {
 
 func currentCatalogBytesForTest(tables []currentCatalogTableForTest) []byte {
 	buf := make([]byte, 0, storage.PageSize)
-	buf = appendUint32LE(buf, 6)
+	buf = appendUint32LE(buf, 7)
 	buf = appendUint32LE(buf, uint32(len(tables)))
 	for _, table := range tables {
 		buf = appendStringLE(buf, table.name)
@@ -770,6 +770,8 @@ func currentCatalogBytesForTest(tables []currentCatalogTableForTest) []byte {
 				}
 			}
 		}
+		buf = append(buf, 0)
+		buf = appendUint16LE(buf, 0)
 	}
 	return buf
 }

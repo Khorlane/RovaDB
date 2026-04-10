@@ -923,8 +923,8 @@ func TestDirectoryWritePathWritesIDMappingsOnly(t *testing.T) {
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
 
-	if catalog.Version != 6 {
-		t.Fatalf("catalog.Version = %d, want 6", catalog.Version)
+	if catalog.Version != 7 {
+		t.Fatalf("catalog.Version = %d, want 7", catalog.Version)
 	}
 	for _, table := range catalog.Tables {
 		if table.RootPageID != 0 {

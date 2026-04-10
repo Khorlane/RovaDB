@@ -200,6 +200,20 @@ func TestLoadCatalogRejectsLegacyPayloadVersions(t *testing.T) {
 			}),
 		},
 		{
+			name: "v6",
+			payload: buildLegacyCatalogPageDataForTest(6, &CatalogData{
+				Tables: []CatalogTable{
+					{
+						Name:       "users",
+						TableID:    7,
+						RootPageID: 1,
+						Columns:    []CatalogColumn{{Name: "id", Type: CatalogColumnTypeInt}},
+						Indexes:    []CatalogIndex{{Name: "idx_users_id", IndexID: 9, RootPageID: 11, Columns: []CatalogIndexColumn{{Name: "id"}}}},
+					},
+				},
+			}),
+		},
+		{
 			name: "v5",
 			payload: buildLegacyCatalogPageDataForTest(5, &CatalogData{
 				Tables: []CatalogTable{

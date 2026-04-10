@@ -5,7 +5,7 @@ import (
 )
 
 const (
-	catalogVersion = 6
+	catalogVersion = 7
 	catalogPageID  = 0
 
 	CatalogColumnTypeInt  = 1
@@ -22,12 +22,14 @@ type CatalogData struct {
 
 // CatalogTable is a persisted table schema entry.
 type CatalogTable struct {
-	Name       string
-	TableID    uint32
-	RootPageID uint32
-	RowCount   uint32
-	Columns    []CatalogColumn
-	Indexes    []CatalogIndex
+	Name        string
+	TableID     uint32
+	RootPageID  uint32
+	RowCount    uint32
+	Columns     []CatalogColumn
+	Indexes     []CatalogIndex
+	PrimaryKey  *CatalogPrimaryKey
+	ForeignKeys []CatalogForeignKey
 }
 
 // CatalogColumn is a persisted typed column entry.
@@ -167,6 +169,11 @@ func encodeCatalogPayload(cat *CatalogData) ([]byte, error) {
 				return nil, err
 			}
 		}
+		var err error
+		buf, err = appendCatalogConstraints(buf, table)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return buf, nil
 }
@@ -251,6 +258,9 @@ func decodeCatalogPayload(pageData []byte) (int, *CatalogData, error) {
 				return 0, nil, err
 			}
 			table.Indexes = append(table.Indexes, index)
+		}
+		if err := readCatalogConstraints(pageData, &offset, &table, columnNames); err != nil {
+			return 0, nil, err
 		}
 
 		cat.Tables = append(cat.Tables, table)
@@ -493,6 +503,271 @@ func appendCatalogIndex(buf []byte, index CatalogIndex, columns []CatalogColumn)
 		}
 	}
 	return buf, nil
+}
+
+func appendCatalogConstraints(buf []byte, table CatalogTable) ([]byte, error) {
+	validColumns := make(map[string]struct{}, len(table.Columns))
+	for _, column := range table.Columns {
+		validColumns[column.Name] = struct{}{}
+	}
+	constraintNames := make(map[string]struct{}, 1+len(table.ForeignKeys))
+	if table.PrimaryKey != nil {
+		if table.PrimaryKey.Name == "" || table.PrimaryKey.TableID == 0 || table.PrimaryKey.TableID != table.TableID || len(table.PrimaryKey.Columns) == 0 || table.PrimaryKey.IndexID == 0 {
+			return nil, errCorruptedCatalogPage
+		}
+		if _, exists := constraintNames[table.PrimaryKey.Name]; exists {
+			return nil, errCorruptedCatalogPage
+		}
+		constraintNames[table.PrimaryKey.Name] = struct{}{}
+		buf = append(buf, 1)
+		buf = appendString(buf, table.PrimaryKey.Name)
+		buf = appendUint32(buf, table.PrimaryKey.TableID)
+		buf = appendUint16(buf, uint16(len(table.PrimaryKey.Columns)))
+		seenColumns := make(map[string]struct{}, len(table.PrimaryKey.Columns))
+		for _, columnName := range table.PrimaryKey.Columns {
+			if columnName == "" {
+				return nil, errCorruptedCatalogPage
+			}
+			if _, ok := validColumns[columnName]; !ok {
+				return nil, errCorruptedCatalogPage
+			}
+			if _, exists := seenColumns[columnName]; exists {
+				return nil, errCorruptedCatalogPage
+			}
+			seenColumns[columnName] = struct{}{}
+			buf = appendString(buf, columnName)
+		}
+		buf = appendUint32(buf, table.PrimaryKey.IndexID)
+		if table.PrimaryKey.ImplicitNN {
+			buf = append(buf, 1)
+		} else {
+			buf = append(buf, 0)
+		}
+	} else {
+		buf = append(buf, 0)
+	}
+	buf = appendUint16(buf, uint16(len(table.ForeignKeys)))
+	for _, fk := range table.ForeignKeys {
+		if fk.Name == "" || fk.ChildTableID == 0 || fk.ChildTableID != table.TableID || len(fk.ChildColumns) == 0 || fk.ParentTableID == 0 || len(fk.ParentColumns) == 0 || fk.ParentPrimaryKeyName == "" || fk.ChildIndexID == 0 {
+			return nil, errCorruptedCatalogPage
+		}
+		if fk.OnDeleteAction != CatalogForeignKeyDeleteActionRestrict && fk.OnDeleteAction != CatalogForeignKeyDeleteActionCascade {
+			return nil, errCorruptedCatalogPage
+		}
+		if _, exists := constraintNames[fk.Name]; exists {
+			return nil, errCorruptedCatalogPage
+		}
+		constraintNames[fk.Name] = struct{}{}
+		buf = appendString(buf, fk.Name)
+		buf = appendUint32(buf, fk.ChildTableID)
+		buf = appendUint16(buf, uint16(len(fk.ChildColumns)))
+		seenChildColumns := make(map[string]struct{}, len(fk.ChildColumns))
+		for _, columnName := range fk.ChildColumns {
+			if columnName == "" {
+				return nil, errCorruptedCatalogPage
+			}
+			if _, ok := validColumns[columnName]; !ok {
+				return nil, errCorruptedCatalogPage
+			}
+			if _, exists := seenChildColumns[columnName]; exists {
+				return nil, errCorruptedCatalogPage
+			}
+			seenChildColumns[columnName] = struct{}{}
+			buf = appendString(buf, columnName)
+		}
+		buf = appendUint32(buf, fk.ParentTableID)
+		buf = appendUint16(buf, uint16(len(fk.ParentColumns)))
+		seenParentColumns := make(map[string]struct{}, len(fk.ParentColumns))
+		for _, columnName := range fk.ParentColumns {
+			if columnName == "" {
+				return nil, errCorruptedCatalogPage
+			}
+			if _, exists := seenParentColumns[columnName]; exists {
+				return nil, errCorruptedCatalogPage
+			}
+			seenParentColumns[columnName] = struct{}{}
+			buf = appendString(buf, columnName)
+		}
+		buf = appendString(buf, fk.ParentPrimaryKeyName)
+		buf = appendUint32(buf, fk.ChildIndexID)
+		buf = append(buf, fk.OnDeleteAction)
+	}
+	return buf, nil
+}
+
+func readCatalogConstraints(data []byte, offset *int, table *CatalogTable, columnNames map[string]struct{}) error {
+	if offset == nil || table == nil {
+		return errCorruptedCatalogPage
+	}
+	if *offset >= len(data) {
+		return errCorruptedCatalogPage
+	}
+	hasPrimaryKey := data[*offset]
+	*offset++
+	if hasPrimaryKey > 1 {
+		return errCorruptedCatalogPage
+	}
+	constraintNames := make(map[string]struct{}, 1)
+	indexIDs := make(map[uint32]struct{}, len(table.Indexes))
+	for _, index := range table.Indexes {
+		indexIDs[index.IndexID] = struct{}{}
+	}
+	if hasPrimaryKey == 1 {
+		pk, err := readCatalogPrimaryKey(data, offset, table.TableID, columnNames, indexIDs)
+		if err != nil {
+			return err
+		}
+		table.PrimaryKey = &pk
+		constraintNames[pk.Name] = struct{}{}
+	}
+	fkCount, ok := readUint16(data, offset)
+	if !ok {
+		return errCorruptedCatalogPage
+	}
+	table.ForeignKeys = make([]CatalogForeignKey, 0, fkCount)
+	for i := uint16(0); i < fkCount; i++ {
+		fk, err := readCatalogForeignKey(data, offset, table.TableID, columnNames, indexIDs)
+		if err != nil {
+			return err
+		}
+		if _, exists := constraintNames[fk.Name]; exists {
+			return errCorruptedCatalogPage
+		}
+		constraintNames[fk.Name] = struct{}{}
+		table.ForeignKeys = append(table.ForeignKeys, fk)
+	}
+	return nil
+}
+
+func readCatalogPrimaryKey(data []byte, offset *int, tableID uint32, columnNames map[string]struct{}, indexIDs map[uint32]struct{}) (CatalogPrimaryKey, error) {
+	name, ok := readString(data, offset)
+	if !ok || name == "" {
+		return CatalogPrimaryKey{}, errCorruptedCatalogPage
+	}
+	owningTableID, ok := readUint32(data, offset)
+	if !ok || owningTableID == 0 || owningTableID != tableID {
+		return CatalogPrimaryKey{}, errCorruptedCatalogPage
+	}
+	columnCount, ok := readUint16(data, offset)
+	if !ok || columnCount == 0 {
+		return CatalogPrimaryKey{}, errCorruptedCatalogPage
+	}
+	columns := make([]string, 0, columnCount)
+	seenColumns := make(map[string]struct{}, columnCount)
+	for i := uint16(0); i < columnCount; i++ {
+		columnName, ok := readString(data, offset)
+		if !ok || columnName == "" {
+			return CatalogPrimaryKey{}, errCorruptedCatalogPage
+		}
+		if _, exists := columnNames[columnName]; !exists {
+			return CatalogPrimaryKey{}, errCorruptedCatalogPage
+		}
+		if _, exists := seenColumns[columnName]; exists {
+			return CatalogPrimaryKey{}, errCorruptedCatalogPage
+		}
+		seenColumns[columnName] = struct{}{}
+		columns = append(columns, columnName)
+	}
+	indexID, ok := readUint32(data, offset)
+	if !ok || indexID == 0 {
+		return CatalogPrimaryKey{}, errCorruptedCatalogPage
+	}
+	if _, exists := indexIDs[indexID]; !exists {
+		return CatalogPrimaryKey{}, errCorruptedCatalogPage
+	}
+	if *offset >= len(data) {
+		return CatalogPrimaryKey{}, errCorruptedCatalogPage
+	}
+	implicitNN := data[*offset] != 0
+	*offset++
+	return CatalogPrimaryKey{
+		Name:       name,
+		TableID:    owningTableID,
+		Columns:    columns,
+		IndexID:    indexID,
+		ImplicitNN: implicitNN,
+	}, nil
+}
+
+func readCatalogForeignKey(data []byte, offset *int, tableID uint32, columnNames map[string]struct{}, indexIDs map[uint32]struct{}) (CatalogForeignKey, error) {
+	name, ok := readString(data, offset)
+	if !ok || name == "" {
+		return CatalogForeignKey{}, errCorruptedCatalogPage
+	}
+	childTableID, ok := readUint32(data, offset)
+	if !ok || childTableID == 0 || childTableID != tableID {
+		return CatalogForeignKey{}, errCorruptedCatalogPage
+	}
+	childColumnCount, ok := readUint16(data, offset)
+	if !ok || childColumnCount == 0 {
+		return CatalogForeignKey{}, errCorruptedCatalogPage
+	}
+	childColumns := make([]string, 0, childColumnCount)
+	seenChildColumns := make(map[string]struct{}, childColumnCount)
+	for i := uint16(0); i < childColumnCount; i++ {
+		columnName, ok := readString(data, offset)
+		if !ok || columnName == "" {
+			return CatalogForeignKey{}, errCorruptedCatalogPage
+		}
+		if _, exists := columnNames[columnName]; !exists {
+			return CatalogForeignKey{}, errCorruptedCatalogPage
+		}
+		if _, exists := seenChildColumns[columnName]; exists {
+			return CatalogForeignKey{}, errCorruptedCatalogPage
+		}
+		seenChildColumns[columnName] = struct{}{}
+		childColumns = append(childColumns, columnName)
+	}
+	parentTableID, ok := readUint32(data, offset)
+	if !ok || parentTableID == 0 {
+		return CatalogForeignKey{}, errCorruptedCatalogPage
+	}
+	parentColumnCount, ok := readUint16(data, offset)
+	if !ok || parentColumnCount == 0 {
+		return CatalogForeignKey{}, errCorruptedCatalogPage
+	}
+	parentColumns := make([]string, 0, parentColumnCount)
+	seenParentColumns := make(map[string]struct{}, parentColumnCount)
+	for i := uint16(0); i < parentColumnCount; i++ {
+		columnName, ok := readString(data, offset)
+		if !ok || columnName == "" {
+			return CatalogForeignKey{}, errCorruptedCatalogPage
+		}
+		if _, exists := seenParentColumns[columnName]; exists {
+			return CatalogForeignKey{}, errCorruptedCatalogPage
+		}
+		seenParentColumns[columnName] = struct{}{}
+		parentColumns = append(parentColumns, columnName)
+	}
+	parentPrimaryKeyName, ok := readString(data, offset)
+	if !ok || parentPrimaryKeyName == "" {
+		return CatalogForeignKey{}, errCorruptedCatalogPage
+	}
+	childIndexID, ok := readUint32(data, offset)
+	if !ok || childIndexID == 0 {
+		return CatalogForeignKey{}, errCorruptedCatalogPage
+	}
+	if _, exists := indexIDs[childIndexID]; !exists {
+		return CatalogForeignKey{}, errCorruptedCatalogPage
+	}
+	if *offset >= len(data) {
+		return CatalogForeignKey{}, errCorruptedCatalogPage
+	}
+	onDeleteAction := data[*offset]
+	*offset++
+	if onDeleteAction != CatalogForeignKeyDeleteActionRestrict && onDeleteAction != CatalogForeignKeyDeleteActionCascade {
+		return CatalogForeignKey{}, errCorruptedCatalogPage
+	}
+	return CatalogForeignKey{
+		Name:                 name,
+		ChildTableID:         childTableID,
+		ChildColumns:         childColumns,
+		ParentTableID:        parentTableID,
+		ParentColumns:        parentColumns,
+		ParentPrimaryKeyName: parentPrimaryKeyName,
+		ChildIndexID:         childIndexID,
+		OnDeleteAction:       onDeleteAction,
+	}, nil
 }
 
 func prepareCatalogWritePlan(cat *CatalogData, currentMode uint32, currentOverflowHead PageID, currentOverflowPageCount uint32, reader PageReader, formatVersion uint32, freeListHead *uint32, checkpointMeta DirectoryCheckpointMetadata, allocate CatalogOverflowPageAllocator) (*CatalogWritePlan, error) {

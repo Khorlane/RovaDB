@@ -498,12 +498,18 @@ func ApplyDirectoryRootIDMappings(cat *CatalogData, mappings []DirectoryRootIDMa
 	applied := &CatalogData{Tables: make([]CatalogTable, 0, len(cat.Tables))}
 	for _, table := range cat.Tables {
 		cloned := CatalogTable{
-			Name:       table.Name,
-			TableID:    table.TableID,
-			RootPageID: 0,
-			RowCount:   table.RowCount,
-			Columns:    append([]CatalogColumn(nil), table.Columns...),
-			Indexes:    make([]CatalogIndex, 0, len(table.Indexes)),
+			Name:        table.Name,
+			TableID:     table.TableID,
+			RootPageID:  0,
+			RowCount:    table.RowCount,
+			Columns:     append([]CatalogColumn(nil), table.Columns...),
+			Indexes:     make([]CatalogIndex, 0, len(table.Indexes)),
+			ForeignKeys: append([]CatalogForeignKey(nil), table.ForeignKeys...),
+		}
+		if table.PrimaryKey != nil {
+			pk := *table.PrimaryKey
+			pk.Columns = append([]string(nil), table.PrimaryKey.Columns...)
+			cloned.PrimaryKey = &pk
 		}
 		if table.TableID != 0 {
 			if mappedRootPageID, ok := tableMappings[table.TableID]; ok {
