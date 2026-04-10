@@ -727,16 +727,27 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
-		if rows, ok, err := db.queryIndexOnly(plan); ok {
+		var handoff *executor.SelectExecutionHandoff
+		if plan.ScanType == planner.ScanTypeIndexOnly {
+			indexOnlyHandoff, err := executor.NewIndexOnlyExecutionHandoff(plan)
 			if err != nil {
 				return &Rows{err: err, idx: -1}, nil
 			}
-			return rows, nil
+			if rows, ok, err := db.queryIndexOnly(indexOnlyHandoff); ok {
+				if err != nil {
+					return &Rows{err: err, idx: -1}, nil
+				}
+				return rows, nil
+			}
+			handoff = indexOnlyHandoff.FallbackSelectHandoff()
+		} else {
+			handoff, err = executor.NewSelectExecutionHandoff(plan)
+			if err != nil {
+				return &Rows{err: err, idx: -1}, nil
+			}
 		}
-		plan = downgradeIndexOnlyPlanForExecution(plan)
-		handoff, err := executor.NewSelectExecutionHandoff(plan)
-		if err != nil {
-			return &Rows{err: err, idx: -1}, nil
+		if handoff == nil {
+			return &Rows{err: newExecError("invalid select plan"), idx: -1}, nil
 		}
 		accessPath := handoff.AccessPath()
 		if accessPath.Kind == executor.SelectAccessPathKindIndex {
@@ -776,7 +787,7 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 				return &Rows{err: newExecError("invalid select plan"), idx: -1}, nil
 			}
 		}
-		execTables, err := db.tablesForSelect(plan)
+		execTables, err := db.tablesForSelectHandoff(handoff)
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
@@ -801,25 +812,19 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 	return newRows(nil, [][]any{{apiValue(value)}}), nil
 }
 
-func (db *DB) queryIndexOnly(plan *planner.SelectPlan) (*Rows, bool, error) {
-	// Root still owns this planner-payload special case; index-only remains an
-	// outer-seam outlier targeted for v0.41 refinement.
-	if db == nil || plan == nil || plan.Query == nil {
+func (db *DB) queryIndexOnly(handoff *executor.IndexOnlyExecutionHandoff) (*Rows, bool, error) {
+	if db == nil || handoff == nil {
 		return nil, false, nil
 	}
-	if plan.ScanType != planner.ScanTypeIndexOnly || plan.IndexOnlyScan == nil {
+	if !handoff.SupportsDirectExecution() {
 		return nil, false, nil
 	}
-	if !supportsIndexOnlyExecutionPlan(plan) {
-		return nil, false, nil
-	}
-
-	if plan.IndexOnlyScan.CountStar {
-		table := db.tables[plan.IndexOnlyScan.TableName]
+	if handoff.Mode() == executor.IndexOnlyExecutionModeCountStar {
+		table := db.tables[handoff.TableName()]
 		if table == nil {
-			return nil, true, newExecError("table not found: " + plan.IndexOnlyScan.TableName)
+			return nil, true, newExecError("table not found: " + handoff.TableName())
 		}
-		indexDef, err := db.resolveSimpleLogicalIndex(table, plan.IndexOnlyScan.ColumnNames[0])
+		indexDef, err := db.resolveSimpleLogicalIndex(table, handoff.ColumnName())
 		if err != nil {
 			return nil, true, err
 		}
@@ -830,63 +835,19 @@ func (db *DB) queryIndexOnly(plan *planner.SelectPlan) (*Rows, bool, error) {
 		return newRows([]string{"count"}, [][]any{{count}}), true, nil
 	}
 
-	table := db.tables[plan.IndexOnlyScan.TableName]
+	table := db.tables[handoff.TableName()]
 	if table == nil {
-		return nil, true, newExecError("table not found: " + plan.IndexOnlyScan.TableName)
+		return nil, true, newExecError("table not found: " + handoff.TableName())
 	}
-	indexDef, err := db.resolveSimpleLogicalIndex(table, plan.IndexOnlyScan.ColumnNames[0])
+	indexDef, err := db.resolveSimpleLogicalIndex(table, handoff.ColumnName())
 	if err != nil {
 		return nil, true, err
 	}
-	rows, err := db.projectAllRowsFromIndexOnly(plan, table, indexDef)
+	rows, err := db.projectAllRowsFromIndexOnly(handoff, table, indexDef)
 	if err != nil {
 		return nil, true, err
 	}
 	return rows, true, nil
-}
-
-func supportsIndexOnlyExecutionPlan(plan *planner.SelectPlan) bool {
-	// This is one of the remaining root-level planner shell inspections to
-	// collapse into a single seam adaptation in later slices.
-	if plan == nil || plan.Query == nil || plan.IndexOnlyScan == nil {
-		return false
-	}
-	if plan.IndexOnlyScan.TableName == "" || len(plan.IndexOnlyScan.ColumnNames) != 1 || plan.IndexOnlyScan.ColumnNames[0] == "" {
-		return false
-	}
-	if plan.IndexOnlyScan.CountStar {
-		return plan.Query.IsCountStar &&
-			plan.Query.Where == nil &&
-			plan.Query.Predicate == nil &&
-			len(plan.Query.OrderBys) == 0 &&
-			plan.Query.OrderBy == nil
-	}
-	if plan.Query.IsCountStar ||
-		plan.Query.Where != nil ||
-		plan.Query.Predicate != nil ||
-		len(plan.Query.OrderBys) > 0 ||
-		plan.Query.OrderBy != nil ||
-		len(plan.Query.ProjectionExprs) != 1 {
-		return false
-	}
-	if len(plan.Query.ProjectionAliases) > 0 && plan.Query.ProjectionAliases[0] != "" {
-		return false
-	}
-	expr := plan.Query.ProjectionExprs[0]
-	return expr != nil && expr.Kind == planner.ValueExprKindColumnRef && expr.Column != ""
-}
-
-func downgradeIndexOnlyPlanForExecution(plan *planner.SelectPlan) *planner.SelectPlan {
-	// Temporary seam adapter: root still rewrites a planner-owned select shell
-	// for the non-index-only executor path.
-	if plan == nil || plan.ScanType != planner.ScanTypeIndexOnly || plan.Query == nil || plan.Query.TableName == "" {
-		return plan
-	}
-	downgraded := *plan
-	downgraded.ScanType = planner.ScanTypeTable
-	downgraded.TableScan = &planner.TableScan{TableName: plan.Query.TableName}
-	downgraded.IndexOnlyScan = nil
-	return &downgraded
 }
 
 func cloneSelectTableMeta(table *executor.Table) *executor.Table {
@@ -929,8 +890,8 @@ func materializeRows(rows [][]parser.Value) [][]any {
 	return materialized
 }
 
-func (db *DB) tablesForSelect(plan *planner.SelectPlan) (map[string]*executor.Table, error) {
-	if plan == nil || plan.Query == nil || plan.Query.TableName == "" {
+func (db *DB) tablesForSelectHandoff(handoff *executor.SelectExecutionHandoff) (map[string]*executor.Table, error) {
+	if handoff == nil {
 		return db.tables, nil
 	}
 
@@ -938,7 +899,7 @@ func (db *DB) tablesForSelect(plan *planner.SelectPlan) (map[string]*executor.Ta
 	for name, existing := range db.tables {
 		execTables[name] = existing
 	}
-	for _, tableName := range tableNamesForSelect(plan) {
+	for _, tableName := range tableNamesForSelectHandoff(handoff) {
 		table := db.tables[tableName]
 		if table == nil {
 			return nil, newExecError("table not found: " + tableName)
@@ -1039,11 +1000,11 @@ func (db *DB) countAllRowsFromIndexOnly(table *executor.Table, indexDef *storage
 	return count, nil
 }
 
-func (db *DB) projectAllRowsFromIndexOnly(plan *planner.SelectPlan, table *executor.Table, indexDef *storage.CatalogIndex) (*Rows, error) {
-	if db == nil || plan == nil || plan.Query == nil || table == nil || indexDef == nil {
+func (db *DB) projectAllRowsFromIndexOnly(handoff *executor.IndexOnlyExecutionHandoff, table *executor.Table, indexDef *storage.CatalogIndex) (*Rows, error) {
+	if db == nil || handoff == nil || table == nil || indexDef == nil {
 		return nil, ErrInvalidArgument
 	}
-	if len(plan.IndexOnlyScan.ColumnNames) != 1 || plan.IndexOnlyScan.ColumnNames[0] == "" {
+	if handoff.ColumnName() == "" {
 		return nil, newExecError("invalid select plan")
 	}
 	indexDef, err := db.validateIndexLookupMetadata(table, indexDef)
@@ -1061,7 +1022,7 @@ func (db *DB) projectAllRowsFromIndexOnly(plan *planner.SelectPlan, table *execu
 		projected = append(projected, []any{apiValue(parserValueFromStorage(value))})
 	}
 
-	columns, err := executor.ProjectedColumnNames(plan, cloneSelectTableMeta(table))
+	columns, err := executor.ProjectedColumnNamesWithHandoff(handoff.FallbackSelectHandoff(), cloneSelectTableMeta(table))
 	if err != nil {
 		return nil, err
 	}
@@ -1264,11 +1225,11 @@ func (db *DB) committedTableLocators(table *executor.Table) ([]storage.RowLocato
 	return locators, nil
 }
 
-func tableNamesForSelect(plan *planner.SelectPlan) []string {
-	accessPath, err := executor.DescribeSelectAccessPath(plan)
-	if err != nil {
+func tableNamesForSelectHandoff(handoff *executor.SelectExecutionHandoff) []string {
+	if handoff == nil {
 		return nil
 	}
+	accessPath := handoff.AccessPath()
 	switch accessPath.Kind {
 	case executor.SelectAccessPathKindJoin:
 		return []string{accessPath.JoinLeftTable, accessPath.JoinRightTable}

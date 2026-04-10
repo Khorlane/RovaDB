@@ -144,3 +144,57 @@ func TestBridgeSelectPlanRejectsMismatchedIndexScanTable(t *testing.T) {
 		t.Fatalf("bridgeSelectPlan() error = %v, want %v", err, errInvalidSelectPlan)
 	}
 }
+
+func TestNewIndexOnlyExecutionHandoffSupportsDirectCountStar(t *testing.T) {
+	handoff, err := NewIndexOnlyExecutionHandoff(&planner.SelectPlan{
+		Query:    &planner.SelectQuery{TableName: "users", IsCountStar: true},
+		ScanType: planner.ScanTypeIndexOnly,
+		IndexOnlyScan: &planner.IndexOnlyScan{
+			TableName:   "users",
+			ColumnNames: []string{"id"},
+			CountStar:   true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewIndexOnlyExecutionHandoff() error = %v", err)
+	}
+	if !handoff.SupportsDirectExecution() {
+		t.Fatal("handoff.SupportsDirectExecution() = false, want true")
+	}
+	if handoff.Mode() != IndexOnlyExecutionModeCountStar {
+		t.Fatalf("handoff.Mode() = %v, want %v", handoff.Mode(), IndexOnlyExecutionModeCountStar)
+	}
+	if handoff.TableName() != "users" || handoff.ColumnName() != "id" {
+		t.Fatalf("handoff = (%q, %q), want users/id", handoff.TableName(), handoff.ColumnName())
+	}
+}
+
+func TestNewIndexOnlyExecutionHandoffBuildsFallbackSelectForAliasedProjection(t *testing.T) {
+	handoff, err := NewIndexOnlyExecutionHandoff(&planner.SelectPlan{
+		Query: &planner.SelectQuery{
+			TableName:         "users",
+			ProjectionExprs:   []*planner.ValueExpr{{Kind: planner.ValueExprKindColumnRef, Column: "id"}},
+			ProjectionLabels:  []string{"id"},
+			ProjectionAliases: []string{"user_id"},
+		},
+		ScanType: planner.ScanTypeIndexOnly,
+		IndexOnlyScan: &planner.IndexOnlyScan{
+			TableName:   "users",
+			ColumnNames: []string{"id"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewIndexOnlyExecutionHandoff() error = %v", err)
+	}
+	if handoff.SupportsDirectExecution() {
+		t.Fatal("handoff.SupportsDirectExecution() = true, want false")
+	}
+	fallback := handoff.FallbackSelectHandoff()
+	if fallback == nil {
+		t.Fatal("handoff.FallbackSelectHandoff() = nil, want value")
+	}
+	accessPath := fallback.AccessPath()
+	if accessPath.Kind != SelectAccessPathKindTable || accessPath.SingleTableName != "users" {
+		t.Fatalf("fallback.AccessPath() = %#v, want table scan for users", accessPath)
+	}
+}

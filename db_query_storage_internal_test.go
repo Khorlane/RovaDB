@@ -72,9 +72,13 @@ func TestTableNamesForSelectUsesExecutorAccessPathForIndexScan(t *testing.T) {
 		},
 	}
 
-	names := tableNamesForSelect(plan)
+	handoff, err := executor.NewSelectExecutionHandoff(plan)
+	if err != nil {
+		t.Fatalf("NewSelectExecutionHandoff() error = %v", err)
+	}
+	names := tableNamesForSelectHandoff(handoff)
 	if len(names) != 1 || names[0] != "users" {
-		t.Fatalf("tableNamesForSelect() = %#v, want [users]", names)
+		t.Fatalf("tableNamesForSelectHandoff() = %#v, want [users]", names)
 	}
 
 	accessPath, err := executor.DescribeSelectAccessPath(plan)

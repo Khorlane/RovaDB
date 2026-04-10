@@ -179,6 +179,24 @@ type SelectExecutionHandoff struct {
 	bridge *selectPlanBridge
 }
 
+type IndexOnlyExecutionMode int
+
+const (
+	IndexOnlyExecutionModeInvalid IndexOnlyExecutionMode = iota
+	IndexOnlyExecutionModeCountStar
+	IndexOnlyExecutionModeProjection
+)
+
+// IndexOnlyExecutionHandoff centralizes the narrow index-only seam and the
+// regular SELECT fallback handoff that shares the normal execution path.
+type IndexOnlyExecutionHandoff struct {
+	tableName      string
+	columnName     string
+	mode           IndexOnlyExecutionMode
+	direct         bool
+	fallbackSelect *SelectExecutionHandoff
+}
+
 // NewSelectExecutionHandoff adapts planner-owned SELECT output into the
 // executor-owned runtime handoff once at the seam.
 func NewSelectExecutionHandoff(plan *planner.SelectPlan) (*SelectExecutionHandoff, error) {
@@ -189,6 +207,34 @@ func NewSelectExecutionHandoff(plan *planner.SelectPlan) (*SelectExecutionHandof
 	return &SelectExecutionHandoff{bridge: bridge}, nil
 }
 
+// NewIndexOnlyExecutionHandoff adapts the planner's narrow index-only payload
+// once at the seam and also prepares the regular SELECT fallback handoff.
+func NewIndexOnlyExecutionHandoff(plan *planner.SelectPlan) (*IndexOnlyExecutionHandoff, error) {
+	if plan == nil || plan.Query == nil || plan.ScanType != planner.ScanTypeIndexOnly || plan.IndexOnlyScan == nil {
+		return nil, errInvalidSelectPlan
+	}
+	if plan.IndexOnlyScan.TableName == "" || len(plan.IndexOnlyScan.ColumnNames) != 1 || plan.IndexOnlyScan.ColumnNames[0] == "" {
+		return nil, errInvalidSelectPlan
+	}
+
+	fallbackSelect, err := newIndexOnlyFallbackSelectHandoff(plan)
+	if err != nil {
+		return nil, err
+	}
+
+	mode := IndexOnlyExecutionModeProjection
+	if plan.IndexOnlyScan.CountStar {
+		mode = IndexOnlyExecutionModeCountStar
+	}
+	return &IndexOnlyExecutionHandoff{
+		tableName:      plan.IndexOnlyScan.TableName,
+		columnName:     plan.IndexOnlyScan.ColumnNames[0],
+		mode:           mode,
+		direct:         supportsDirectIndexOnlyExecution(plan),
+		fallbackSelect: fallbackSelect,
+	}, nil
+}
+
 // AccessPath exposes the bridge-owned access-path view without leaking planner
 // shell details into executor runtime entry points.
 func (h *SelectExecutionHandoff) AccessPath() SelectAccessPath {
@@ -196,6 +242,41 @@ func (h *SelectExecutionHandoff) AccessPath() SelectAccessPath {
 		return SelectAccessPath{}
 	}
 	return h.bridge.accessPath
+}
+
+func (h *IndexOnlyExecutionHandoff) SupportsDirectExecution() bool {
+	if h == nil {
+		return false
+	}
+	return h.direct
+}
+
+func (h *IndexOnlyExecutionHandoff) TableName() string {
+	if h == nil {
+		return ""
+	}
+	return h.tableName
+}
+
+func (h *IndexOnlyExecutionHandoff) ColumnName() string {
+	if h == nil {
+		return ""
+	}
+	return h.columnName
+}
+
+func (h *IndexOnlyExecutionHandoff) Mode() IndexOnlyExecutionMode {
+	if h == nil {
+		return IndexOnlyExecutionModeInvalid
+	}
+	return h.mode
+}
+
+func (h *IndexOnlyExecutionHandoff) FallbackSelectHandoff() *SelectExecutionHandoff {
+	if h == nil {
+		return nil
+	}
+	return h.fallbackSelect
 }
 
 // bridgeSelectPlan is the executor-facing seam for SELECT. It validates the
@@ -270,6 +351,54 @@ func DescribeSelectAccessPath(plan *planner.SelectPlan) (SelectAccessPath, error
 		return SelectAccessPath{}, err
 	}
 	return handoff.AccessPath(), nil
+}
+
+func supportsDirectIndexOnlyExecution(plan *planner.SelectPlan) bool {
+	if plan == nil || plan.Query == nil || plan.IndexOnlyScan == nil {
+		return false
+	}
+	if plan.IndexOnlyScan.TableName == "" || len(plan.IndexOnlyScan.ColumnNames) != 1 || plan.IndexOnlyScan.ColumnNames[0] == "" {
+		return false
+	}
+	if plan.IndexOnlyScan.CountStar {
+		return plan.Query.IsCountStar &&
+			plan.Query.Where == nil &&
+			plan.Query.Predicate == nil &&
+			len(plan.Query.OrderBys) == 0 &&
+			plan.Query.OrderBy == nil
+	}
+	if plan.Query.IsCountStar ||
+		plan.Query.Where != nil ||
+		plan.Query.Predicate != nil ||
+		len(plan.Query.OrderBys) > 0 ||
+		plan.Query.OrderBy != nil ||
+		len(plan.Query.ProjectionExprs) != 1 {
+		return false
+	}
+	if len(plan.Query.ProjectionAliases) > 0 && plan.Query.ProjectionAliases[0] != "" {
+		return false
+	}
+	expr := plan.Query.ProjectionExprs[0]
+	return expr != nil && expr.Kind == planner.ValueExprKindColumnRef && expr.Column != ""
+}
+
+func newIndexOnlyFallbackSelectHandoff(plan *planner.SelectPlan) (*SelectExecutionHandoff, error) {
+	downgraded := downgradeIndexOnlyPlanForSelectExecution(plan)
+	if downgraded == nil {
+		return nil, errInvalidSelectPlan
+	}
+	return NewSelectExecutionHandoff(downgraded)
+}
+
+func downgradeIndexOnlyPlanForSelectExecution(plan *planner.SelectPlan) *planner.SelectPlan {
+	if plan == nil || plan.ScanType != planner.ScanTypeIndexOnly || plan.Query == nil || plan.Query.TableName == "" {
+		return nil
+	}
+	downgraded := *plan
+	downgraded.ScanType = planner.ScanTypeTable
+	downgraded.TableScan = &planner.TableScan{TableName: plan.Query.TableName}
+	downgraded.IndexOnlyScan = nil
+	return &downgraded
 }
 
 func runtimeSelectQueryFromPlan(query *planner.SelectQuery) *runtimeSelectQuery {

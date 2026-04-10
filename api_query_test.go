@@ -582,6 +582,56 @@ func TestQueryAPIIndexedProjectionWithOrderBySurvivesLegacyRootRemoval(t *testin
 	}
 }
 
+func TestQueryAPIIndexedProjectionWithAliasAndOrderBySurvivesLegacyRootRemoval(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE INDEX users_ix1 ON users (id)"); err != nil {
+		t.Fatalf("Exec(create index) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	table := db.tables["users"]
+	if table == nil {
+		t.Fatal("db.tables[users] = nil, want value")
+	}
+	table.SetStorageMeta(0, table.PersistedRowCount())
+
+	rows, err := db.Query("SELECT id AS user_id FROM users ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if got := rows.Columns(); len(got) != 1 || got[0] != "user_id" {
+		t.Fatalf("Columns() = %#v, want [user_id]", got)
+	}
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+	var userID int
+	if err := rows.Scan(&userID); err != nil {
+		t.Fatalf("rows.Scan() error = %v", err)
+	}
+	if userID != 1 {
+		t.Fatalf("rows.Scan() = %d, want 1", userID)
+	}
+	if rows.Next() {
+		t.Fatal("Next() second = true, want false")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err() = %v", err)
+	}
+}
+
 func TestQueryAPINonIndexedProjectionSurvivesLegacyRootRemoval(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
