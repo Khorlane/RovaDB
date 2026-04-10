@@ -8,9 +8,9 @@ import (
 	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
-// This file owns SELECT runtime behavior. It consumes planner-produced plan
-// data and owns row flow, evaluation, and materialization; it does not make
-// planner decisions beyond interpreting the plan contract.
+// This file owns SELECT runtime behavior. The executor-facing seam starts at
+// bridgeSelectPlan; direct planner shell input here remains temporary and is a
+// v0.41 outer-seam tightening target.
 func Select(plan *planner.SelectPlan, tables map[string]*Table) ([][]parser.Value, error) {
 	bridge, err := bridgeSelectPlan(plan)
 	if err != nil {

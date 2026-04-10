@@ -173,10 +173,10 @@ type selectPlanJoinScan struct {
 	rightColumnName string
 }
 
-// bridgeSelectPlan is the executor-owned adaptation seam for SELECT plans. It
-// validates the stable planner plan contract, centralizes access-path
-// interpretation, and converts planner-owned query/value shapes into runtime
-// executor structs before hot-path evaluation begins.
+// bridgeSelectPlan is the executor-facing seam for SELECT. It validates the
+// current planner contract, centralizes access-path interpretation, and
+// converts planner-owned query/value shapes into runtime executor structs.
+// Raw planner shell input remains temporary and is a v0.41 tightening target.
 func bridgeSelectPlan(plan *planner.SelectPlan) (*selectPlanBridge, error) {
 	if plan == nil || plan.Query == nil {
 		return nil, errUnsupportedStatement

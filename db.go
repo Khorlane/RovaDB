@@ -801,6 +801,8 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 }
 
 func (db *DB) queryIndexOnly(plan *planner.SelectPlan) (*Rows, bool, error) {
+	// Root still owns this planner-payload special case; index-only remains an
+	// outer-seam outlier targeted for v0.41 refinement.
 	if db == nil || plan == nil || plan.Query == nil {
 		return nil, false, nil
 	}
@@ -843,6 +845,8 @@ func (db *DB) queryIndexOnly(plan *planner.SelectPlan) (*Rows, bool, error) {
 }
 
 func supportsIndexOnlyExecutionPlan(plan *planner.SelectPlan) bool {
+	// This is one of the remaining root-level planner shell inspections to
+	// collapse into a single seam adaptation in later slices.
 	if plan == nil || plan.Query == nil || plan.IndexOnlyScan == nil {
 		return false
 	}
@@ -872,6 +876,8 @@ func supportsIndexOnlyExecutionPlan(plan *planner.SelectPlan) bool {
 }
 
 func downgradeIndexOnlyPlanForExecution(plan *planner.SelectPlan) *planner.SelectPlan {
+	// Temporary seam adapter: root still rewrites a planner-owned select shell
+	// for the non-index-only executor path.
 	if plan == nil || plan.ScanType != planner.ScanTypeIndexOnly || plan.Query == nil || plan.Query.TableName == "" {
 		return plan
 	}
