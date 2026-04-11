@@ -294,7 +294,6 @@ func collectRepoFiles(root string) ([]string, error) {
 	return files, nil
 }
 
-
 func collectTestFiles(root string, files []string) ([]string, error) {
 	var tests []string
 	for _, path := range files {

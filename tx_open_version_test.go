@@ -2,9 +2,39 @@ package rovadb
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/Khorlane/RovaDB/internal/storage"
 )
+
+func TestOpenRejectsOrphanWALWhenDBFileIsMissing(t *testing.T) {
+	path := testDBPath(t)
+	walPath := storage.WALPath(path)
+
+	if err := storage.EnsureWALFile(path, storage.DBFormatVersion()); err != nil {
+		t.Fatalf("EnsureWALFile() error = %v", err)
+	}
+
+	db, err := Open(path)
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open() error = nil, want orphan WAL failure")
+	}
+	if err.Error() != "open: database file does not exist but WAL sidecar exists: "+walPath {
+		t.Fatalf("Open() error = %q, want %q", err.Error(), "open: database file does not exist but WAL sidecar exists: "+walPath)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("os.Stat(db path) error = %v, want %v", statErr, os.ErrNotExist)
+	}
+}
+
+func TestVersionReturnsCurrentProductVersion(t *testing.T) {
+	if got := Version(); got != "v0.43.0" {
+		t.Fatalf("Version() = %q, want %q", got, "v0.43.0")
+	}
+}
 
 func TestPublicTransactionAPIMethodShapesCompile(t *testing.T) {
 	var begin func(*DB) (*Tx, error) = (*DB).Begin
