@@ -17,7 +17,7 @@ import (
 
 const (
 	outputDir         = `C:\Projects\RovaDB Research`
-	snapshotToolToken = "snapshot-main-v10"
+	snapshotToolToken = "snapshot-main-v11"
 )
 
 type treeNode struct {
@@ -112,6 +112,16 @@ func main() {
 		fail("unable to collect Go packages: %v", err)
 	}
 
+	testFiles, err := collectTestFiles(rootAbs, files)
+	if err != nil {
+		fail("unable to collect test files: %v", err)
+	}
+
+	testClassification, err := classifyTests(rootAbs, testFiles)
+	if err != nil {
+		fail("unable to classify test files: %v", err)
+	}
+
 	dependencyMap, err := buildDependencyMap(modulePath, packages)
 	if err != nil {
 		fail("unable to build package dependency map: %v", err)
@@ -165,6 +175,7 @@ func main() {
 		{9, "ARCHITECTURAL GUARDRAILS", guardrails},
 		{10, "LARGE / CENTRAL FILES", largeFiles},
 		{11, "SUMMARY SIGNAL (SHORT)", summary},
+		{12, "TEST CLASSIFICATION", testClassification},
 	}
 
 	indexLines := []string{
@@ -281,6 +292,150 @@ func collectRepoFiles(root string) ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+
+func collectTestFiles(root string, files []string) ([]string, error) {
+	var tests []string
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return nil, err
+			}
+			tests = append(tests, filepath.ToSlash(rel))
+		}
+	}
+	sort.Strings(tests)
+	return tests, nil
+}
+
+func classifyTests(root string, testFiles []string) ([]string, error) {
+	type classifiedTest struct {
+		relPath        string
+		dir            string
+		packageName    string
+		classification string
+	}
+
+	type directorySummary struct {
+		white int
+		black int
+	}
+
+	type packageSummary struct {
+		classification string
+		count          int
+	}
+
+	var items []classifiedTest
+	dirSummary := map[string]*directorySummary{}
+	pkgSummary := map[string]*packageSummary{}
+	whiteCount := 0
+	blackCount := 0
+
+	for _, relPath := range testFiles {
+		absPath := filepath.Join(root, filepath.FromSlash(relPath))
+
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, absPath, nil, parser.PackageClauseOnly)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", relPath, err)
+		}
+
+		pkgName := f.Name.Name
+		classification := fmt.Sprintf("white-box (package %s)", pkgName)
+		if strings.HasSuffix(pkgName, "_test") {
+			classification = fmt.Sprintf("black-box (package %s)", pkgName)
+			blackCount++
+		} else {
+			whiteCount++
+		}
+
+		dir := filepath.ToSlash(filepath.Dir(relPath))
+		if dir == "." {
+			dir = "(root)"
+		}
+
+		entry := dirSummary[dir]
+		if entry == nil {
+			entry = &directorySummary{}
+			dirSummary[dir] = entry
+		}
+		if strings.HasSuffix(pkgName, "_test") {
+			entry.black++
+		} else {
+			entry.white++
+		}
+
+		pkgEntry := pkgSummary[pkgName]
+		if pkgEntry == nil {
+			pkgEntry = &packageSummary{classification: classification}
+			pkgSummary[pkgName] = pkgEntry
+		}
+		pkgEntry.count++
+
+		items = append(items, classifiedTest{
+			relPath:        relPath,
+			dir:            dir,
+			packageName:    pkgName,
+			classification: classification,
+		})
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].dir != items[j].dir {
+			return items[i].dir < items[j].dir
+		}
+		if items[i].packageName != items[j].packageName {
+			return items[i].packageName < items[j].packageName
+		}
+		return items[i].relPath < items[j].relPath
+	})
+
+	lines := []string{
+		fmt.Sprintf("white-box tests: %d", whiteCount),
+		fmt.Sprintf("black-box tests: %d", blackCount),
+		"",
+		"[directory summary]",
+	}
+
+	if len(items) == 0 {
+		lines = append(lines, "  - (none)")
+		return lines, nil
+	}
+
+	dirs := make([]string, 0, len(dirSummary))
+	for dir := range dirSummary {
+		dirs = append(dirs, dir)
+	}
+	sort.Strings(dirs)
+	for _, dir := range dirs {
+		s := dirSummary[dir]
+		lines = append(lines, fmt.Sprintf("  %s -> white-box: %d, black-box: %d, total: %d", dir, s.white, s.black, s.white+s.black))
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, "[package summary]")
+
+	packages := make([]string, 0, len(pkgSummary))
+	for pkgName := range pkgSummary {
+		packages = append(packages, pkgName)
+	}
+	sort.Strings(packages)
+	for _, pkgName := range packages {
+		s := pkgSummary[pkgName]
+		lines = append(lines, fmt.Sprintf("  %s -> %s, files: %d", pkgName, s.classification, s.count))
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, "[per-file classification]")
+
+	for _, item := range items {
+		lines = append(lines, fmt.Sprintf("  %s -> %s", item.relPath, item.classification))
+	}
+
+	return lines, nil
 }
 
 func buildRepoTree(root string) ([]string, error) {
