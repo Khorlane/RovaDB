@@ -1811,7 +1811,7 @@ func TestAlterTableAddColumnCloseReopenPreservesExpandedExistingRows(t *testing.
 	if err != nil {
 		t.Fatalf("Query(before reopen) error = %v", err)
 	}
-	if got := rows.data; len(got) != 2 || got[0][0] != 1 || got[0][1] != "guest" || got[0][2] != nil || got[1][0] != 2 || got[1][1] != "guest" || got[1][2] != nil {
+	if got := rows.data; len(got) != 2 || got[0][0] != int32(1) || got[0][1] != "guest" || got[0][2] != nil || got[1][0] != int32(2) || got[1][1] != "guest" || got[1][2] != nil {
 		t.Fatalf("before reopen rows = %#v, want existing rows expanded with default/null", got)
 	}
 	rows.Close()
@@ -1827,7 +1827,7 @@ func TestAlterTableAddColumnCloseReopenPreservesExpandedExistingRows(t *testing.
 	if err != nil {
 		t.Fatalf("Query(after reopen) error = %v", err)
 	}
-	if got := rows.data; len(got) != 2 || got[0][0] != 1 || got[0][1] != "guest" || got[0][2] != nil || got[1][0] != 2 || got[1][1] != "guest" || got[1][2] != nil {
+	if got := rows.data; len(got) != 2 || got[0][0] != int32(1) || got[0][1] != "guest" || got[0][2] != nil || got[1][0] != int32(2) || got[1][1] != "guest" || got[1][2] != nil {
 		t.Fatalf("after reopen rows = %#v, want existing rows expanded with default/null", got)
 	}
 	rows.Close()
@@ -1839,7 +1839,7 @@ func TestAlterTableAddColumnCloseReopenPreservesExpandedExistingRows(t *testing.
 	if err != nil {
 		t.Fatalf("Query(after reopen insert) error = %v", err)
 	}
-	if got := rows.data; len(got) != 3 || got[2][0] != 3 || got[2][1] != "guest" || got[2][2] != nil {
+	if got := rows.data; len(got) != 3 || got[2][0] != int32(3) || got[2][1] != "guest" || got[2][2] != nil {
 		t.Fatalf("after reopen insert rows = %#v, want new row to follow updated schema defaults", got)
 	}
 	rows.Close()
@@ -9128,8 +9128,8 @@ func TestSQLUsabilityMilestoneJoinAndAliasSurface(t *testing.T) {
 		t.Fatalf("explicitRows.columns = %#v, want [a.cust_nbr AS customer_number a.name b.order_nbr b.total_amt]", got)
 	}
 	wantExplicit := [][]any{
-		{1, "Alice Carter", 101, 75},
-		{2, "Brian Lewis", 103, 60},
+		{int32(1), "Alice Carter", int32(101), int32(75)},
+		{int32(2), "Brian Lewis", int32(103), int32(60)},
 	}
 	assertMaterializedRowsEqual(t, explicitRows.data, wantExplicit)
 
@@ -9157,9 +9157,9 @@ func TestSQLUsabilityMilestoneJoinAndAliasSurface(t *testing.T) {
 		t.Fatalf("aliasRows.columns = %#v, want [customer_number name]", got)
 	}
 	wantAlias := [][]any{
-		{1, "Alice Carter"},
-		{2, "Brian Lewis"},
-		{3, "Carla Gomez"},
+		{int32(1), "Alice Carter"},
+		{int32(2), "Brian Lewis"},
+		{int32(3), "Carla Gomez"},
 	}
 	assertMaterializedRowsEqual(t, aliasRows.data, wantAlias)
 }

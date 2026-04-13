@@ -162,11 +162,14 @@ func scanAssignableValue(dest any, src any, scanType string) (any, error) {
 		if scanType == "SMALLINT" || scanType == "INT" || scanType == "BIGINT" {
 			return nil, ErrUnsupportedScanType
 		}
-		n, ok := src.(int)
-		if !ok {
+		switch n := src.(type) {
+		case int:
+			return n, nil
+		case int64:
+			return intFromInt64(n)
+		default:
 			return nil, ErrUnsupportedScanType
 		}
-		return n, nil
 	case *int16:
 		if d == nil {
 			return nil, ErrUnsupportedScanType
@@ -174,11 +177,11 @@ func scanAssignableValue(dest any, src any, scanType string) (any, error) {
 		if scanType != "SMALLINT" {
 			return nil, ErrUnsupportedScanType
 		}
-		n, ok := src.(int)
+		n, ok := src.(int16)
 		if !ok {
 			return nil, ErrUnsupportedScanType
 		}
-		return int16(n), nil
+		return n, nil
 	case *int32:
 		if d == nil {
 			return nil, ErrUnsupportedScanType
@@ -186,11 +189,11 @@ func scanAssignableValue(dest any, src any, scanType string) (any, error) {
 		if scanType != "INT" {
 			return nil, ErrUnsupportedScanType
 		}
-		n, ok := src.(int)
+		n, ok := src.(int32)
 		if !ok {
 			return nil, ErrUnsupportedScanType
 		}
-		return int32(n), nil
+		return n, nil
 	case *int64:
 		if d == nil {
 			return nil, ErrUnsupportedScanType
@@ -198,11 +201,11 @@ func scanAssignableValue(dest any, src any, scanType string) (any, error) {
 		if scanType != "BIGINT" {
 			return nil, ErrUnsupportedScanType
 		}
-		n, ok := src.(int)
+		n, ok := src.(int64)
 		if !ok {
 			return nil, ErrUnsupportedScanType
 		}
-		return int64(n), nil
+		return n, nil
 	case *string:
 		if d == nil {
 			return nil, ErrUnsupportedScanType
@@ -238,6 +241,15 @@ func scanAssignableValue(dest any, src any, scanType string) (any, error) {
 	default:
 		return nil, ErrUnsupportedScanType
 	}
+}
+
+func intFromInt64(value int64) (int, error) {
+	maxInt := int64(int(^uint(0) >> 1))
+	minInt := -maxInt - 1
+	if value < minInt || value > maxInt {
+		return 0, ErrUnsupportedScanType
+	}
+	return int(value), nil
 }
 
 // Scan reads exactly one row from the wrapped Rows result.

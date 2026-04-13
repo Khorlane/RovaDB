@@ -1006,7 +1006,7 @@ func TestExecAlterTableAddColumnAppliesExistingRowDefaultsAndNullability(t *test
 	if err != nil {
 		t.Fatalf("Query(nullable no default) error = %v", err)
 	}
-	if got := rows.data; len(got) != 2 || got[0][0] != 1 || got[0][1] != nil || got[1][0] != 2 || got[1][1] != nil {
+	if got := rows.data; len(got) != 2 || got[0][0] != int32(1) || got[0][1] != nil || got[1][0] != int32(2) || got[1][1] != nil {
 		t.Fatalf("nullable no default rows = %#v, want [[1 nil] [2 nil]]", got)
 	}
 	rows.Close()
@@ -1018,7 +1018,7 @@ func TestExecAlterTableAddColumnAppliesExistingRowDefaultsAndNullability(t *test
 	if err != nil {
 		t.Fatalf("Query(not null default) error = %v", err)
 	}
-	if got := rows.data; len(got) != 2 || got[0][0] != 1 || got[0][1] != 1.5 || got[1][0] != 2 || got[1][1] != 1.5 {
+	if got := rows.data; len(got) != 2 || got[0][0] != int32(1) || got[0][1] != 1.5 || got[1][0] != int32(2) || got[1][1] != 1.5 {
 		t.Fatalf("not null default rows = %#v, want [[1 1.5] [2 1.5]]", got)
 	}
 	rows.Close()
@@ -1030,7 +1030,7 @@ func TestExecAlterTableAddColumnAppliesExistingRowDefaultsAndNullability(t *test
 	if err != nil {
 		t.Fatalf("Query(post alter insert) error = %v", err)
 	}
-	if got := rows.data; len(got) != 3 || got[2][0] != 3 || got[2][1] != nil || got[2][2] != 1.5 {
+	if got := rows.data; len(got) != 3 || got[2][0] != int32(3) || got[2][1] != nil || got[2][2] != 1.5 {
 		t.Fatalf("post alter insert rows = %#v, want row 3 to use NULL/default fill", got)
 	}
 	rows.Close()
@@ -1082,7 +1082,7 @@ func TestExecAPIAcceptsTrailingSemicolon(t *testing.T) {
 	if rows == nil || rows.err != nil {
 		t.Fatalf("rows = %#v, want successful rowset", rows)
 	}
-	if len(rows.data) != 1 || len(rows.data[0]) != 2 || rows.data[0][0] != 1 || rows.data[0][1] != "alice" {
+	if len(rows.data) != 1 || len(rows.data[0]) != 2 || rows.data[0][0] != int32(1) || rows.data[0][1] != "alice" {
 		t.Fatalf("rows.data = %#v, want [[1 \"alice\"]]", rows.data)
 	}
 }
@@ -1178,7 +1178,7 @@ func TestExecAPIWriteFlowStillValidatesViaQuery(t *testing.T) {
 	if len(rows.data) != 1 || len(rows.data[0]) != 2 {
 		t.Fatalf("rows.data = %#v, want one row", rows.data)
 	}
-	if rows.data[0][0] != 2 || rows.data[0][1] != "bobby" {
+	if rows.data[0][0] != int32(2) || rows.data[0][1] != "bobby" {
 		t.Fatalf("rows.data = %#v, want [[2 \"bobby\"]]", rows.data)
 	}
 }
@@ -1204,7 +1204,7 @@ func TestExecAPIPlaceholderArgsInsert(t *testing.T) {
 	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 2 {
 		t.Fatalf("rows = %#v, want one materialized row", rows)
 	}
-	if rows.data[0][0] != 1 || rows.data[0][1] != "alice" {
+	if rows.data[0][0] != int32(1) || rows.data[0][1] != "alice" {
 		t.Fatalf("rows.data = %#v, want [[1 \"alice\"]]", rows.data)
 	}
 }
@@ -1303,7 +1303,7 @@ func TestExecAPIPlaceholderArgsDelete(t *testing.T) {
 	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 2 {
 		t.Fatalf("rows = %#v, want one remaining row", rows)
 	}
-	if rows.data[0][0] != 2 || rows.data[0][1] != "sam" {
+	if rows.data[0][0] != int32(2) || rows.data[0][1] != "sam" {
 		t.Fatalf("rows.data = %#v, want [[2 \"sam\"]]", rows.data)
 	}
 }
@@ -1327,7 +1327,7 @@ func TestExecAPIPlaceholderArgsCountMismatchInsertHasNoSideEffects(t *testing.T)
 	if err != nil {
 		t.Fatalf("Query(count) error = %v", err)
 	}
-	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 0 {
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != int64(0) {
 		t.Fatalf("rows.data = %#v, want [[0]]", rows.data)
 	}
 }
@@ -1381,7 +1381,7 @@ func TestExecAPIPlaceholderArgsCountMismatchDeleteHasNoSideEffects(t *testing.T)
 	if err != nil {
 		t.Fatalf("Query(count) error = %v", err)
 	}
-	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 1 {
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != int64(1) {
 		t.Fatalf("rows.data = %#v, want [[1]]", rows.data)
 	}
 }
@@ -1477,7 +1477,7 @@ func TestExecAPIArithmeticValueExprInsertAndUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
-	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 2 || rows.data[0][0] != 3 || rows.data[0][1] != 3.0 {
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 2 || rows.data[0][0] != int32(3) || rows.data[0][1] != 3.0 {
 		t.Fatalf("rows.data = %#v, want [[3 3.0]]", rows.data)
 	}
 }

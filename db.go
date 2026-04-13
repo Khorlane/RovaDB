@@ -808,7 +808,7 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 				if err != nil {
 					return &Rows{err: err, idx: -1}, nil
 				}
-				return newRows([]string{"count"}, [][]any{{count}}), nil
+				return newRows([]string{"count"}, [][]any{{int64(count)}}), nil
 			}
 			candidateRows, err := db.lookupIndexedRows(table, indexDef, accessPath.IndexLookup.LookupValue)
 			if err != nil {
@@ -883,7 +883,7 @@ func (db *DB) queryIndexOnly(handoff *executor.IndexOnlyExecutionHandoff) (*Rows
 		if err != nil {
 			return nil, true, err
 		}
-		return newRows([]string{"count"}, [][]any{{count}}), true, nil
+		return newRows([]string{"count"}, [][]any{{int64(count)}}), true, nil
 	}
 
 	table := db.tables[handoff.TableName()]
@@ -1070,16 +1070,21 @@ func (db *DB) projectAllRowsFromIndexOnly(handoff *executor.IndexOnlyExecutionHa
 		return nil, wrapStorageError(err)
 	}
 
+	projectedColumnType := projectedColumnTypeByName(table, handoff.ColumnName())
 	projected := make([][]any, 0, len(values))
 	for _, value := range values {
-		projected = append(projected, []any{apiValue(parserValueFromStorage(value))})
+		projectedValue, err := rebindProjectedIndexValue(parserValueFromStorage(value), projectedColumnType)
+		if err != nil {
+			return nil, err
+		}
+		projected = append(projected, []any{apiValue(projectedValue)})
 	}
 
 	columns, err := executor.ProjectedColumnNamesWithHandoff(handoff.FallbackSelectHandoff(), cloneSelectTableMeta(table))
 	if err != nil {
 		return nil, err
 	}
-	return newRowsWithScanTypes(columns, projected, []string{projectedColumnTypeByName(table, handoff.ColumnName())}), nil
+	return newRowsWithScanTypes(columns, projected, []string{projectedColumnType}), nil
 }
 
 func (db *DB) resolveSimpleLogicalIndex(table *executor.Table, columnName string) (*storage.CatalogIndex, error) {
@@ -1297,19 +1302,30 @@ func tableNamesForSelectHandoff(handoff *executor.SelectExecutionHandoff) []stri
 }
 
 func apiValue(value parser.Value) any {
-	switch value.Kind {
-	case parser.ValueKindNull:
-		return nil
-	case parser.ValueKindIntegerLiteral, parser.ValueKindSmallInt, parser.ValueKindInt, parser.ValueKindBigInt:
-		return int(value.IntegerValue())
-	case parser.ValueKindString:
-		return value.Str
-	case parser.ValueKindBool:
-		return value.Bool
-	case parser.ValueKindReal:
-		return value.F64
+	return value.Any()
+}
+
+func rebindProjectedIndexValue(value parser.Value, columnType string) (parser.Value, error) {
+	if !value.IsIntegerLiteral() {
+		return value, nil
+	}
+
+	integerValue := value.IntegerValue()
+	switch columnType {
+	case parser.ColumnTypeSmallInt:
+		if integerValue < -32768 || integerValue > 32767 {
+			return parser.Value{}, newStorageError("corrupted index page")
+		}
+		return parser.SmallIntValue(int16(integerValue)), nil
+	case parser.ColumnTypeInt:
+		if integerValue < -2147483648 || integerValue > 2147483647 {
+			return parser.Value{}, newStorageError("corrupted index page")
+		}
+		return parser.IntValue(int32(integerValue)), nil
+	case parser.ColumnTypeBigInt:
+		return parser.BigIntValue(integerValue), nil
 	default:
-		return value.Any()
+		return value, nil
 	}
 }
 

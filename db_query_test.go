@@ -30,7 +30,7 @@ func TestQueryAPILiteralSelectReturnsRows(t *testing.T) {
 	if len(rows.columns) != 0 {
 		t.Fatalf("rows.columns = %#v, want nil/empty", rows.columns)
 	}
-	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 1 {
+	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != int64(1) {
 		t.Fatalf("rows.data = %#v, want [[1]]", rows.data)
 	}
 }
@@ -49,7 +49,7 @@ func TestQueryAPINoArgsStillWorksWithVariadicSignature(t *testing.T) {
 	if rows == nil {
 		t.Fatal("Query() rows = nil, want value")
 	}
-	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 1 {
+	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != int64(1) {
 		t.Fatalf("rows.data = %#v, want [[1]]", rows.data)
 	}
 }
@@ -78,8 +78,93 @@ func TestQueryAPISelectFromReturnsMaterializedRows(t *testing.T) {
 	if len(rows.columns) != 2 || rows.columns[0] != "id" || rows.columns[1] != "name" {
 		t.Fatalf("rows.columns = %#v, want [id name]", rows.columns)
 	}
-	if len(rows.data) != 1 || len(rows.data[0]) != 2 || rows.data[0][0] != 1 || rows.data[0][1] != "alice" {
+	if len(rows.data) != 1 || len(rows.data[0]) != 2 || rows.data[0][0] != int32(1) || rows.data[0][1] != "alice" {
 		t.Fatalf("rows.data = %#v, want [[1 \"alice\"]]", rows.data)
+	}
+}
+
+func TestQueryMaterializationPreservesExactIntegerWidthsAndNonIntegerShapes(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE numbers (small_col SMALLINT, int_col INT, big_col BIGINT, active BOOL, score REAL, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO numbers VALUES (?, ?, ?, ?, ?, ?)", int16(11), int32(22), int64(33), true, 4.5, "ok"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT small_col, int_col, big_col, active, score, name FROM numbers")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 6 {
+		t.Fatalf("rows = %#v, want one fully materialized row", rows)
+	}
+
+	if got, ok := rows.data[0][0].(int16); !ok || got != 11 {
+		t.Fatalf("rows.data[0][0] = %#v, want int16(11)", rows.data[0][0])
+	}
+	if got, ok := rows.data[0][1].(int32); !ok || got != 22 {
+		t.Fatalf("rows.data[0][1] = %#v, want int32(22)", rows.data[0][1])
+	}
+	if got, ok := rows.data[0][2].(int64); !ok || got != 33 {
+		t.Fatalf("rows.data[0][2] = %#v, want int64(33)", rows.data[0][2])
+	}
+	if got, ok := rows.data[0][3].(bool); !ok || !got {
+		t.Fatalf("rows.data[0][3] = %#v, want true", rows.data[0][3])
+	}
+	if got, ok := rows.data[0][4].(float64); !ok || got != 4.5 {
+		t.Fatalf("rows.data[0][4] = %#v, want 4.5", rows.data[0][4])
+	}
+	if got, ok := rows.data[0][5].(string); !ok || got != "ok" {
+		t.Fatalf("rows.data[0][5] = %#v, want %q", rows.data[0][5], "ok")
+	}
+}
+
+func TestQueryMaterializationKeepsTypedArithmeticSeparateFromUntypedIntegerLiterals(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE numbers (small_col SMALLINT, int_col INT, big_col BIGINT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO numbers VALUES (?, ?, ?)", int16(11), int32(22), int64(33)); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT small_col + 1, int_col + 1, big_col + 1 FROM numbers")
+	if err != nil {
+		t.Fatalf("Query(typed arithmetic) error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 3 {
+		t.Fatalf("rows = %#v, want one typed arithmetic row", rows)
+	}
+	if got, ok := rows.data[0][0].(int16); !ok || got != 12 {
+		t.Fatalf("rows.data[0][0] = %#v, want int16(12)", rows.data[0][0])
+	}
+	if got, ok := rows.data[0][1].(int32); !ok || got != 23 {
+		t.Fatalf("rows.data[0][1] = %#v, want int32(23)", rows.data[0][1])
+	}
+	if got, ok := rows.data[0][2].(int64); !ok || got != 34 {
+		t.Fatalf("rows.data[0][2] = %#v, want int64(34)", rows.data[0][2])
+	}
+
+	literalRows, err := db.Query("SELECT 1 + 2")
+	if err != nil {
+		t.Fatalf("Query(untyped literal arithmetic) error = %v", err)
+	}
+	if literalRows == nil || len(literalRows.data) != 1 || len(literalRows.data[0]) != 1 {
+		t.Fatalf("literalRows = %#v, want one literal row", literalRows)
+	}
+	if got, ok := literalRows.data[0][0].(int64); !ok || got != 3 {
+		t.Fatalf("literalRows.data[0][0] = %#v, want int64(3)", literalRows.data[0][0])
 	}
 }
 
@@ -152,7 +237,7 @@ func TestQueryAPICountStarStillReturnsRows(t *testing.T) {
 	if len(rows.columns) != 1 || rows.columns[0] != "count" {
 		t.Fatalf("rows.columns = %#v, want [count]", rows.columns)
 	}
-	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 1 {
+	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != int64(1) {
 		t.Fatalf("rows.data = %#v, want [[1]]", rows.data)
 	}
 }
@@ -193,7 +278,7 @@ func TestQueryAPIEligibleCountStarUsesIndexOnlyWithoutBaseRowFetch(t *testing.T)
 	if rows == nil || rows.err != nil {
 		t.Fatalf("rows = %#v, want successful count rowset", rows)
 	}
-	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 3 {
+	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != int64(3) {
 		t.Fatalf("rows.data = %#v, want [[3]]", rows.data)
 	}
 }
@@ -219,7 +304,7 @@ func TestQueryAPIEligibleCountStarOnEmptyIndexedTableReturnsZero(t *testing.T) {
 	if rows == nil || rows.err != nil {
 		t.Fatalf("rows = %#v, want successful count rowset", rows)
 	}
-	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 0 {
+	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != int64(0) {
 		t.Fatalf("rows.data = %#v, want [[0]]", rows.data)
 	}
 }
@@ -255,7 +340,7 @@ func TestQueryAPIEligibleCountStarTracksInsertAndDeleteChanges(t *testing.T) {
 	if rows == nil || rows.err != nil {
 		t.Fatalf("rows = %#v, want successful count rowset", rows)
 	}
-	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 2 {
+	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != int64(2) {
 		t.Fatalf("rows.data = %#v, want [[2]]", rows.data)
 	}
 }
@@ -296,7 +381,7 @@ func TestQueryAPIEligibleCountStarRemainsCorrectAfterReopen(t *testing.T) {
 	if rows == nil || rows.err != nil {
 		t.Fatalf("rows = %#v, want successful count rowset", rows)
 	}
-	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 3 {
+	if len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != int64(3) {
 		t.Fatalf("rows.data = %#v, want [[3]]", rows.data)
 	}
 }
@@ -339,7 +424,7 @@ func TestQueryAPIEligibleIndexedProjectionUsesIndexOnlyWithoutBaseRowFetch(t *te
 	if got := rows.Columns(); len(got) != 1 || got[0] != "id" {
 		t.Fatalf("Columns() = %#v, want [id]", got)
 	}
-	if len(rows.data) != 3 || rows.data[0][0] != 1 || rows.data[1][0] != 2 || rows.data[2][0] != 3 {
+	if len(rows.data) != 3 || rows.data[0][0] != int32(1) || rows.data[1][0] != int32(2) || rows.data[2][0] != int32(3) {
 		t.Fatalf("rows.data = %#v, want [[1] [2] [3]]", rows.data)
 	}
 }
@@ -382,7 +467,7 @@ func TestQueryAPIEligibleIndexedProjectionRemainsCorrectAfterReopen(t *testing.T
 	if got := rows.Columns(); len(got) != 1 || got[0] != "id" {
 		t.Fatalf("Columns() = %#v, want [id]", got)
 	}
-	if len(rows.data) != 3 || rows.data[0][0] != 1 || rows.data[1][0] != 2 || rows.data[2][0] != 3 {
+	if len(rows.data) != 3 || rows.data[0][0] != int32(1) || rows.data[1][0] != int32(2) || rows.data[2][0] != int32(3) {
 		t.Fatalf("rows.data = %#v, want [[1] [2] [3]]", rows.data)
 	}
 }
@@ -446,7 +531,7 @@ func TestQueryAPIEligibleQualifiedIndexedProjectionWorks(t *testing.T) {
 	if got := rows.Columns(); len(got) != 1 || got[0] != "users.id" {
 		t.Fatalf("Columns() = %#v, want [users.id]", got)
 	}
-	if len(rows.data) != 2 || rows.data[0][0] != 1 || rows.data[1][0] != 2 {
+	if len(rows.data) != 2 || rows.data[0][0] != int32(1) || rows.data[1][0] != int32(2) {
 		t.Fatalf("rows.data = %#v, want [[1] [2]]", rows.data)
 	}
 }
@@ -488,7 +573,7 @@ func TestQueryAPIEligibleQualifiedIndexedProjectionRemainsCorrectAfterReopen(t *
 	if got := rows.Columns(); len(got) != 1 || got[0] != "users.id" {
 		t.Fatalf("Columns() = %#v, want [users.id]", got)
 	}
-	if len(rows.data) != 2 || rows.data[0][0] != 1 || rows.data[1][0] != 2 {
+	if len(rows.data) != 2 || rows.data[0][0] != int32(1) || rows.data[1][0] != int32(2) {
 		t.Fatalf("rows.data = %#v, want [[1] [2]]", rows.data)
 	}
 }
@@ -714,7 +799,7 @@ func TestQueryAPIEligibleIndexedProjectionTracksInsertAndDeleteChanges(t *testin
 	}
 	defer rows.Close()
 
-	if len(rows.data) != 2 || rows.data[0][0] != 1 || rows.data[1][0] != 3 {
+	if len(rows.data) != 2 || rows.data[0][0] != int32(1) || rows.data[1][0] != int32(3) {
 		t.Fatalf("rows.data = %#v, want [[1] [3]]", rows.data)
 	}
 }
@@ -748,7 +833,7 @@ func TestQueryAPIEligibleIndexedProjectionTracksIndexedValueUpdate(t *testing.T)
 	}
 	defer rows.Close()
 
-	if len(rows.data) != 2 || rows.data[0][0] != 1 || rows.data[1][0] != 7 {
+	if len(rows.data) != 2 || rows.data[0][0] != int32(1) || rows.data[1][0] != int32(7) {
 		t.Fatalf("rows.data = %#v, want [[1] [7]]", rows.data)
 	}
 }
@@ -862,10 +947,10 @@ func TestQueryAPICommaJoinReturnsRows(t *testing.T) {
 	if len(rows.data) != 2 {
 		t.Fatalf("rows.data = %#v, want two joined rows", rows.data)
 	}
-	if rows.data[0][0] != 1 || rows.data[0][1] != "alice" || rows.data[0][2] != 101 || rows.data[0][3] != 75 {
+	if rows.data[0][0] != int32(1) || rows.data[0][1] != "alice" || rows.data[0][2] != int32(101) || rows.data[0][3] != int32(75) {
 		t.Fatalf("rows.data[0] = %#v, want [1 alice 101 75]", rows.data[0])
 	}
-	if rows.data[1][0] != 2 || rows.data[1][1] != "bob" || rows.data[1][2] != 103 || rows.data[1][3] != 60 {
+	if rows.data[1][0] != int32(2) || rows.data[1][1] != "bob" || rows.data[1][2] != int32(103) || rows.data[1][3] != int32(60) {
 		t.Fatalf("rows.data[1] = %#v, want [2 bob 103 60]", rows.data[1])
 	}
 }
@@ -1085,7 +1170,7 @@ func TestQueryAPIPlaceholderArgsRespectBooleanPrecedence(t *testing.T) {
 	if rows == nil || len(rows.data) != 2 {
 		t.Fatalf("rows.data = %#v, want two rows", rows.data)
 	}
-	if rows.data[0][0] != 1 || rows.data[1][0] != 2 {
+	if rows.data[0][0] != int32(1) || rows.data[1][0] != int32(2) {
 		t.Fatalf("rows.data = %#v, want [[1] [2]]", rows.data)
 	}
 }
@@ -1151,7 +1236,7 @@ func TestQueryAPIPlaceholderArgsWithinFunctionOperand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
-	if rows == nil || len(rows.data) != 1 || rows.data[0][0] != 2 {
+	if rows == nil || len(rows.data) != 1 || rows.data[0][0] != int32(2) {
 		t.Fatalf("rows.data = %#v, want [[2]]", rows.data)
 	}
 }
@@ -1212,7 +1297,7 @@ func TestQueryAPICountStarWithPlaceholderWhereClause(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
-	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 2 {
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != int64(2) {
 		t.Fatalf("rows.data = %#v, want [[2]]", rows.data)
 	}
 }
@@ -1247,7 +1332,7 @@ func TestQueryAPIAggregateFunctionsReturnSingleRow(t *testing.T) {
 	if len(rows.data) != 1 || len(rows.data[0]) != 5 {
 		t.Fatalf("rows.data = %#v, want one aggregate row", rows.data)
 	}
-	if rows.data[0][0] != 3 || rows.data[0][1] != (1.5+2.5+3.0)/3.0 || rows.data[0][2] != 7.0 || rows.data[0][3] != "alpha" || rows.data[0][4] != 3.0 {
+	if rows.data[0][0] != int64(3) || rows.data[0][1] != (1.5+2.5+3.0)/3.0 || rows.data[0][2] != 7.0 || rows.data[0][3] != "alpha" || rows.data[0][4] != 3.0 {
 		t.Fatalf("rows.data = %#v, want [[3 2.333... 7 alpha 3.0]]", rows.data)
 	}
 }
@@ -1275,7 +1360,7 @@ func TestQueryAPIArithmeticProjectionAndPredicate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
-	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != 3 {
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != int32(3) {
 		t.Fatalf("rows.data = %#v, want [[3]]", rows.data)
 	}
 }
@@ -1309,7 +1394,7 @@ func TestQueryAPIAlternateNotEqualsWhereClause(t *testing.T) {
 	if len(rows.data) != 1 || len(rows.data[0]) != 2 {
 		t.Fatalf("rows.data = %#v, want one row with two columns", rows.data)
 	}
-	if rows.data[0][0] != 2 || rows.data[0][1] != "bob" {
+	if rows.data[0][0] != int32(2) || rows.data[0][1] != "bob" {
 		t.Fatalf("rows.data = %#v, want [[2 \"bob\"]]", rows.data)
 	}
 }
@@ -3503,7 +3588,7 @@ func TestQueryRowReturnsWrapperForLiteralSelect(t *testing.T) {
 	if row.rows.idx != -1 {
 		t.Fatalf("QueryRow().rows.idx = %d, want -1", row.rows.idx)
 	}
-	if len(row.rows.data) != 1 || len(row.rows.data[0]) != 1 || row.rows.data[0][0] != 1 {
+	if len(row.rows.data) != 1 || len(row.rows.data[0]) != 1 || row.rows.data[0][0] != int64(1) {
 		t.Fatalf("QueryRow().rows.data = %#v, want [[1]]", row.rows.data)
 	}
 }
