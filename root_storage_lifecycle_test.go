@@ -47,7 +47,7 @@ func TestQueryReloadsRowsFromStorageInsteadOfStaleTableCache(t *testing.T) {
 	defer rows.Close()
 
 	want := []struct {
-		id   int
+		id   int32
 		name string
 	}{
 		{1, "alice"},
@@ -57,7 +57,7 @@ func TestQueryReloadsRowsFromStorageInsteadOfStaleTableCache(t *testing.T) {
 		if !rows.Next() {
 			t.Fatalf("Next() row %d = false, want true", i)
 		}
-		var id int
+		var id int32
 		var name string
 		if err := rows.Scan(&id, &name); err != nil {
 			t.Fatalf("Scan() row %d error = %v", i, err)
@@ -3430,7 +3430,7 @@ func TestInterruptedDropTableRecoveryPreservesUnrelatedObjects(t *testing.T) {
 	}
 	defer rows.Close()
 
-	var id int
+	var id int32
 	var name string
 	if !rows.Next() {
 		t.Fatal("rows.Next() = false, want true")
@@ -4180,7 +4180,7 @@ func TestIndexedQueryRowLookupSurvivesReopen(t *testing.T) {
 	db = reopenDB(t, path)
 	defer db.Close()
 	row := db.QueryRow("SELECT id FROM users WHERE name = 'bob'")
-	var id int
+	var id int32
 	if err := row.Scan(&id); err != nil {
 		t.Fatalf("QueryRow(indexed reopen).Scan() error = %v", err)
 	}
@@ -5440,7 +5440,7 @@ func TestOpenLoadsCatalogFromCATDIROverflowMode(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("rows.Next() = false, want one row")
 	}
-	var id int
+	var id int32
 	var name string
 	if err := rows.Scan(&id, &name); err != nil {
 		t.Fatalf("rows.Scan() error = %v", err)
@@ -7907,7 +7907,7 @@ func TestDropPrimaryKeyAndDependentForeignKeysPersistAcrossReopen(t *testing.T) 
 		t.Fatalf("Query(users) error = %v", err)
 	}
 	defer rows.Close()
-	var id, teamID int
+	var id, teamID int32
 	if !rows.Next() {
 		t.Fatal("rows.Next() = false, want true")
 	}
@@ -7959,7 +7959,7 @@ func TestDropTableDependencyTeardownPersistsAcrossReopen(t *testing.T) {
 		t.Fatalf("Query(users) error = %v", err)
 	}
 	defer rows.Close()
-	var id, teamID int
+	var id, teamID int32
 	var note string
 	if !rows.Next() {
 		t.Fatal("rows.Next() = false, want true")
@@ -8479,7 +8479,7 @@ func TestSchemaLifecycleRoundTripConfidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query(teams) after second reopen error = %v", err)
 	}
-	var teamID int
+	var teamID int32
 	var teamName string
 	if !rows.Next() {
 		t.Fatal("teams rows.Next() = false, want true")

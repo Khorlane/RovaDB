@@ -155,6 +155,26 @@ func ProjectedColumnNamesForHandoff(handoff *SelectExecutionHandoff, tables map[
 	return projectedJoinColumnNames(bridge.query, resolver)
 }
 
+func ProjectedColumnTypesForHandoff(handoff *SelectExecutionHandoff, tables map[string]*Table) ([]string, error) {
+	bridge, err := selectBridgeFromHandoff(handoff)
+	if err != nil {
+		return nil, err
+	}
+	if bridge.scanKind != selectScanKindJoin {
+		table, err := bridge.singleTable(tables)
+		if err != nil {
+			return nil, err
+		}
+		return projectedColumnTypes(bridge.query, table, validateProjectionExprs, resolveSelectColumnIndex)
+	}
+	leftTable, rightTable, err := bridge.joinTables(tables)
+	if err != nil {
+		return nil, err
+	}
+	resolver := newJoinSelectResolver(bridge.query, leftTable, rightTable)
+	return projectedJoinColumnTypes(bridge.query, resolver)
+}
+
 func projectedJoinColumnNames(sel *runtimeSelectQuery, resolver *joinSelectResolver) ([]string, error) {
 	if sel.isCountStar {
 		return []string{"count"}, nil
@@ -180,6 +200,55 @@ func projectedJoinColumnNames(sel *runtimeSelectQuery, resolver *joinSelectResol
 		return resolver.starColumnNames(), nil
 	}
 	return append([]string(nil), sel.columns...), nil
+}
+
+func projectedJoinColumnTypes(sel *runtimeSelectQuery, resolver *joinSelectResolver) ([]string, error) {
+	if sel.isCountStar {
+		return []string{""}, nil
+	}
+	if len(sel.projectionExprs) > 0 {
+		if err := validateJoinProjectionExprs(sel, resolver); err != nil {
+			return nil, err
+		}
+		types := make([]string, 0, len(sel.projectionExprs))
+		for _, expr := range sel.projectionExprs {
+			if expr != nil && expr.kind == runtimeValueExprKindColumnRef {
+				name := expr.column
+				if expr.qualifier != "" {
+					name = expr.qualifier + "." + expr.column
+				}
+				idx, err := resolver.resolveColumnIndex(name)
+				if err != nil {
+					return nil, err
+				}
+				columnType, err := resolver.columnTypeAt(idx)
+				if err != nil {
+					return nil, err
+				}
+				types = append(types, columnType)
+				continue
+			}
+			types = append(types, "")
+		}
+		return types, nil
+	}
+	if len(sel.columns) == 0 {
+		return resolver.starColumnTypes(), nil
+	}
+
+	types := make([]string, 0, len(sel.columns))
+	for _, name := range sel.columns {
+		idx, err := resolver.resolveColumnIndex(name)
+		if err != nil {
+			return nil, err
+		}
+		columnType, err := resolver.columnTypeAt(idx)
+		if err != nil {
+			return nil, err
+		}
+		types = append(types, columnType)
+	}
+	return types, nil
 }
 
 func newJoinSelectResolver(sel *runtimeSelectQuery, leftTable, rightTable *Table) *joinSelectResolver {
@@ -265,6 +334,28 @@ func (r *joinSelectResolver) starColumnNames() []string {
 		}
 	}
 	return names
+}
+
+func (r *joinSelectResolver) starColumnTypes() []string {
+	types := make([]string, 0)
+	for _, source := range r.sources {
+		for _, column := range source.table.Columns {
+			types = append(types, column.Type)
+		}
+	}
+	return types
+}
+
+func (r *joinSelectResolver) columnTypeAt(idx int) (string, error) {
+	for _, source := range r.sources {
+		start := source.offset
+		end := source.offset + len(source.table.Columns)
+		if idx < start || idx >= end {
+			continue
+		}
+		return source.table.Columns[idx-start].Type, nil
+	}
+	return "", errColumnDoesNotExist
 }
 
 func resolveColumnOffset(table *Table, offset int, name string) (int, error) {

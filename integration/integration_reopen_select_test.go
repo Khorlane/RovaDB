@@ -39,7 +39,7 @@ func TestInsertSelectAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id1 int
+	var id1 int32
 	var name1 string
 	if err := rows.Scan(&id1, &name1); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
@@ -51,7 +51,7 @@ func TestInsertSelectAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() second = false, want true")
 	}
-	var id2 int
+	var id2 int32
 	var name2 string
 	if err := rows.Scan(&id2, &name2); err != nil {
 		t.Fatalf("Scan() second error = %v", err)
@@ -103,7 +103,7 @@ func TestMultipleTablesReloadRowsOnOpen(t *testing.T) {
 	if !userRows.Next() {
 		t.Fatal("users Next() = false, want true")
 	}
-	var userID int
+	var userID int32
 	var userName string
 	if err := userRows.Scan(&userID, &userName); err != nil {
 		t.Fatalf("users Scan() error = %v", err)
@@ -121,7 +121,7 @@ func TestMultipleTablesReloadRowsOnOpen(t *testing.T) {
 	if !teamRows.Next() {
 		t.Fatal("teams Next() = false, want true")
 	}
-	var teamID int
+	var teamID int32
 	var teamName string
 	if err := teamRows.Scan(&teamID, &teamName); err != nil {
 		t.Fatalf("teams Scan() error = %v", err)
@@ -169,7 +169,7 @@ func TestBoolRowsRoundTripAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id1 int
+	var id1 int32
 	var active1 bool
 	var name1 string
 	if err := rows.Scan(&id1, &active1, &name1); err != nil {
@@ -182,7 +182,7 @@ func TestBoolRowsRoundTripAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() second = false, want true")
 	}
-	var id2 int
+	var id2 int32
 	var active2 bool
 	var name2 string
 	if err := rows.Scan(&id2, &active2, &name2); err != nil {
@@ -195,7 +195,7 @@ func TestBoolRowsRoundTripAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() third = false, want true")
 	}
-	var id3 int
+	var id3 int32
 	var active3 any
 	var name3 string
 	if err := rows.Scan(&id3, &active3, &name3); err != nil {
@@ -252,7 +252,7 @@ func TestBoolRowsUpdateRoundTripAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id1 int
+	var id1 int32
 	var name1 string
 	var active1 bool
 	if err := rows.Scan(&id1, &name1, &active1); err != nil {
@@ -265,7 +265,7 @@ func TestBoolRowsUpdateRoundTripAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() second = false, want true")
 	}
-	var id2 int
+	var id2 int32
 	var name2 string
 	var active2 bool
 	if err := rows.Scan(&id2, &name2, &active2); err != nil {
@@ -278,7 +278,7 @@ func TestBoolRowsUpdateRoundTripAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() third = false, want true")
 	}
-	var id3 int
+	var id3 int32
 	var name3 string
 	var active3 any
 	if err := rows.Scan(&id3, &name3, &active3); err != nil {
@@ -337,7 +337,7 @@ func TestRealRowsRoundTripAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id1 int
+	var id1 int32
 	var x1 float64
 	var label1 string
 	if err := rows.Scan(&id1, &x1, &label1); err != nil {
@@ -350,7 +350,7 @@ func TestRealRowsRoundTripAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() second = false, want true")
 	}
-	var id2 int
+	var id2 int32
 	var x2 float64
 	var label2 string
 	if err := rows.Scan(&id2, &x2, &label2); err != nil {
@@ -363,7 +363,7 @@ func TestRealRowsRoundTripAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() third = false, want true")
 	}
-	var id3 int
+	var id3 int32
 	var x3 float64
 	var label3 string
 	if err := rows.Scan(&id3, &x3, &label3); err != nil {
@@ -376,7 +376,7 @@ func TestRealRowsRoundTripAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() fourth = false, want true")
 	}
-	var id4 int
+	var id4 int32
 	var x4 any
 	var label4 string
 	if err := rows.Scan(&id4, &x4, &label4); err != nil {
@@ -469,7 +469,7 @@ func TestInsertDefaultsAndNotNullStillApplyAfterReopen(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int
+	var id int32
 	var name string
 	var active bool
 	var score any
@@ -495,13 +495,13 @@ func assertSelectRealRows(t *testing.T, db *DB, sql string, want [][3]any) {
 
 	got := make([][3]any, 0, len(want))
 	for rows.Next() {
-		var id int
+		var id int32
 		var x any
 		var label string
 		if err := rows.Scan(&id, &x, &label); err != nil {
 			t.Fatalf("Scan(%q) error = %v", sql, err)
 		}
-		got = append(got, [3]any{id, x, label})
+		got = append(got, [3]any{int(id), x, label})
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("Rows.Err(%q) = %v", sql, err)

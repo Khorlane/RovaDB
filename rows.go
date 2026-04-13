@@ -2,11 +2,12 @@ package rovadb
 
 // Rows represents a fully materialized query result.
 type Rows struct {
-	columns []string
-	data    [][]any
-	idx     int
-	err     error
-	closed  bool
+	columns   []string
+	scanTypes []string
+	data      [][]any
+	idx       int
+	err       error
+	closed    bool
 }
 
 // Row is a thin QueryRow wrapper over Rows.
@@ -15,10 +16,15 @@ type Row struct {
 }
 
 func newRows(cols []string, data [][]any) *Rows {
+	return newRowsWithScanTypes(cols, data, nil)
+}
+
+func newRowsWithScanTypes(cols []string, data [][]any, scanTypes []string) *Rows {
 	return &Rows{
-		columns: cols,
-		data:    data,
-		idx:     -1,
+		columns:   cols,
+		scanTypes: append([]string(nil), scanTypes...),
+		data:      data,
+		idx:       -1,
 	}
 }
 
@@ -104,7 +110,7 @@ func (r *Rows) Scan(dest ...any) error {
 
 	assignments := make([]assignment, 0, len(dest))
 	for i := range dest {
-		value, err := scanAssignableValue(dest[i], row[i])
+		value, err := scanAssignableValue(dest[i], row[i], r.scanTypeAt(i))
 		if err != nil {
 			return err
 		}
@@ -118,6 +124,12 @@ func (r *Rows) Scan(dest ...any) error {
 		switch d := assignment.dest.(type) {
 		case *int:
 			*d = assignment.value.(int)
+		case *int16:
+			*d = assignment.value.(int16)
+		case *int32:
+			*d = assignment.value.(int32)
+		case *int64:
+			*d = assignment.value.(int64)
 		case *string:
 			*d = assignment.value.(string)
 		case *bool:
@@ -134,10 +146,20 @@ func (r *Rows) Scan(dest ...any) error {
 	return nil
 }
 
-func scanAssignableValue(dest any, src any) (any, error) {
+func (r *Rows) scanTypeAt(idx int) string {
+	if r == nil || idx < 0 || idx >= len(r.scanTypes) {
+		return ""
+	}
+	return r.scanTypes[idx]
+}
+
+func scanAssignableValue(dest any, src any, scanType string) (any, error) {
 	switch d := dest.(type) {
 	case *int:
 		if d == nil {
+			return nil, ErrUnsupportedScanType
+		}
+		if scanType == "SMALLINT" || scanType == "INT" || scanType == "BIGINT" {
 			return nil, ErrUnsupportedScanType
 		}
 		n, ok := src.(int)
@@ -145,6 +167,42 @@ func scanAssignableValue(dest any, src any) (any, error) {
 			return nil, ErrUnsupportedScanType
 		}
 		return n, nil
+	case *int16:
+		if d == nil {
+			return nil, ErrUnsupportedScanType
+		}
+		if scanType != "SMALLINT" {
+			return nil, ErrUnsupportedScanType
+		}
+		n, ok := src.(int)
+		if !ok {
+			return nil, ErrUnsupportedScanType
+		}
+		return int16(n), nil
+	case *int32:
+		if d == nil {
+			return nil, ErrUnsupportedScanType
+		}
+		if scanType != "INT" {
+			return nil, ErrUnsupportedScanType
+		}
+		n, ok := src.(int)
+		if !ok {
+			return nil, ErrUnsupportedScanType
+		}
+		return int32(n), nil
+	case *int64:
+		if d == nil {
+			return nil, ErrUnsupportedScanType
+		}
+		if scanType != "BIGINT" {
+			return nil, ErrUnsupportedScanType
+		}
+		n, ok := src.(int)
+		if !ok {
+			return nil, ErrUnsupportedScanType
+		}
+		return int64(n), nil
 	case *string:
 		if d == nil {
 			return nil, ErrUnsupportedScanType

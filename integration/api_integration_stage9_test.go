@@ -47,12 +47,12 @@ func TestStage9APICanonicalLifecycleAndReopen(t *testing.T) {
 
 	var gotRows [][2]any
 	for rows.Next() {
-		var id int
+		var id int32
 		var name string
 		if err := rows.Scan(&id, &name); err != nil {
 			t.Fatalf("Scan() error = %v", err)
 		}
-		gotRows = append(gotRows, [2]any{id, name})
+		gotRows = append(gotRows, [2]any{int(id), name})
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows.Err() = %v, want nil", err)
@@ -169,7 +169,7 @@ func TestStage9APIBoolExampleFlow(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int
+	var id int32
 	var userName string
 	if err := rows.Scan(&id, &userName); err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -216,7 +216,7 @@ func TestStage9APIRealExampleFlow(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int
+	var id int32
 	var userName string
 	if err := rows.Scan(&id, &userName); err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -274,7 +274,7 @@ func TestStage9APIPositionalArgsExampleFlow(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int
+	var id int32
 	var name string
 	if err := rows.Scan(&id, &name); err != nil {
 		t.Fatalf("Scan() error = %v", err)

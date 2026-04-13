@@ -42,13 +42,13 @@ func assertSelectBoolRows(t *testing.T, db *DB, sql string, want [][3]any) {
 
 	got := make([][3]any, 0, len(want))
 	for rows.Next() {
-		var id int
+		var id any
 		var name string
 		var active any
 		if err := rows.Scan(&id, &name, &active); err != nil {
 			t.Fatalf("Scan(%q) error = %v", sql, err)
 		}
-		got = append(got, [3]any{id, name, active})
+		got = append(got, [3]any{numericValueToInt(t, id), name, active})
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("Rows.Err(%q) = %v", sql, err)
@@ -74,13 +74,13 @@ func assertSelectRealCommitRows(t *testing.T, db *DB, sql string, want [][3]any)
 
 	got := make([][3]any, 0, len(want))
 	for rows.Next() {
-		var id int
+		var id any
 		var label string
 		var x any
 		if err := rows.Scan(&id, &label, &x); err != nil {
 			t.Fatalf("Scan(%q) error = %v", sql, err)
 		}
-		got = append(got, [3]any{id, label, x})
+		got = append(got, [3]any{numericValueToInt(t, id), label, x})
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("Rows.Err(%q) = %v", sql, err)
@@ -707,11 +707,11 @@ func collectIntRows(t *testing.T, db *DB, sql string) []int {
 
 	got := []int{}
 	for rows.Next() {
-		var v int
+		var v any
 		if err := rows.Scan(&v); err != nil {
 			t.Fatalf("Scan(%q) error = %v", sql, err)
 		}
-		got = append(got, v)
+		got = append(got, numericValueToInt(t, v))
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("Rows.Err(%q) = %v", sql, err)
@@ -837,12 +837,12 @@ func assertSelectRowsWithNames(t *testing.T, db *DB, sql string, want [][2]any) 
 
 	got := make([][2]any, 0, len(want))
 	for rows.Next() {
-		var id int
+		var id any
 		var name string
 		if err := rows.Scan(&id, &name); err != nil {
 			t.Fatalf("Scan(%q) error = %v", sql, err)
 		}
-		got = append(got, [2]any{id, name})
+		got = append(got, [2]any{numericValueToInt(t, id), name})
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("Rows.Err(%q) = %v", sql, err)
@@ -958,11 +958,11 @@ func assertIntRows(t *testing.T, rows *Rows, want ...int) {
 
 	got := make([]int, 0, len(want))
 	for rows.Next() {
-		var value int
+		var value any
 		if err := rows.Scan(&value); err != nil {
 			t.Fatalf("Scan() error = %v", err)
 		}
-		got = append(got, value)
+		got = append(got, numericValueToInt(t, value))
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("Err() = %v", err)
@@ -987,6 +987,24 @@ func assertSelectIntRows(t *testing.T, db *DB, sql string, want ...int) {
 	defer rows.Close()
 
 	assertIntRows(t, rows, want...)
+}
+
+func numericValueToInt(t *testing.T, value any) int {
+	t.Helper()
+
+	switch v := value.(type) {
+	case int:
+		return v
+	case int16:
+		return int(v)
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	default:
+		t.Fatalf("numeric value = %#v (%T), want integer-compatible type", value, value)
+		return 0
+	}
 }
 
 type strictIndexRootMappingForTest struct {
@@ -1260,7 +1278,7 @@ func assertFinalUsersState(db *DB) error {
 	if !rows.Next() {
 		return errInvalidArgumentForTest("missing first row")
 	}
-	var id1 int
+	var id1 int32
 	var name1 string
 	if err := rows.Scan(&id1, &name1); err != nil {
 		return err
@@ -1272,7 +1290,7 @@ func assertFinalUsersState(db *DB) error {
 	if !rows.Next() {
 		return errInvalidArgumentForTest("missing second row")
 	}
-	var id2 int
+	var id2 int32
 	var name2 string
 	if err := rows.Scan(&id2, &name2); err != nil {
 		return err

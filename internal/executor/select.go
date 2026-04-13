@@ -247,6 +247,14 @@ func ProjectedColumnNamesWithHandoff(handoff *SelectExecutionHandoff, table *Tab
 	return projectedColumnNames(bridge.query, table, validateProjectionExprs, resolveSelectColumnIndex)
 }
 
+func ProjectedColumnTypesWithHandoff(handoff *SelectExecutionHandoff, table *Table) ([]string, error) {
+	bridge, err := selectBridgeFromHandoff(handoff)
+	if err != nil || table == nil || bridge.query == nil {
+		return nil, errUnsupportedStatement
+	}
+	return projectedColumnTypes(bridge.query, table, validateProjectionExprs, resolveSelectColumnIndex)
+}
+
 type selectProjectionExprValidator func(sel *runtimeSelectQuery, table *Table) error
 type selectProjectionColumnResolver func(sel *runtimeSelectQuery, name string, table *Table) (int, error)
 
@@ -292,6 +300,51 @@ func projectedColumnNames(sel *runtimeSelectQuery, table *Table, validateExprs s
 		names = append(names, name)
 	}
 	return names, nil
+}
+
+func projectedColumnTypes(sel *runtimeSelectQuery, table *Table, validateExprs selectProjectionExprValidator, resolveColumn selectProjectionColumnResolver) ([]string, error) {
+	if sel.isCountStar {
+		return []string{""}, nil
+	}
+	if len(sel.projectionExprs) > 0 {
+		if err := validateExprs(sel, table); err != nil {
+			return nil, err
+		}
+		types := make([]string, 0, len(sel.projectionExprs))
+		for _, expr := range sel.projectionExprs {
+			if expr != nil && expr.kind == runtimeValueExprKindColumnRef {
+				name := expr.column
+				if expr.qualifier != "" {
+					name = expr.qualifier + "." + expr.column
+				}
+				idx, err := resolveColumn(sel, name, table)
+				if err != nil {
+					return nil, err
+				}
+				types = append(types, table.Columns[idx].Type)
+				continue
+			}
+			types = append(types, "")
+		}
+		return types, nil
+	}
+	if len(sel.columns) == 0 {
+		types := make([]string, 0, len(table.Columns))
+		for _, column := range table.Columns {
+			types = append(types, column.Type)
+		}
+		return types, nil
+	}
+
+	types := make([]string, 0, len(sel.columns))
+	for _, name := range sel.columns {
+		idx, err := resolveColumn(sel, name, table)
+		if err != nil {
+			return nil, err
+		}
+		types = append(types, table.Columns[idx].Type)
+	}
+	return types, nil
 }
 
 func projectRow(sel *runtimeSelectQuery, table *Table, row []parser.Value) ([]parser.Value, error) {

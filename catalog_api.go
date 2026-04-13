@@ -248,7 +248,7 @@ func (db *DB) schemaDigestPayloadFromSystemCatalog() ([]byte, error) {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var tableID int
+		var tableID int32
 		var tableName string
 		if err := rows.Scan(&tableID, &tableName); err != nil {
 			return nil, err
@@ -265,14 +265,14 @@ func (db *DB) schemaDigestPayloadFromSystemCatalog() ([]byte, error) {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var tableID int
+		var tableID int32
 		var columnName string
 		var columnType string
-		var ordinal int
+		var ordinal int32
 		if err := rows.Scan(&tableID, &columnName, &columnType, &ordinal); err != nil {
 			return nil, err
 		}
-		b.WriteColumn(uint32(tableID), ordinal, columnName, columnType)
+		b.WriteColumn(uint32(tableID), int(ordinal), columnName, columnType)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -284,9 +284,9 @@ func (db *DB) schemaDigestPayloadFromSystemCatalog() ([]byte, error) {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var indexID int
+		var indexID int32
 		var indexName string
-		var tableID int
+		var tableID int32
 		var isUnique bool
 		if err := rows.Scan(&indexID, &indexName, &tableID, &isUnique); err != nil {
 			return nil, err
@@ -303,13 +303,13 @@ func (db *DB) schemaDigestPayloadFromSystemCatalog() ([]byte, error) {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var indexID int
+		var indexID int32
 		var columnName string
-		var ordinal int
+		var ordinal int32
 		if err := rows.Scan(&indexID, &columnName, &ordinal); err != nil {
 			return nil, err
 		}
-		b.WriteIndexColumn(uint32(indexID), ordinal, columnName)
+		b.WriteIndexColumn(uint32(indexID), int(ordinal), columnName)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

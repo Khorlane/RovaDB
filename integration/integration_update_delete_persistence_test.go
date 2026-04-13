@@ -141,12 +141,12 @@ func assertRow(t *testing.T, rows *Rows, wantID int, wantName string) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int
+	var id int32
 	var name string
 	if err := rows.Scan(&id, &name); err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
-	if id != wantID || name != wantName {
+	if id != int32(wantID) || name != wantName {
 		t.Fatalf("row = (%d, %q), want (%d, %q)", id, name, wantID, wantName)
 	}
 }

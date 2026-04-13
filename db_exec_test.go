@@ -180,7 +180,7 @@ func TestExecDeleteFromWhere(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id1 int
+	var id1 int32
 	var name1 string
 	if err := rows.Scan(&id1, &name1); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
@@ -192,7 +192,7 @@ func TestExecDeleteFromWhere(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() second = false, want true")
 	}
-	var id2 int
+	var id2 int32
 	var name2 string
 	if err := rows.Scan(&id2, &name2); err != nil {
 		t.Fatalf("Scan() second error = %v", err)
@@ -301,7 +301,7 @@ func TestExecInsertInto(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int
+	var id int32
 	var name string
 	if err := rows.Scan(&id, &name); err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -334,7 +334,7 @@ func TestExecInsertIntoWithColumnListReordered(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int
+	var id int32
 	var name string
 	if err := rows.Scan(&id, &name); err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -367,7 +367,7 @@ func TestExecInsertColumnOmissionUsesDefaultsAndNullability(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int
+	var id int32
 	var name string
 	var active bool
 	var score any
@@ -587,9 +587,9 @@ func TestExecUpdateTypedIntegerColumnsRequireExactGoTypes(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var small int
-	var regular int
-	var big int
+	var small int16
+	var regular int32
+	var big int64
 	if err := rows.Scan(&small, &regular, &big); err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -632,7 +632,9 @@ func TestExecEngineOwnedIntegerLiteralsAndDefaultsRemainValidForTypedIntegerWrit
 	if !rows.Next() {
 		t.Fatal("numbers first Next() = false, want true")
 	}
-	var small1, int1, big1 int
+	var small1 int16
+	var int1 int32
+	var big1 int64
 	if err := rows.Scan(&small1, &int1, &big1); err != nil {
 		t.Fatalf("Scan(default row) error = %v", err)
 	}
@@ -642,7 +644,9 @@ func TestExecEngineOwnedIntegerLiteralsAndDefaultsRemainValidForTypedIntegerWrit
 	if !rows.Next() {
 		t.Fatal("numbers second Next() = false, want true")
 	}
-	var small2, int2, big2 int
+	var small2 int16
+	var int2 int32
+	var big2 int64
 	if err := rows.Scan(&small2, &int2, &big2); err != nil {
 		t.Fatalf("Scan(literal row) error = %v", err)
 	}
@@ -656,6 +660,108 @@ func TestExecEngineOwnedIntegerLiteralsAndDefaultsRemainValidForTypedIntegerWrit
 	}
 	defer userRows.Close()
 	assertRowsIntSequence(t, userRows, 5)
+}
+
+func TestTypedIntegerScanRequiresExactDestinationTypes(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE numbers (id INT, small_col SMALLINT, int_col INT, big_col BIGINT, active BOOL, score REAL, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO numbers VALUES (?, ?, ?, ?, ?, ?, ?)", int32(1), int16(11), int32(22), int64(33), true, 4.5, "ok"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT small_col, int_col, big_col FROM numbers WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Query(rows) error = %v", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("rows.Next() = false, want true")
+	}
+	var small int16
+	var regular int32
+	var big int64
+	if err := rows.Scan(&small, &regular, &big); err != nil {
+		t.Fatalf("rows.Scan(exact types) error = %v", err)
+	}
+	if small != 11 || regular != 22 || big != 33 {
+		t.Fatalf("rows.Scan(exact types) = (%d, %d, %d), want (11, 22, 33)", small, regular, big)
+	}
+
+	rows, err = db.Query("SELECT small_col, int_col, big_col FROM numbers WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Query(rows mismatch) error = %v", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("rows.Next() mismatch = false, want true")
+	}
+	for _, tc := range []struct {
+		name string
+		dest []any
+	}{
+		{name: "smallint rejects int32", dest: []any{new(int32), new(int32), new(int64)}},
+		{name: "smallint rejects int64", dest: []any{new(int64), new(int32), new(int64)}},
+		{name: "smallint rejects int", dest: []any{new(int), new(int32), new(int64)}},
+		{name: "int rejects int16", dest: []any{new(int16), new(int16), new(int64)}},
+		{name: "int rejects int64", dest: []any{new(int16), new(int64), new(int64)}},
+		{name: "int rejects int", dest: []any{new(int16), new(int), new(int64)}},
+		{name: "bigint rejects int16", dest: []any{new(int16), new(int32), new(int16)}},
+		{name: "bigint rejects int32", dest: []any{new(int16), new(int32), new(int32)}},
+		{name: "bigint rejects int", dest: []any{new(int16), new(int32), new(int)}},
+	} {
+		t.Run("Rows.Scan "+tc.name, func(t *testing.T) {
+			if err := rows.Scan(tc.dest...); !errors.Is(err, ErrUnsupportedScanType) {
+				t.Fatalf("rows.Scan() error = %v, want ErrUnsupportedScanType", err)
+			}
+		})
+	}
+
+	row := db.QueryRow("SELECT small_col, int_col, big_col FROM numbers WHERE id = 1")
+	small, regular, big = 0, 0, 0
+	if err := row.Scan(&small, &regular, &big); err != nil {
+		t.Fatalf("row.Scan(exact types) error = %v", err)
+	}
+	if small != 11 || regular != 22 || big != 33 {
+		t.Fatalf("row.Scan(exact types) = (%d, %d, %d), want (11, 22, 33)", small, regular, big)
+	}
+
+	for _, tc := range []struct {
+		name string
+		dest []any
+	}{
+		{name: "smallint rejects int32", dest: []any{new(int32), new(int32), new(int64)}},
+		{name: "smallint rejects int64", dest: []any{new(int64), new(int32), new(int64)}},
+		{name: "smallint rejects int", dest: []any{new(int), new(int32), new(int64)}},
+		{name: "int rejects int16", dest: []any{new(int16), new(int16), new(int64)}},
+		{name: "int rejects int64", dest: []any{new(int16), new(int64), new(int64)}},
+		{name: "int rejects int", dest: []any{new(int16), new(int), new(int64)}},
+		{name: "bigint rejects int16", dest: []any{new(int16), new(int32), new(int16)}},
+		{name: "bigint rejects int32", dest: []any{new(int16), new(int32), new(int32)}},
+		{name: "bigint rejects int", dest: []any{new(int16), new(int32), new(int)}},
+	} {
+		t.Run("Row.Scan "+tc.name, func(t *testing.T) {
+			if err := db.QueryRow("SELECT small_col, int_col, big_col FROM numbers WHERE id = 1").Scan(tc.dest...); !errors.Is(err, ErrUnsupportedScanType) {
+				t.Fatalf("QueryRow().Scan() error = %v, want ErrUnsupportedScanType", err)
+			}
+		})
+	}
+
+	var active bool
+	var score float64
+	var name string
+	if err := db.QueryRow("SELECT active, score, name FROM numbers WHERE id = 1").Scan(&active, &score, &name); err != nil {
+		t.Fatalf("QueryRow(non-integers) error = %v", err)
+	}
+	if !active || score != 4.5 || name != "ok" {
+		t.Fatalf("QueryRow(non-integers) = (%v, %v, %q), want (true, 4.5, %q)", active, score, name, "ok")
+	}
 }
 
 func TestExecMutationPathsPreserveIndexedVisibilityAcrossReopen(t *testing.T) {
@@ -1290,7 +1396,7 @@ func TestExecUpdateWhere(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id1 int
+	var id1 int32
 	var name1 string
 	if err := rows.Scan(&id1, &name1); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
@@ -1302,7 +1408,7 @@ func TestExecUpdateWhere(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() second = false, want true")
 	}
-	var id2 int
+	var id2 int32
 	var name2 string
 	if err := rows.Scan(&id2, &name2); err != nil {
 		t.Fatalf("Scan() second error = %v", err)

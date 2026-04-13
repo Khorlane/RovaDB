@@ -555,7 +555,7 @@ func TestExecAPIDropForeignKeyRemovesConstraintOnly(t *testing.T) {
 		t.Fatalf("Query(users) error = %v", err)
 	}
 	defer rows.Close()
-	var id, teamID int
+	var id, teamID int32
 	var note string
 	if !rows.Next() {
 		t.Fatal("rows.Next() = false, want true")
@@ -651,7 +651,7 @@ func TestExecAPIDropPrimaryKeyRemovesDependentForeignKeysAndKeepsIndexes(t *test
 		t.Fatalf("Query(users) error = %v", err)
 	}
 	defer rows.Close()
-	var id, teamID, teamShadow int
+	var id, teamID, teamShadow int32
 	if !rows.Next() {
 		t.Fatal("rows.Next() = false, want true")
 	}
@@ -733,7 +733,7 @@ func TestExecAPIDropTableTeardownRemovesDependentForeignKeysOnly(t *testing.T) {
 		t.Fatalf("Query(users) error = %v", err)
 	}
 	defer rows.Close()
-	var id, teamID int
+	var id, teamID int32
 	var note string
 	if !rows.Next() {
 		t.Fatal("rows.Next() = false, want true")
@@ -955,11 +955,11 @@ func mustExec(t *testing.T, db *DB, sql string) {
 
 func mustQueryInt(t *testing.T, db *DB, sql string) int {
 	t.Helper()
-	var got int
+	var got any
 	if err := db.QueryRow(sql).Scan(&got); err != nil {
 		t.Fatalf("QueryRow(%q).Scan() error = %v", sql, err)
 	}
-	return got
+	return numericValueToInt(t, got)
 }
 
 func mustQueryString(t *testing.T, db *DB, sql string) string {

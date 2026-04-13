@@ -78,7 +78,7 @@ func printActiveUsers(db *rovadb.DB, label string) {
 	fmt.Println(label)
 	fmt.Printf("columns: %v\n", rows.Columns())
 	for rows.Next() {
-		var id int
+		var id int32
 		var name string
 		var score float64
 		if err := rows.Scan(&id, &name, &score); err != nil {
@@ -91,7 +91,7 @@ func printActiveUsers(db *rovadb.DB, label string) {
 	}
 }
 
-func printUserStatusByID(db *rovadb.DB, id int) {
+func printUserStatusByID(db *rovadb.DB, id int32) {
 	row := db.QueryRow("SELECT name, active, score FROM users WHERE id = ?", id)
 
 	var name string

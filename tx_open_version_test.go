@@ -379,7 +379,7 @@ func TestTxExecAndQueryOperateWithinExplicitTransactionSnapshot(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("rows.Next() = false, want one row")
 	}
-	var id int
+	var id int32
 	var name string
 	if err := rows.Scan(&id, &name); err != nil {
 		t.Fatalf("rows.Scan() error = %v", err)
@@ -652,7 +652,7 @@ func TestTxCommitPersistsMultiPagePhysicalStorageAcrossReopen(t *testing.T) {
 }
 
 type userRow struct {
-	id   int
+	id   int32
 	name string
 }
 

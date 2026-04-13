@@ -176,7 +176,11 @@ func (tx *Tx) Query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
-		return newRows(columns, materializeRows(rows)), nil
+		columnTypes, err := executor.ProjectedColumnTypesForHandoff(handoff, execTables)
+		if err != nil {
+			return &Rows{err: err, idx: -1}, nil
+		}
+		return newRowsWithScanTypes(columns, materializeRows(rows), columnTypes), nil
 	}
 
 	value, err := executor.Eval(sel.Expr)

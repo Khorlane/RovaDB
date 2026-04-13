@@ -822,7 +822,11 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 			if err != nil {
 				return &Rows{err: err, idx: -1}, nil
 			}
-			return newRows(columns, materializeRows(rows)), nil
+			columnTypes, err := executor.ProjectedColumnTypesWithHandoff(handoff, execTable)
+			if err != nil {
+				return &Rows{err: err, idx: -1}, nil
+			}
+			return newRowsWithScanTypes(columns, materializeRows(rows), columnTypes), nil
 		}
 		if tableName, columnName, ok := simpleEqualityPlanningTarget(sel); ok {
 			table := db.tables[tableName]
@@ -845,7 +849,11 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
-		return newRows(columns, materializeRows(rows)), nil
+		columnTypes, err := executor.ProjectedColumnTypesForHandoff(handoff, execTables)
+		if err != nil {
+			return &Rows{err: err, idx: -1}, nil
+		}
+		return newRowsWithScanTypes(columns, materializeRows(rows), columnTypes), nil
 	}
 
 	value, err := executor.Eval(sel.Expr)
@@ -1071,7 +1079,7 @@ func (db *DB) projectAllRowsFromIndexOnly(handoff *executor.IndexOnlyExecutionHa
 	if err != nil {
 		return nil, err
 	}
-	return newRows(columns, projected), nil
+	return newRowsWithScanTypes(columns, projected, []string{projectedColumnTypeByName(table, handoff.ColumnName())}), nil
 }
 
 func (db *DB) resolveSimpleLogicalIndex(table *executor.Table, columnName string) (*storage.CatalogIndex, error) {
@@ -1303,6 +1311,18 @@ func apiValue(value parser.Value) any {
 	default:
 		return value.Any()
 	}
+}
+
+func projectedColumnTypeByName(table *executor.Table, columnName string) string {
+	if table == nil {
+		return ""
+	}
+	for _, column := range table.Columns {
+		if column.Name == columnName {
+			return column.Type
+		}
+	}
+	return ""
 }
 
 func plannerTableMetadata(tables map[string]*executor.Table) map[string]*planner.TableMetadata {

@@ -228,7 +228,7 @@ func TestCatalogIntrospectionPreservesDeclaredIntegerWidthsAfterReopen(t *testin
 	if !rows.Next() {
 		t.Fatal("sys_tables lookup for numbers returned no rows")
 	}
-	var tableID int
+	var tableID int32
 	if err := rows.Scan(&tableID); err != nil {
 		t.Fatalf("Scan(sys_tables) error = %v", err)
 	}
@@ -923,11 +923,11 @@ func collectIntRowsFromRows(t *testing.T, rows *Rows) []int {
 
 	got := []int{}
 	for rows.Next() {
-		var v int
+		var v any
 		if err := rows.Scan(&v); err != nil {
 			t.Fatalf("Scan() error = %v", err)
 		}
-		got = append(got, v)
+		got = append(got, numericValueToInt(t, v))
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("Rows.Err() = %v", err)
@@ -1208,7 +1208,7 @@ func TestExecAPIDropTableLeavesUnrelatedTablesIntact(t *testing.T) {
 		t.Fatalf("Query(teams) error = %v", err)
 	}
 	defer rows.Close()
-	var id int
+	var id int32
 	var name string
 	if !rows.Next() {
 		t.Fatal("rows.Next() = false, want true")
@@ -1454,7 +1454,7 @@ func TestAPIErrorContractQueryAndExecRouting(t *testing.T) {
 func TestAPIErrorContractRowsStateErrors(t *testing.T) {
 	rows := newRows(nil, [][]any{{1}})
 
-	var i int
+	var i int32
 	if err := rows.Scan(&i); !errors.Is(err, ErrScanBeforeNext) {
 		t.Fatalf("Scan() before Next = %v, want ErrScanBeforeNext", err)
 	}
@@ -1491,7 +1491,7 @@ func TestAPIErrorContractRowStrictness(t *testing.T) {
 	}
 
 	row := db.QueryRow("SELECT id FROM users WHERE id = 999")
-	var i int
+	var i int32
 	if err := row.Scan(&i); !errors.Is(err, ErrNoRows) {
 		t.Fatalf("QueryRow(no rows).Scan() = %v, want ErrNoRows", err)
 	}
@@ -1519,7 +1519,7 @@ func TestAPIErrorContractDeferredPassthrough(t *testing.T) {
 	defer db.Close()
 
 	row := db.QueryRow("SELECT * FROM users WHERE id =")
-	var i int
+	var i int32
 	err = row.Scan(&i)
 	if err == nil || err.Error() != "parse: invalid where clause" {
 		t.Fatalf("QueryRow(malformed).Scan() = %v, want %q", err, "parse: invalid where clause")

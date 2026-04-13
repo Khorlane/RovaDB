@@ -31,7 +31,7 @@ func TestAlterTableAddColumnBasic(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id1 int
+	var id1 int32
 	var age1 any
 	if err := rows.Scan(&id1, &age1); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
@@ -42,7 +42,7 @@ func TestAlterTableAddColumnBasic(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() second = false, want true")
 	}
-	var id2 int
+	var id2 int32
 	var age2 any
 	if err := rows.Scan(&id2, &age2); err != nil {
 		t.Fatalf("Scan() second error = %v", err)
@@ -86,8 +86,8 @@ func TestAlterTableAddColumnInsertAndUpdate(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id1 int
-	var age1 int
+	var id1 int32
+	var age1 int32
 	if err := rows.Scan(&id1, &age1); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
 	}
@@ -97,8 +97,8 @@ func TestAlterTableAddColumnInsertAndUpdate(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() second = false, want true")
 	}
-	var id2 int
-	var age2 int
+	var id2 int32
+	var age2 int32
 	if err := rows.Scan(&id2, &age2); err != nil {
 		t.Fatalf("Scan() second error = %v", err)
 	}
@@ -138,7 +138,7 @@ func TestAlterTableAddColumnReopenAndWhere(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int
+	var id int32
 	if err := rows.Scan(&id); err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -211,7 +211,7 @@ func TestAlterTableAddColumnDefaultsAndNotNullPersistAcrossReopen(t *testing.T) 
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id1 int
+	var id1 int32
 	var name1 string
 	var active1 bool
 	if err := rows.Scan(&id1, &name1, &active1); err != nil {
@@ -224,7 +224,7 @@ func TestAlterTableAddColumnDefaultsAndNotNullPersistAcrossReopen(t *testing.T) 
 	if !rows.Next() {
 		t.Fatal("Next() second = false, want true")
 	}
-	var id2 int
+	var id2 int32
 	var name2 string
 	var active2 bool
 	if err := rows.Scan(&id2, &name2, &active2); err != nil {
@@ -257,7 +257,7 @@ func TestAlterTableAddColumnDefaultsAndNotNullPersistAcrossReopen(t *testing.T) 
 	defer rows.Close()
 
 	want := []struct {
-		id     int
+		id     int32
 		name   string
 		active bool
 	}{
@@ -269,7 +269,7 @@ func TestAlterTableAddColumnDefaultsAndNotNullPersistAcrossReopen(t *testing.T) 
 		if !rows.Next() {
 			t.Fatalf("Next() row %d = false, want true", i)
 		}
-		var id int
+		var id int32
 		var name string
 		var active bool
 		if err := rows.Scan(&id, &name, &active); err != nil {

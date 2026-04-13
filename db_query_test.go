@@ -525,7 +525,7 @@ func TestQueryAPIAliasedIndexedProjectionSurvivesLegacyRootRemoval(t *testing.T)
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var userID int
+	var userID int32
 	if err := rows.Scan(&userID); err != nil {
 		t.Fatalf("rows.Scan() error = %v", err)
 	}
@@ -572,7 +572,7 @@ func TestQueryAPIIndexedProjectionWithOrderBySurvivesLegacyRootRemoval(t *testin
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int
+	var id int32
 	if err := rows.Scan(&id); err != nil {
 		t.Fatalf("rows.Scan() error = %v", err)
 	}
@@ -622,7 +622,7 @@ func TestQueryAPIIndexedProjectionWithAliasAndOrderBySurvivesLegacyRootRemoval(t
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var userID int
+	var userID int32
 	if err := rows.Scan(&userID); err != nil {
 		t.Fatalf("rows.Scan() error = %v", err)
 	}
@@ -1316,7 +1316,7 @@ func TestQuerySelectFromTable(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id1 int
+	var id1 int32
 	var name1 string
 	if err := rows.Scan(&id1, &name1); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
@@ -1328,7 +1328,7 @@ func TestQuerySelectFromTable(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() second = false, want true")
 	}
-	var id2 int
+	var id2 int32
 	var name2 string
 	if err := rows.Scan(&id2, &name2); err != nil {
 		t.Fatalf("Scan() second error = %v", err)
@@ -1371,7 +1371,7 @@ func TestQuerySelectAllFromTable(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int
+	var id int32
 	var name string
 	if err := rows.Scan(&id, &name); err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -1483,7 +1483,7 @@ func TestQuerySelectSubsetOrder(t *testing.T) {
 		t.Fatal("Next() = false, want true")
 	}
 	var name string
-	var id int
+	var id int32
 	if err := rows.Scan(&name, &id); err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -1517,7 +1517,7 @@ func TestQuerySelectAliasUsesAliasAsOutputColumnName(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var custNbr int
+	var custNbr int32
 	if err := rows.Scan(&custNbr); err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -1604,7 +1604,7 @@ func TestQuerySelectSingleProjectedColumn(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int
+	var id int32
 	if err := rows.Scan(&id); err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -1722,7 +1722,7 @@ func TestQuerySelectWrongScanShape(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
-	var id int
+	var id int32
 	err = rows.Scan(&id)
 	if !errors.Is(err, ErrScanMismatch) {
 		t.Fatalf("Scan() error = %v, want ErrScanMismatch", err)
@@ -2113,7 +2113,7 @@ func TestQuerySelectWhereNumericComparisons(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id int
+	var id int32
 	if err := rows.Scan(&id); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
 	}
@@ -2268,7 +2268,7 @@ func TestQuerySelectWhereAndConditions(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var id int
+	var id int32
 	if err := rows.Scan(&id); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
 	}
@@ -2971,12 +2971,13 @@ func assertRowsIntSequence(t *testing.T, rows *Rows, want ...int) {
 		if !rows.Next() {
 			t.Fatalf("Next() row %d = false, want true", i)
 		}
-		var got int
+		var got any
 		if err := rows.Scan(&got); err != nil {
 			t.Fatalf("Scan() row %d error = %v", i, err)
 		}
-		if got != wantValue {
-			t.Fatalf("row %d = %d, want %d", i, got, wantValue)
+		gotValue := numericValueToInt(t, got)
+		if gotValue != wantValue {
+			t.Fatalf("row %d = %d, want %d", i, gotValue, wantValue)
 		}
 	}
 	if rows.Next() {
@@ -3434,7 +3435,7 @@ func TestRowScanSuccessSingleRowMultipleColumns(t *testing.T) {
 	}
 
 	row := db.QueryRow("SELECT id, name FROM users WHERE id = 1")
-	var i int
+	var i int32
 	var s string
 	if err := row.Scan(&i, &s); err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -3558,7 +3559,7 @@ func TestRowScanNoRows(t *testing.T) {
 	}
 
 	row := db.QueryRow("SELECT id FROM users WHERE id = 999")
-	var i int
+	var i int32
 	if err := row.Scan(&i); !errors.Is(err, ErrNoRows) {
 		t.Fatalf("Scan() error = %v, want ErrNoRows", err)
 	}
@@ -3587,7 +3588,7 @@ func TestRowScanMultipleRows(t *testing.T) {
 	}
 
 	row := db.QueryRow("SELECT id FROM users ORDER BY id")
-	var i int
+	var i int32
 	if err := row.Scan(&i); !errors.Is(err, ErrMultipleRows) {
 		t.Fatalf("Scan() error = %v, want ErrMultipleRows", err)
 	}
@@ -3604,7 +3605,7 @@ func TestRowScanDeferredQueryErrorPassthrough(t *testing.T) {
 	defer db.Close()
 
 	row := db.QueryRow("CREATE TABLE users (id INT)")
-	var i int
+	var i int32
 	if err := row.Scan(&i); !errors.Is(err, ErrQueryRequiresSelect) {
 		t.Fatalf("Scan() error = %v, want ErrQueryRequiresSelect", err)
 	}
@@ -3624,7 +3625,7 @@ func TestRowScanClosedAndNilDBDeferredErrors(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	var i int
+	var i int32
 	row := db.QueryRow("SELECT 1")
 	if err := row.Scan(&i); !errors.Is(err, ErrClosed) {
 		t.Fatalf("Scan() error = %v, want ErrClosed", err)
@@ -3652,7 +3653,7 @@ func TestRowScanMismatchAndTypeMismatchPassthrough(t *testing.T) {
 	}
 
 	row := db.QueryRow("SELECT id, name FROM users")
-	var i int
+	var i int32
 	if err := row.Scan(&i); !errors.Is(err, ErrScanMismatch) {
 		t.Fatalf("Scan() error = %v, want ErrScanMismatch", err)
 	}
@@ -3665,7 +3666,7 @@ func TestRowScanMismatchAndTypeMismatchPassthrough(t *testing.T) {
 
 func TestRowScanNilReceiver(t *testing.T) {
 	var row *Row
-	var i int
+	var i int32
 
 	if err := row.Scan(&i); !errors.Is(err, ErrNoRows) {
 		t.Fatalf("Scan() error = %v, want ErrNoRows", err)
@@ -3746,7 +3747,7 @@ func TestQueryRowIndexedEqualityUsesDurableLookupPath(t *testing.T) {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
 	row := db.QueryRow("SELECT id FROM users WHERE name = 'bob'")
-	var id int
+	var id int32
 	if err := row.Scan(&id); err != nil {
 		t.Fatalf("QueryRow(indexed equality).Scan() error = %v", err)
 	}
@@ -3778,7 +3779,7 @@ func TestQueryRowIndexedEqualityDuplicateMatchesRemainMultipleRows(t *testing.T)
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
 	row := db.QueryRow("SELECT id FROM users WHERE name = 'alice'")
-	var id int
+	var id int32
 	if err := row.Scan(&id); !errors.Is(err, ErrMultipleRows) {
 		t.Fatalf("QueryRow(duplicate indexed equality).Scan() = %v, want ErrMultipleRows", err)
 	}
@@ -3806,7 +3807,7 @@ func TestQueryRowIndexedEqualityNoMatchRemainsNoRows(t *testing.T) {
 		t.Fatalf("Exec(create index) error = %v", err)
 	}
 	row := db.QueryRow("SELECT id FROM users WHERE name = 'zoe'")
-	var id int
+	var id int32
 	if err := row.Scan(&id); !errors.Is(err, ErrNoRows) {
 		t.Fatalf("QueryRow(no-match indexed equality).Scan() = %v, want ErrNoRows", err)
 	}
@@ -3841,7 +3842,7 @@ func TestQueryRowIndexedEqualityUsesLogicalIndexMetadataWhenRuntimeShellIsAbsent
 	defer db.Close()
 
 	row := db.QueryRow("SELECT id FROM users WHERE name = 'bob'")
-	var id int
+	var id int32
 	if err := row.Scan(&id); err != nil {
 		t.Fatalf("QueryRow(indexed logical metadata).Scan() error = %v", err)
 	}
