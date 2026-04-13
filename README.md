@@ -382,6 +382,11 @@ Supported Go argument types are:
 
 Unsupported argument types fail with an error.
 
+For SQL integer binding, placeholder width is exact: `SMALLINT` binds through
+`int16`, `INT` through `int32`, and `BIGINT` through `int64`. Go `int` and
+other integer-like Go types are rejected rather than widened or narrowed
+implicitly.
+
 ## Catalog Introspection
 
 RovaDB exposes a small public catalog API for listing tables and reading table schema metadata:
@@ -451,6 +456,11 @@ if err := rows.Err(); err != nil {
 This stores `Alice` exactly as provided, while the second row uses the schema defaults because the `INSERT` omits `name`, `active`, and `score`.
 
 For typed integer columns, public writes and `Scan` destinations must match the declared SQL width exactly: `SMALLINT` <-> `int16`, `INT` <-> `int32`, and `BIGINT` <-> `int64`. There is no generic Go `int` interchange for these typed integer columns.
+
+Untyped integer-expression results remain a narrow exception. Query shapes such
+as `SELECT 1`, `SELECT 1 + 2`, `COUNT(*)`, and `LENGTH(name)` currently
+materialize as untyped integer results and scan through `*int64`, which is why
+the example above uses `int64` for `COUNT(*)`.
 
 Explicit transactions are opt-in through the Go API. Plain `DB.Exec`, `DB.Query`, and `DB.QueryRow` keep their existing autocommit behavior when you do not call `Begin()`.
 

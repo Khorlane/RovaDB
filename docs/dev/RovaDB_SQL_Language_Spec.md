@@ -338,7 +338,7 @@ Supported scalar functions:
 
 - `LOWER(text) -> text`
 - `UPPER(text) -> text`
-- `LENGTH(text) -> int`
+- `LENGTH(text) -> untyped integer result`
 - `ABS(int|real) -> same numeric domain as input`
 
 Supported aggregate functions:
@@ -347,8 +347,8 @@ Supported aggregate functions:
 - `MAX(text|int|real) -> same domain as input`
 - `AVG(int|real) -> real`
 - `SUM(int|real) -> real`
-- `COUNT(*) -> int`
-- `COUNT(expr) -> int`
+- `COUNT(*) -> untyped integer result`
+- `COUNT(expr) -> untyped integer result`
 
 Function calls may appear only in expression contexts that allow them.
 

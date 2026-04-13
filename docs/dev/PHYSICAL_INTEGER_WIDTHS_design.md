@@ -1,67 +1,85 @@
 # Physical Integer Widths Design
 
-This document defines the locked contract for the physical integer widths milestone in RovaDB.
+This document defines the locked exact-width integer contract for RovaDB.
 
-It remains the authoritative design note for the user-visible and storage-facing contract that the landed implementation preserves.
+It is the authoritative design note for the user-visible, storage-facing, and
+durable-format behavior of `SMALLINT`, `INT`, and `BIGINT`.
 
-## Problem Statement
+## Purpose
 
-RovaDB already had an `INT` design note, but supporting multiple integer widths required a narrower and more explicit contract.
+- lock the exact-width integer model that the implementation now preserves
+- keep SQL type identity, Go type identity, and physical width aligned
+- prevent drift back toward generic integer handling or permissive widening
+- describe the intentionally narrow untyped integer-result seams that still remain
 
-Without that lock:
+## Locked SQL Integer Types
 
-- later slices could drift on SQL-to-Go mappings
-- storage width choices could become inconsistent with declared schema types
-- write and `Scan` behavior could silently widen or narrow values
-- catalog metadata could collapse distinct declared integer types into one runtime assumption
-
-This milestone exists to define and preserve those boundaries explicitly.
-
-## Milestone Goal
-
-Lock the exact design scope for physical integer widths so implementation can add and preserve support intentionally and testably.
-
-The milestone contract is:
-
-- the supported integer type set is explicit
-- SQL-to-Go type mapping is explicit
-- on-page widths are explicit
-- binary encoding expectations are explicit
-- write and `Scan` strictness are explicit
-- catalog persistence expectations are explicit
-- non-goals are explicit
-
-## Locked Decisions
-
-### SQL Types
-
-The physical integer widths milestone covers these SQL types:
+RovaDB supports these SQL integer types:
 
 - `SMALLINT`
 - `INT`
 - `BIGINT`
 
-### SQL to Go Type Mapping
+These are distinct declared schema types. They are not aliases for one generic
+integer storage or API shape.
 
-The public exact mapping is:
+## Locked SQL-to-Go Mapping
+
+The public mapping is exact:
 
 - `SMALLINT` -> `int16`
 - `INT` -> `int32`
 - `BIGINT` -> `int64`
 
-This mapping is strict and is part of the intended public contract.
+That mapping applies across binding, writes, storage decode, query
+materialization, and `Scan`.
 
-### On-Page Physical Widths
+## Locked Binding Contract
 
-Declared integer types drive fixed physical widths:
+Placeholder binding for SQL integer values is exact-width:
+
+- placeholders accept only Go `int16`, `int32`, and `int64` for SQL integer binding
+- Go `int` is rejected
+- other integer-like Go types are rejected
+
+Binding is not allowed to blur the SQL integer widths by accepting whichever Go
+integer happens to fit numerically.
+
+## Locked Write Contract
+
+Typed integer writes are exact by declared column type:
+
+- `SMALLINT` columns accept only `int16`
+- `INT` columns accept only `int32`
+- `BIGINT` columns accept only `int64`
+
+Allowed narrow exception:
+
+- untyped SQL integer literals may resolve to the target width if they fit
+
+Rejected behavior:
+
+- implicit widening
+- implicit narrowing
+- generic integer interchange
+- "fits so allow it" for wrong-width typed Go integers
+- using Go `int` for typed SQL integer columns
+
+If the caller supplies the wrong typed integer width for the target SQL column,
+the write must fail even when the numeric magnitude would fit.
+
+## Locked Physical Widths
+
+Declared schema type drives fixed on-page width:
 
 - `SMALLINT` = 2 bytes
 - `INT` = 4 bytes
 - `BIGINT` = 8 bytes
 
-Physical width is determined by the declared column type, not by the magnitude of a particular value.
+Physical width is determined by declared column type, not by runtime value
+magnitude.
 
-### Encoding
+## Locked Encoding Semantics
 
 Integer values are encoded as:
 
@@ -80,47 +98,72 @@ Representative read forms:
 - `int32(binary.LittleEndian.Uint32(buf))`
 - `int64(binary.LittleEndian.Uint64(buf))`
 
-These examples lock the intended encoding semantics. They do not require one exact helper shape, but later implementation must preserve the same durable meaning.
+These examples lock the durable meaning, not one mandatory helper layout.
 
-## Public Contract
+## Locked Storage Round-Trip Contract
 
-### Write Contract
+Schema-aware row storage preserves exact width on encode and decode:
 
-Writes are strict by declared type:
+- `SMALLINT` rows round-trip as `SMALLINT`
+- `INT` rows round-trip as `INT`
+- `BIGINT` rows round-trip as `BIGINT`
 
-- `SMALLINT` columns accept only Go `int16`
-- `INT` columns accept only Go `int32`
-- `BIGINT` columns accept only Go `int64`
+Storage must not:
 
-The following are not allowed:
+- collapse typed integer columns into one generic integer identity
+- decode typed integer columns onto the wrong width
+- silently repair or reinterpret durable bytes that violate declared width
 
-- implicit widening
-- implicit narrowing
-- generic integer interchange
-- "fits so allow it"
-- using Go `int` for these typed integer columns
+Corruption or durable-format mismatch must fail clearly.
 
-If a caller supplies the wrong Go integer type for the declared SQL type, the operation must fail explicitly.
+## Locked Evaluation Contract
 
-### Scan Contract
+Typed integer arithmetic preserves exact width:
 
-Scanning is strict by declared type:
+- `SMALLINT +/- SMALLINT -> SMALLINT`
+- `INT +/- INT -> INT`
+- `BIGINT +/- BIGINT -> BIGINT`
+
+Required behavior:
+
+- overflow fails immediately
+- mixed-width typed arithmetic is rejected
+- typed integer + untyped integer literal resolves to the typed width if it fits
+- typed integer + untyped integer literal fails if it does not fit
+
+The engine must not silently widen typed integer arithmetic results to a larger
+width.
+
+## Locked Materialization Contract
+
+Typed integer results materialize to exact Go widths:
+
+- typed `SMALLINT` -> `int16`
+- typed `INT` -> `int32`
+- typed `BIGINT` -> `int64`
+
+Go `int` is not used on typed SQL integer result paths.
+
+## Locked Scan Contract
+
+Scanning is exact-width for typed integer results:
 
 - `SMALLINT` scans only into `*int16`
 - `INT` scans only into `*int32`
 - `BIGINT` scans only into `*int64`
 
-The following are not allowed:
+Untyped integer results scan only into `*int64`.
+
+The following are not allowed for typed integer results:
 
 - widening during scan
 - narrowing during scan
-- scanning these typed integer columns into `*int`
+- scanning into `*int`
 
-Later implementation should keep this contract explicit and deterministic rather than relying on permissive reflection behavior.
+## Locked Catalog and Schema Identity
 
-## Catalog and Schema Identity
-
-Declared integer type identity must be preserved exactly in schema and catalog metadata.
+Declared integer identity must be preserved exactly in schema and catalog
+metadata.
 
 That means:
 
@@ -128,65 +171,48 @@ That means:
 - catalog persistence must not collapse them into one generic integer identity
 - reopen must preserve the original declared type exactly
 
-This is required so physical width, API behavior, and schema truth remain aligned across restarts.
+This is required so schema truth, physical width, runtime behavior, and API
+behavior stay aligned across restarts.
 
-## Storage and Runtime Boundary
+## Intentional Narrow Untyped Seams
 
-The storage-facing rule is simple:
+RovaDB still retains a narrow untyped integer-result path for expression-only or
+schema-less results that do not resolve against a typed integer column.
 
-- physical width is driven by declared column type
+Current examples include:
 
-Later implementation slices may choose internal execution representations pragmatically, but they must not weaken the public contract.
+- `SELECT 1`
+- `SELECT 1 + 2`
+- `COUNT(*)`-style results
+- narrow helper results such as `LENGTH(text)`
 
-This design note intentionally does not over-prescribe internal refactors beyond what is needed to ensure:
+These results materialize as `int64` and scan only into `*int64`.
 
-- exact public write behavior
-- exact public `Scan` behavior
-- exact catalog identity
-- exact physical width by declared type
+This seam is intentional and narrow:
 
-Internal helpers may stay as narrow as practical, but the engine must not blur the user-visible distinction between `SMALLINT`, `INT`, and `BIGINT`.
-
-## Storage Implications
-
-Once implemented, adding physical integer widths will require storage paths to treat declared integer width as durable format truth.
-
-Implications for later slices:
-
-- row encoding must reserve the exact fixed width for the declared type
-- row decoding must reconstruct the matching signed Go width
-- validation must fail clearly if durable bytes do not match the declared type expectations
-- durable metadata must remain version-aware and validation-aware
-
-This milestone locks the storage contract the implementation must preserve.
+- it is not part of the normal typed column path
+- it does not permit generic typed integer interchange
+- it does not weaken exact-width schema-aware storage or typed scans
 
 ## Non-Goals
 
-The following are out of scope for this milestone and should not be smuggled into later implementation slices unless separately planned:
+The exact-width integer contract does not include:
 
 - `TINYINT`
 - unsigned integer types
-- implicit numeric coercion
-- arithmetic or type-promotion redesign
-- backward-compatibility migration work unless explicitly planned later
+- implicit numeric coercion between typed integer widths
+- generic Go `int` support for typed SQL integer paths
+- broad speculative numeric-framework work
 
-This milestone also does not require broad speculative numeric-framework work.
+## Acceptance Summary
 
-## Relationship to Existing INT Design
+The contract is preserved only if all of the following stay true together:
 
-The earlier `INTEGER_design.md` note remains the design reference for the already-locked meaning of `INT` as signed 32-bit.
-
-This document extends the design scope by locking the future multi-width contract before implementation begins. Where multi-width wording matters, this document is the controlling note.
-
-## Likely Implementation Slices
-
-The expected follow-on work is small-slice and implementation-oriented, for example:
-
-- parser/type-name recognition for `SMALLINT` and `BIGINT`
-- catalog/schema persistence for distinct integer identities
-- storage encode/decode by declared width
-- write-path validation for strict Go type acceptance
-- query materialization and `Scan` enforcement for strict destination types
-- reopen and corruption-focused integration coverage
-
-Those slices should stay narrow and test-backed. This design note should not be read as permission to broaden scope beyond the locked contract above.
+- exact-width placeholder binding
+- exact-width typed writes
+- exact physical width by declared schema type
+- exact-width schema-aware storage round trips
+- exact-width typed arithmetic with immediate overflow failure
+- exact-width typed materialization and `Scan`
+- narrow, explicitly documented untyped integer-result seams only where they are
+  still intentional
