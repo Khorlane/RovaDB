@@ -11,8 +11,8 @@ func TestEvalIntLiteral(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Eval() error = %v", err)
 	}
-	if got != parser.IntValue(42) {
-		t.Fatalf("Eval() = %#v, want %#v", got, parser.IntValue(42))
+	if got != parser.Int64Value(42) {
+		t.Fatalf("Eval() = %#v, want %#v", got, parser.Int64Value(42))
 	}
 }
 
@@ -46,8 +46,8 @@ func TestEvalBinaryAdd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Eval() error = %v", err)
 	}
-	if got != parser.IntValue(3) {
-		t.Fatalf("Eval() = %#v, want %#v", got, parser.IntValue(3))
+	if got != parser.Int64Value(3) {
+		t.Fatalf("Eval() = %#v, want %#v", got, parser.Int64Value(3))
 	}
 }
 
@@ -61,7 +61,7 @@ func TestEvalBinarySub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Eval() error = %v", err)
 	}
-	if got != parser.IntValue(2) {
-		t.Fatalf("Eval() = %#v, want %#v", got, parser.IntValue(2))
+	if got != parser.Int64Value(2) {
+		t.Fatalf("Eval() = %#v, want %#v", got, parser.Int64Value(2))
 	}
 }

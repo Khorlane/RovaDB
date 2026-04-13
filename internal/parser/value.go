@@ -187,6 +187,19 @@ func (v Value) IsInteger() bool {
 	}
 }
 
+func (v Value) IsIntegerLiteral() bool {
+	return v.Kind == ValueKindIntegerLiteral
+}
+
+func (v Value) IsTypedInteger() bool {
+	switch v.Kind {
+	case ValueKindSmallInt, ValueKindInt, ValueKindBigInt:
+		return true
+	default:
+		return false
+	}
+}
+
 func (v Value) IntegerValue() int64 {
 	switch v.Kind {
 	case ValueKindSmallInt:

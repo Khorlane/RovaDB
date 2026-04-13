@@ -224,6 +224,9 @@ func normalizeIntegerColumnValue(value parser.Value, exactType parser.BoundInteg
 	if value.BoundIntegerType != parser.BoundIntegerTypeNone && value.BoundIntegerType != exactType {
 		return parser.Value{}, errTypeMismatch
 	}
+	if value.IsTypedInteger() && integerBoundTypeForValue(value) != exactType {
+		return parser.Value{}, errTypeMismatch
+	}
 	integerValue := value.IntegerValue()
 	if integerValue < minValue || integerValue > maxValue {
 		return parser.Value{}, errTypeMismatch
@@ -237,6 +240,19 @@ func normalizeIntegerColumnValue(value parser.Value, exactType parser.BoundInteg
 		return parser.BigIntValue(integerValue), nil
 	default:
 		return parser.Value{}, errTypeMismatch
+	}
+}
+
+func integerBoundTypeForValue(value parser.Value) parser.BoundIntegerType {
+	switch value.Kind {
+	case parser.ValueKindSmallInt:
+		return parser.BoundIntegerTypeInt16
+	case parser.ValueKindInt:
+		return parser.BoundIntegerTypeInt32
+	case parser.ValueKindBigInt:
+		return parser.BoundIntegerTypeInt64
+	default:
+		return parser.BoundIntegerTypeNone
 	}
 }
 

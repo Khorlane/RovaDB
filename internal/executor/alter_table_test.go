@@ -113,6 +113,17 @@ func TestExecuteAlterTableAddColumnAppliesNullabilityAndDefaults(t *testing.T) {
 			wantRows:     [][]parser.Value{{parser.Int64Value(1), parser.BoolValue(true)}, {parser.Int64Value(2), parser.BoolValue(true)}},
 			wantRowWidth: 2,
 		},
+		{
+			name: "typed integer default resolves during add column expansion",
+			table: &Table{
+				Name:    "users",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+				Rows:    [][]parser.Value{{parser.Int64Value(1)}},
+			},
+			column:       parser.ColumnDef{Name: "age", Type: parser.ColumnTypeSmallInt, HasDefault: true, DefaultValue: parser.Int64Value(5)},
+			wantRows:     [][]parser.Value{{parser.Int64Value(1), parser.SmallIntValue(5)}},
+			wantRowWidth: 2,
+		},
 	}
 
 	for _, tc := range tests {

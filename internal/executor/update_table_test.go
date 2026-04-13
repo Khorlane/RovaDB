@@ -515,3 +515,23 @@ func TestExecuteUpdateAssignmentExprArithmetic(t *testing.T) {
 		t.Fatalf("rows = %#v, want id 3", tables["users"].Rows)
 	}
 }
+
+func TestExecuteUpdateTypedIntegerTargetRejectsUntypedLiteralOverflow(t *testing.T) {
+	tables := map[string]*Table{
+		"numbers": {
+			Name:    "numbers",
+			Columns: []parser.ColumnDef{{Name: "small_col", Type: parser.ColumnTypeSmallInt}},
+			Rows:    [][]parser.Value{{parser.SmallIntValue(1)}},
+		},
+	}
+
+	_, err := executeUpdate(&parser.UpdateStmt{
+		TableName: "numbers",
+		Assignments: []parser.UpdateAssignment{
+			{Column: "small_col", Value: parser.Int64Value(40000)},
+		},
+	}, tables)
+	if err != errTypeMismatch {
+		t.Fatalf("executeUpdate() error = %v, want %v", err, errTypeMismatch)
+	}
+}

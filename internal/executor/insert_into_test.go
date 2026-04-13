@@ -422,3 +422,62 @@ func TestExecuteInsertValueExprArithmetic(t *testing.T) {
 		t.Fatalf("rows = %#v, want [[3]]", tables["users"].Rows)
 	}
 }
+
+func TestNormalizeIntegerColumnValueResolvesUntypedLiteralsToTargetWidth(t *testing.T) {
+	tests := []struct {
+		name      string
+		column    parser.ColumnDef
+		value     parser.Value
+		want      parser.Value
+		wantError error
+	}{
+		{
+			name:   "smallint fits",
+			column: parser.ColumnDef{Name: "small_col", Type: parser.ColumnTypeSmallInt},
+			value:  parser.Int64Value(7),
+			want:   parser.SmallIntValue(7),
+		},
+		{
+			name:      "smallint rejects overflow",
+			column:    parser.ColumnDef{Name: "small_col", Type: parser.ColumnTypeSmallInt},
+			value:     parser.Int64Value(40000),
+			wantError: errTypeMismatch,
+		},
+		{
+			name:   "int fits",
+			column: parser.ColumnDef{Name: "int_col", Type: parser.ColumnTypeInt},
+			value:  parser.Int64Value(42),
+			want:   parser.IntValue(42),
+		},
+		{
+			name:      "int rejects overflow",
+			column:    parser.ColumnDef{Name: "int_col", Type: parser.ColumnTypeInt},
+			value:     parser.Int64Value(1 << 40),
+			wantError: errTypeMismatch,
+		},
+		{
+			name:   "bigint fits",
+			column: parser.ColumnDef{Name: "big_col", Type: parser.ColumnTypeBigInt},
+			value:  parser.Int64Value(1 << 40),
+			want:   parser.BigIntValue(1 << 40),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeColumnValueForDef(tc.column, tc.value)
+			if tc.wantError != nil {
+				if err != tc.wantError {
+					t.Fatalf("normalizeColumnValueForDef() error = %v, want %v", err, tc.wantError)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeColumnValueForDef() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("normalizeColumnValueForDef() = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}

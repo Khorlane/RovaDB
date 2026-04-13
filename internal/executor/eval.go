@@ -65,7 +65,11 @@ func compareValues(op string, left, right parser.Value) (bool, error) {
 		}
 	}
 	if left.IsInteger() && right.IsInteger() {
-		return compareIntegerValues(op, left.IntegerValue(), right.IntegerValue())
+		resolvedLeft, resolvedRight, err := resolveIntegerComparisonOperands(left, right)
+		if err != nil {
+			return false, err
+		}
+		return compareIntegerValues(op, resolvedLeft.IntegerValue(), resolvedRight.IntegerValue())
 	}
 	if left.Kind != right.Kind {
 		return false, errTypeMismatch
@@ -126,7 +130,11 @@ func compareSortableValues(left, right parser.Value) (int, error) {
 		return 0, errTypeMismatch
 	}
 	if left.IsInteger() && right.IsInteger() {
-		return compareSortableIntegerValues(left.IntegerValue(), right.IntegerValue()), nil
+		resolvedLeft, resolvedRight, err := resolveIntegerComparisonOperands(left, right)
+		if err != nil {
+			return 0, err
+		}
+		return compareSortableIntegerValues(resolvedLeft.IntegerValue(), resolvedRight.IntegerValue()), nil
 	}
 	if left.Kind != right.Kind {
 		return 0, errTypeMismatch
@@ -257,5 +265,40 @@ func compareSortableIntegerValues(left, right int64) int {
 		return 1
 	default:
 		return 0
+	}
+}
+
+func resolveIntegerComparisonOperands(left, right parser.Value) (parser.Value, parser.Value, error) {
+	switch {
+	case left.IsIntegerLiteral() && right.IsTypedInteger():
+		resolved, err := resolveUntypedIntegerLiteralToValueKind(left, right.Kind)
+		if err != nil {
+			return parser.Value{}, parser.Value{}, err
+		}
+		return resolved, right, nil
+	case left.IsTypedInteger() && right.IsIntegerLiteral():
+		resolved, err := resolveUntypedIntegerLiteralToValueKind(right, left.Kind)
+		if err != nil {
+			return parser.Value{}, parser.Value{}, err
+		}
+		return left, resolved, nil
+	default:
+		return left, right, nil
+	}
+}
+
+func resolveUntypedIntegerLiteralToValueKind(value parser.Value, targetKind parser.ValueKind) (parser.Value, error) {
+	if !value.IsIntegerLiteral() {
+		return parser.Value{}, errTypeMismatch
+	}
+	switch targetKind {
+	case parser.ValueKindSmallInt:
+		return normalizeIntegerColumnValue(value, parser.BoundIntegerTypeInt16, -1<<15, 1<<15-1)
+	case parser.ValueKindInt:
+		return normalizeIntegerColumnValue(value, parser.BoundIntegerTypeInt32, -1<<31, 1<<31-1)
+	case parser.ValueKindBigInt:
+		return normalizeIntegerColumnValue(value, parser.BoundIntegerTypeInt64, -1<<63, 1<<63-1)
+	default:
+		return value, nil
 	}
 }

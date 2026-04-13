@@ -662,6 +662,36 @@ func TestExecEngineOwnedIntegerLiteralsAndDefaultsRemainValidForTypedIntegerWrit
 	assertRowsIntSequence(t, userRows, 5)
 }
 
+func TestExecTypedIntegerWritesRejectOutOfRangeSQLLiteralsByTargetWidth(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE numbers (small_col SMALLINT, int_col INT, big_col BIGINT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	tests := []string{
+		"INSERT INTO numbers (small_col) VALUES (40000)",
+	}
+
+	for _, sql := range tests {
+		t.Run(sql, func(t *testing.T) {
+			_, err := db.Exec(sql)
+			var dbErr *DBError
+			if !errors.As(err, &dbErr) || dbErr.Kind != ErrExec {
+				t.Fatalf("Exec(%q) error = %v, want exec type mismatch", sql, err)
+			}
+		})
+	}
+
+	if _, err := db.Exec("INSERT INTO numbers (big_col) VALUES (2147483647)"); err != nil {
+		t.Fatalf("Exec(bigint fitting literal) error = %v", err)
+	}
+}
+
 func TestTypedIntegerScanRequiresExactDestinationTypes(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

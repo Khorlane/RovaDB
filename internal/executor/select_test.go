@@ -202,6 +202,34 @@ func TestSelectWithNumericComparisons(t *testing.T) {
 	}
 }
 
+func TestSelectResolvesUntypedIntegerLiteralAgainstTypedStoredIntegerValue(t *testing.T) {
+	tables := map[string]*Table{
+		"numbers": {
+			Name: "numbers",
+			Columns: []parser.ColumnDef{
+				{Name: "small_col", Type: parser.ColumnTypeSmallInt},
+				{Name: "name", Type: parser.ColumnTypeText},
+			},
+			Rows: [][]parser.Value{
+				{parser.SmallIntValue(7), parser.StringValue("match")},
+				{parser.SmallIntValue(8), parser.StringValue("other")},
+			},
+		},
+	}
+
+	rows, err := Select(planSelect(t, &parser.SelectExpr{
+		TableName: "numbers",
+		Columns:   []string{"small_col", "name"},
+		Where:     where(parser.Condition{Left: "small_col", Operator: "=", Right: parser.Int64Value(7)}),
+	}), tables)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if len(rows) != 1 || rows[0][0] != parser.SmallIntValue(7) || rows[0][1] != parser.StringValue("match") {
+		t.Fatalf("Select() rows = %#v, want typed SMALLINT row preserved", rows)
+	}
+}
+
 func TestSelectWithStringNotEqual(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
@@ -855,7 +883,7 @@ func TestSelectCountStarEmptyTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
-	if len(rows) != 1 || len(rows[0]) != 1 || rows[0][0] != parser.IntValue(0) {
+	if len(rows) != 1 || len(rows[0]) != 1 || rows[0][0] != parser.Int64Value(0) {
 		t.Fatalf("Select() rows = %#v, want [[0]]", rows)
 	}
 }
@@ -873,7 +901,7 @@ func TestSelectCountStarPopulatedTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
-	if len(rows) != 1 || rows[0][0] != parser.IntValue(3) {
+	if len(rows) != 1 || rows[0][0] != parser.Int64Value(3) {
 		t.Fatalf("Select() rows = %#v, want [[3]]", rows)
 	}
 }
@@ -895,7 +923,7 @@ func TestSelectCountStarWithWhere(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
-	if len(rows) != 1 || rows[0][0] != parser.IntValue(2) {
+	if len(rows) != 1 || rows[0][0] != parser.Int64Value(2) {
 		t.Fatalf("Select() rows = %#v, want [[2]]", rows)
 	}
 }
@@ -943,7 +971,7 @@ func TestSelectAggregateFunctionsSingleTable(t *testing.T) {
 	if len(rows) != 1 || len(rows[0]) != 5 {
 		t.Fatalf("rows = %#v, want one aggregate row", rows)
 	}
-	if rows[0][0] != parser.IntValue(3) || rows[0][1] != parser.RealValue((1.5+2.5+3.0)/3.0) || rows[0][2] != parser.RealValue(7.0) || rows[0][3] != parser.StringValue("alpha") || rows[0][4] != parser.RealValue(3.0) {
+	if rows[0][0] != parser.Int64Value(3) || rows[0][1] != parser.RealValue((1.5+2.5+3.0)/3.0) || rows[0][2] != parser.RealValue(7.0) || rows[0][3] != parser.StringValue("alpha") || rows[0][4] != parser.RealValue(3.0) {
 		t.Fatalf("rows[0] = %#v, want [3 2.333... 7 alpha 3.0]", rows[0])
 	}
 }
@@ -982,7 +1010,7 @@ func TestSelectAggregateFunctionsJoin(t *testing.T) {
 	if len(rows) != 1 || len(rows[0]) != 3 {
 		t.Fatalf("rows = %#v, want one aggregate row", rows)
 	}
-	if rows[0][0] != parser.IntValue(3) || rows[0][1] != parser.StringValue("eng") || rows[0][2] != parser.StringValue("ops") {
+	if rows[0][0] != parser.Int64Value(3) || rows[0][1] != parser.StringValue("eng") || rows[0][2] != parser.StringValue("ops") {
 		t.Fatalf("rows[0] = %#v, want [3 eng ops]", rows[0])
 	}
 }
@@ -1155,7 +1183,7 @@ func TestSelectProjectionAndPredicateArithmetic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
-	if len(rows) != 1 || rows[0][0] != parser.IntValue(3) {
+	if len(rows) != 1 || rows[0][0] != parser.Int64Value(3) {
 		t.Fatalf("rows = %#v, want [[3]]", rows)
 	}
 }
@@ -1496,7 +1524,7 @@ func TestSelectIndexScanBridgeAdaptsPlannerProjectionExpressions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
-	if len(rows) != 2 || rows[0][0] != parser.IntValue(11) || rows[1][0] != parser.IntValue(13) {
+	if len(rows) != 2 || rows[0][0] != parser.Int64Value(11) || rows[1][0] != parser.Int64Value(13) {
 		t.Fatalf("Select() rows = %#v, want [[11] [13]]", rows)
 	}
 }
