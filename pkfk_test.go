@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/executor"
+	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
 
@@ -66,6 +67,80 @@ func TestExecCreateTableWithNamedForeignKeyPersistsMetadata(t *testing.T) {
 	}
 	if table.ForeignKeyDefs[0].ChildIndexID != indexDef.IndexID {
 		t.Fatalf("ForeignKeyDefs[0].ChildIndexID = %d, want %d", table.ForeignKeyDefs[0].ChildIndexID, indexDef.IndexID)
+	}
+}
+
+func TestWriteValidationLoadTargetsDeleteIncludesRootAndDescendantClosureWithoutDuplicates(t *testing.T) {
+	tables := map[string]*executor.Table{
+		"parents": {
+			Name:    "parents",
+			TableID: 1,
+			PrimaryKeyDef: &storage.CatalogPrimaryKey{
+				Name:    "pk_parents",
+				Columns: []string{"id"},
+			},
+		},
+		"children_a": {
+			Name:    "children_a",
+			TableID: 2,
+			PrimaryKeyDef: &storage.CatalogPrimaryKey{
+				Name:    "pk_children_a",
+				Columns: []string{"id"},
+			},
+			ForeignKeyDefs: []storage.CatalogForeignKey{
+				{
+					Name:                 "fk_children_a_parent",
+					ParentTableID:        1,
+					ParentPrimaryKeyName: "pk_parents",
+				},
+			},
+		},
+		"children_b": {
+			Name:    "children_b",
+			TableID: 3,
+			PrimaryKeyDef: &storage.CatalogPrimaryKey{
+				Name:    "pk_children_b",
+				Columns: []string{"id"},
+			},
+			ForeignKeyDefs: []storage.CatalogForeignKey{
+				{
+					Name:                 "fk_children_b_parent",
+					ParentTableID:        1,
+					ParentPrimaryKeyName: "pk_parents",
+				},
+			},
+		},
+		"grandchildren": {
+			Name:    "grandchildren",
+			TableID: 4,
+			PrimaryKeyDef: &storage.CatalogPrimaryKey{
+				Name:    "pk_grandchildren",
+				Columns: []string{"id"},
+			},
+			ForeignKeyDefs: []storage.CatalogForeignKey{
+				{
+					Name:                 "fk_grandchildren_child_a",
+					ParentTableID:        2,
+					ParentPrimaryKeyName: "pk_children_a",
+				},
+				{
+					Name:                 "fk_grandchildren_child_b",
+					ParentTableID:        3,
+					ParentPrimaryKeyName: "pk_children_b",
+				},
+			},
+		},
+	}
+
+	got := writeValidationLoadTargets(tables, &parser.DeleteStmt{TableName: "parents"})
+	want := []string{"parents", "children_a", "grandchildren", "children_b"}
+	if len(got) != len(want) {
+		t.Fatalf("writeValidationLoadTargets(delete) len = %d, want %d; got = %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("writeValidationLoadTargets(delete)[%d] = %q, want %q; got = %#v", i, got[i], want[i], got)
+		}
 	}
 }
 

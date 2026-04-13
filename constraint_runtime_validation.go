@@ -44,7 +44,7 @@ func writeValidationLoadTargets(tables map[string]*executor.Table, stmt any) []s
 		addParentValidationTargets(tables, typed.TableName, add)
 	case *parser.DeleteStmt:
 		add(typed.TableName)
-		addReferencingChildTargetsRecursive(tables, typed.TableName, add)
+		addDeleteValidationDescendantTargets(tables, typed.TableName, add)
 	}
 	return targets
 }
@@ -60,26 +60,7 @@ func addParentValidationTargets(tables map[string]*executor.Table, tableName str
 	}
 }
 
-func addReferencingChildTargets(tables map[string]*executor.Table, tableName string, add func(string)) {
-	table := tables[tableName]
-	if table == nil || table.PrimaryKeyDef == nil {
-		return
-	}
-	for _, childName := range sortedTableNames(tables) {
-		child := tables[childName]
-		if child == nil {
-			continue
-		}
-		for _, fk := range child.ForeignKeyDefs {
-			if fk.ParentTableID == table.TableID && fk.ParentPrimaryKeyName == table.PrimaryKeyDef.Name {
-				add(childName)
-				break
-			}
-		}
-	}
-}
-
-func addReferencingChildTargetsRecursive(tables map[string]*executor.Table, tableName string, add func(string)) {
+func addDeleteValidationDescendantTargets(tables map[string]*executor.Table, tableName string, add func(string)) {
 	seen := make(map[string]struct{})
 	var walk func(string)
 	walk = func(parentName string) {
@@ -90,7 +71,6 @@ func addReferencingChildTargetsRecursive(tables map[string]*executor.Table, tabl
 			return
 		}
 		seen[parentName] = struct{}{}
-		add(parentName)
 		parent := tables[parentName]
 		if parent == nil || parent.PrimaryKeyDef == nil {
 			return
@@ -102,6 +82,7 @@ func addReferencingChildTargetsRecursive(tables map[string]*executor.Table, tabl
 			}
 			for _, fk := range child.ForeignKeyDefs {
 				if fk.ParentTableID == parent.TableID && fk.ParentPrimaryKeyName == parent.PrimaryKeyDef.Name {
+					add(childName)
 					walk(childName)
 					break
 				}
