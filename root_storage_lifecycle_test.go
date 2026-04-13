@@ -1788,6 +1788,108 @@ func TestRealRollbackCloseReopenKeepsCommittedState(t *testing.T) {
 	})
 }
 
+func TestTypedIntegerCloseReopenPreservesExactWidthsAcrossMaterializeAndScan(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE numbers (id INT, small_col SMALLINT, int_col INT, big_col BIGINT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO numbers VALUES (?, ?, ?, ?)", int32(1), int16(11), int32(22), int64(33)); err != nil {
+		t.Fatalf("Exec(insert exact widths) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	rows, err := db.Query("SELECT small_col, int_col, big_col FROM numbers WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Query(materialize) error = %v", err)
+	}
+	if got := rows.data; len(got) != 1 || len(got[0]) != 3 {
+		t.Fatalf("rows.data = %#v, want one typed integer row", got)
+	}
+	if got, ok := rows.data[0][0].(int16); !ok || got != 11 {
+		t.Fatalf("rows.data[0][0] = %#v, want int16(11)", rows.data[0][0])
+	}
+	if got, ok := rows.data[0][1].(int32); !ok || got != 22 {
+		t.Fatalf("rows.data[0][1] = %#v, want int32(22)", rows.data[0][1])
+	}
+	if got, ok := rows.data[0][2].(int64); !ok || got != 33 {
+		t.Fatalf("rows.data[0][2] = %#v, want int64(33)", rows.data[0][2])
+	}
+	if _, ok := rows.data[0][0].(int); ok {
+		t.Fatalf("rows.data[0][0] = %#v, want no Go int on typed path", rows.data[0][0])
+	}
+	if _, ok := rows.data[0][1].(int); ok {
+		t.Fatalf("rows.data[0][1] = %#v, want no Go int on typed path", rows.data[0][1])
+	}
+	if _, ok := rows.data[0][2].(int); ok {
+		t.Fatalf("rows.data[0][2] = %#v, want no Go int on typed path", rows.data[0][2])
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("rows.Close() error = %v", err)
+	}
+
+	rows, err = db.Query("SELECT small_col, int_col, big_col FROM numbers WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Query(scan exact) error = %v", err)
+	}
+	if !rows.Next() {
+		t.Fatal("rows.Next() = false, want true")
+	}
+	var small int16
+	var regular int32
+	var big int64
+	if err := rows.Scan(&small, &regular, &big); err != nil {
+		t.Fatalf("rows.Scan(exact widths) error = %v", err)
+	}
+	if small != 11 || regular != 22 || big != 33 {
+		t.Fatalf("rows.Scan(exact widths) = (%d, %d, %d), want (11, 22, 33)", small, regular, big)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("rows.Close() second error = %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		dest []any
+	}{
+		{name: "smallint rejects int64", dest: []any{new(int64), new(int32), new(int64)}},
+		{name: "smallint rejects int", dest: []any{new(int), new(int32), new(int64)}},
+		{name: "int rejects int16", dest: []any{new(int16), new(int16), new(int64)}},
+		{name: "bigint rejects int32", dest: []any{new(int16), new(int32), new(int32)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := db.QueryRow("SELECT small_col, int_col, big_col FROM numbers WHERE id = 1").Scan(tc.dest...); !errors.Is(err, ErrUnsupportedScanType) {
+				t.Fatalf("QueryRow().Scan() error = %v, want ErrUnsupportedScanType", err)
+			}
+		})
+	}
+
+	if err := db.QueryRow("SELECT 1 + 2").Scan(&big); err != nil {
+		t.Fatalf("QueryRow(untyped literal arithmetic).Scan(*int64) error = %v", err)
+	}
+	if big != 3 {
+		t.Fatalf("QueryRow(untyped literal arithmetic).Scan(*int64) = %d, want 3", big)
+	}
+	if err := db.QueryRow("SELECT COUNT(*) FROM numbers").Scan(&big); err != nil {
+		t.Fatalf("QueryRow(COUNT(*)).Scan(*int64) error = %v", err)
+	}
+	if big != 1 {
+		t.Fatalf("QueryRow(COUNT(*)).Scan(*int64) = %d, want 1", big)
+	}
+	if err := db.QueryRow("SELECT COUNT(*) FROM numbers").Scan(new(int)); !errors.Is(err, ErrUnsupportedScanType) {
+		t.Fatalf("QueryRow(COUNT(*)).Scan(*int) error = %v, want ErrUnsupportedScanType", err)
+	}
+}
+
 func TestAlterTableAddColumnCloseReopenPreservesExpandedExistingRows(t *testing.T) {
 	path := testDBPath(t)
 

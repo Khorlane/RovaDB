@@ -110,6 +110,68 @@ func TestBindPlaceholdersUpdateOrdering(t *testing.T) {
 	}
 }
 
+func TestBindPlaceholdersIntegerWidthMatrix(t *testing.T) {
+	stmt, err := Parse("INSERT INTO numbers VALUES (?, ?, ?)")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if err := BindPlaceholders(stmt, []any{int16(7), int32(8), int64(9)}); err != nil {
+		t.Fatalf("BindPlaceholders() error = %v", err)
+	}
+
+	insert, ok := stmt.(*InsertStmt)
+	if !ok {
+		t.Fatalf("stmt type = %T, want *InsertStmt", stmt)
+	}
+	if len(insert.ValueExprs) != 3 {
+		t.Fatalf("len(insert.ValueExprs) = %d, want 3", len(insert.ValueExprs))
+	}
+	want := []Value{
+		boundIntegerValue(7, BoundIntegerTypeInt16),
+		boundIntegerValue(8, BoundIntegerTypeInt32),
+		boundIntegerValue(9, BoundIntegerTypeInt64),
+	}
+	for i := range want {
+		if insert.ValueExprs[i].Kind != ValueExprKindLiteral {
+			t.Fatalf("insert.ValueExprs[%d].Kind = %v, want %v", i, insert.ValueExprs[i].Kind, ValueExprKindLiteral)
+		}
+		if insert.ValueExprs[i].Value != want[i] {
+			t.Fatalf("insert.ValueExprs[%d].Value = %#v, want %#v", i, insert.ValueExprs[i].Value, want[i])
+		}
+		if insert.ValueExprs[i].Value.Kind == ValueKindIntegerLiteral {
+			t.Fatalf("insert.ValueExprs[%d].Value.Kind = %v, want typed integer kind", i, insert.ValueExprs[i].Value.Kind)
+		}
+	}
+}
+
+func TestBindPlaceholdersRejectsUnsupportedIntegerTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		arg  any
+	}{
+		{name: "int", arg: int(1)},
+		{name: "int8", arg: int8(1)},
+		{name: "uint", arg: uint(1)},
+		{name: "uint32", arg: uint32(1)},
+		{name: "uint64", arg: uint64(1)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stmt, err := Parse("INSERT INTO numbers VALUES (?)")
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+
+			err = BindPlaceholders(stmt, []any{tc.arg})
+			if err == nil || !strings.Contains(err.Error(), "unsupported placeholder argument type") {
+				t.Fatalf("BindPlaceholders() error = %v, want unsupported placeholder argument type", err)
+			}
+		})
+	}
+}
+
 func TestBindArgumentValueSupportedTypes(t *testing.T) {
 	tests := []struct {
 		name string

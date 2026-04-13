@@ -89,11 +89,32 @@ func TestEvalBinaryValueExprTypedIntegerArithmeticPreservesWidth(t *testing.T) {
 			want:  parser.IntValue(15),
 		},
 		{
+			name:  "int minus int stays int",
+			op:    parser.ValueExprBinaryOpSub,
+			left:  parser.IntValue(10),
+			right: parser.IntValue(5),
+			want:  parser.IntValue(5),
+		},
+		{
 			name:  "bigint minus bigint stays bigint",
 			op:    parser.ValueExprBinaryOpSub,
 			left:  parser.BigIntValue(1 << 40),
 			right: parser.BigIntValue(9),
 			want:  parser.BigIntValue((1 << 40) - 9),
+		},
+		{
+			name:  "bigint plus bigint stays bigint",
+			op:    parser.ValueExprBinaryOpAdd,
+			left:  parser.BigIntValue(1 << 40),
+			right: parser.BigIntValue(9),
+			want:  parser.BigIntValue((1 << 40) + 9),
+		},
+		{
+			name:  "smallint minus smallint stays smallint",
+			op:    parser.ValueExprBinaryOpSub,
+			left:  parser.SmallIntValue(7),
+			right: parser.SmallIntValue(2),
+			want:  parser.SmallIntValue(5),
 		},
 		{
 			name:  "smallint plus fitting literal resolves to smallint",
@@ -123,6 +144,13 @@ func TestEvalBinaryValueExprTypedIntegerArithmeticPreservesWidth(t *testing.T) {
 			right: parser.SmallIntValue(9),
 			want:  parser.SmallIntValue(13),
 		},
+		{
+			name:  "bigint minus fitting literal resolves to bigint",
+			op:    parser.ValueExprBinaryOpSub,
+			left:  parser.BigIntValue(1 << 40),
+			right: parser.Int64Value(6),
+			want:  parser.BigIntValue((1 << 40) - 6),
+		},
 	}
 
 	for _, tc := range tests {
@@ -144,29 +172,39 @@ func TestEvalBinaryValueExprTypedIntegerArithmeticPreservesWidth(t *testing.T) {
 func TestEvalBinaryValueExprTypedIntegerArithmeticRejectsMixedWidths(t *testing.T) {
 	tests := []struct {
 		name  string
+		op    parser.ValueExprBinaryOp
 		left  parser.Value
 		right parser.Value
 	}{
 		{
 			name:  "smallint plus int",
+			op:    parser.ValueExprBinaryOpAdd,
 			left:  parser.SmallIntValue(1),
 			right: parser.IntValue(2),
 		},
 		{
 			name:  "smallint plus bigint",
+			op:    parser.ValueExprBinaryOpAdd,
 			left:  parser.SmallIntValue(1),
 			right: parser.BigIntValue(2),
 		},
 		{
 			name:  "int plus bigint",
+			op:    parser.ValueExprBinaryOpAdd,
 			left:  parser.IntValue(1),
 			right: parser.BigIntValue(2),
+		},
+		{
+			name:  "bigint minus int",
+			op:    parser.ValueExprBinaryOpSub,
+			left:  parser.BigIntValue(3),
+			right: parser.IntValue(2),
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := evalBinaryValueExpr(int(parser.ValueExprBinaryOpAdd), tc.left, tc.right)
+			_, err := evalBinaryValueExpr(int(tc.op), tc.left, tc.right)
 			if err != errTypeMismatch {
 				t.Fatalf("evalBinaryValueExpr() error = %v, want %v", err, errTypeMismatch)
 			}

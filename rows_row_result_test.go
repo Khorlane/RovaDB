@@ -510,6 +510,72 @@ func TestRowsScanTypeMismatchCases(t *testing.T) {
 	})
 }
 
+func TestRowsScanTypedIntegerResultsRequireExactDestinations(t *testing.T) {
+	rows := newRowsWithScanTypes(nil, [][]any{{int16(7), int32(8), int64(9)}}, []string{"SMALLINT", "INT", "BIGINT"})
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+
+	var small int16
+	var regular int32
+	var big int64
+	if err := rows.Scan(&small, &regular, &big); err != nil {
+		t.Fatalf("Scan(exact widths) error = %v", err)
+	}
+	if small != 7 || regular != 8 || big != 9 {
+		t.Fatalf("Scan(exact widths) = (%d, %d, %d), want (7, 8, 9)", small, regular, big)
+	}
+
+	rows = newRowsWithScanTypes(nil, [][]any{{int16(7), int32(8), int64(9)}}, []string{"SMALLINT", "INT", "BIGINT"})
+	if !rows.Next() {
+		t.Fatal("Next() mismatch = false, want true")
+	}
+
+	tests := []struct {
+		name string
+		dest []any
+	}{
+		{name: "smallint rejects int64", dest: []any{new(int64), new(int32), new(int64)}},
+		{name: "smallint rejects int", dest: []any{new(int), new(int32), new(int64)}},
+		{name: "int rejects int16", dest: []any{new(int16), new(int16), new(int64)}},
+		{name: "int rejects int64", dest: []any{new(int16), new(int64), new(int64)}},
+		{name: "bigint rejects int32", dest: []any{new(int16), new(int32), new(int32)}},
+		{name: "bigint rejects int", dest: []any{new(int16), new(int32), new(int)}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := rows.Scan(tc.dest...); !errors.Is(err, ErrUnsupportedScanType) {
+				t.Fatalf("Scan() error = %v, want ErrUnsupportedScanType", err)
+			}
+		})
+	}
+}
+
+func TestRowsScanLegacySchemaLessIntegerSeamRemainsUntyped(t *testing.T) {
+	rows := newRows(nil, [][]any{{int64(3)}})
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+
+	var got int64
+	if err := rows.Scan(&got); err != nil {
+		t.Fatalf("Scan(*int64) error = %v", err)
+	}
+	if got != 3 {
+		t.Fatalf("Scan(*int64) = %d, want 3", got)
+	}
+
+	rows = newRows(nil, [][]any{{int64(3)}})
+	if !rows.Next() {
+		t.Fatal("Next() second = false, want true")
+	}
+
+	var wrong int16
+	if err := rows.Scan(&wrong); !errors.Is(err, ErrUnsupportedScanType) {
+		t.Fatalf("Scan(*int16) error = %v, want ErrUnsupportedScanType", err)
+	}
+}
+
 func TestRowsScanAnySupport(t *testing.T) {
 	t.Run("int", func(t *testing.T) {
 		rows := newRows(nil, [][]any{{1}})
