@@ -4,11 +4,53 @@ import "testing"
 
 func TestInt64Value(t *testing.T) {
 	got := Int64Value(42)
-	if got.Kind != ValueKindInt64 {
-		t.Fatalf("Int64Value().Kind = %v, want %v", got.Kind, ValueKindInt64)
+	if got.Kind != ValueKindIntegerLiteral {
+		t.Fatalf("Int64Value().Kind = %v, want %v", got.Kind, ValueKindIntegerLiteral)
 	}
 	if got.I64 != 42 {
 		t.Fatalf("Int64Value().I64 = %d, want 42", got.I64)
+	}
+}
+
+func TestExactWidthIntegerConstructors(t *testing.T) {
+	small := SmallIntValue(7)
+	if small.Kind != ValueKindSmallInt || small.I16 != 7 {
+		t.Fatalf("SmallIntValue() = %#v, want SMALLINT 7", small)
+	}
+	if got := small.Any(); got != int16(7) {
+		t.Fatalf("SmallIntValue().Any() = %#v, want int16(7)", got)
+	}
+
+	regular := IntValue(8)
+	if regular.Kind != ValueKindInt || regular.I32 != 8 {
+		t.Fatalf("IntValue() = %#v, want INT 8", regular)
+	}
+	if got := regular.Any(); got != int32(8) {
+		t.Fatalf("IntValue().Any() = %#v, want int32(8)", got)
+	}
+
+	big := BigIntValue(9)
+	if big.Kind != ValueKindBigInt || big.I64 != 9 {
+		t.Fatalf("BigIntValue() = %#v, want BIGINT 9", big)
+	}
+	if got := big.Any(); got != int64(9) {
+		t.Fatalf("BigIntValue().Any() = %#v, want int64(9)", got)
+	}
+}
+
+func TestExactWidthIntegerKindsAreDistinct(t *testing.T) {
+	small := SmallIntValue(1)
+	regular := IntValue(1)
+	big := BigIntValue(1)
+
+	if small.Kind == regular.Kind {
+		t.Fatalf("SMALLINT kind = %v, INT kind = %v, want distinct", small.Kind, regular.Kind)
+	}
+	if regular.Kind == big.Kind {
+		t.Fatalf("INT kind = %v, BIGINT kind = %v, want distinct", regular.Kind, big.Kind)
+	}
+	if !small.IsInteger() || !regular.IsInteger() || !big.IsInteger() {
+		t.Fatalf("exact-width integer values must report IsInteger() = true")
 	}
 }
 

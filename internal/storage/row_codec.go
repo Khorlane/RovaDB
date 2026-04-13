@@ -23,13 +23,14 @@ func EncodeRow(values []Value) ([]byte, error) {
 		switch value.Kind {
 		case ValueKindNull:
 			buf = append(buf, rowTypeNull)
-		case ValueKindInt64:
-			if !publicIntInRange(value.I64) {
+		case ValueKindIntegerLiteral, ValueKindSmallInt, ValueKindInt, ValueKindBigInt:
+			integerValue := value.IntegerValue()
+			if !publicIntInRange(integerValue) {
 				return nil, errCorruptedRowData
 			}
 			var raw [8]byte
 			buf = append(buf, rowTypeInt64)
-			binary.LittleEndian.PutUint64(raw[:], uint64(value.I64))
+			binary.LittleEndian.PutUint64(raw[:], uint64(integerValue))
 			buf = append(buf, raw[:]...)
 		case ValueKindString:
 			var raw [4]byte
@@ -84,11 +85,11 @@ func DecodeRow(data []byte) ([]Value, error) {
 				return nil, errCorruptedRowData
 			}
 			value := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+			offset += 8
 			if !publicIntInRange(value) {
 				return nil, errCorruptedRowData
 			}
-			offset += 8
-			values = append(values, Int64Value(value))
+			values = append(values, IntegerLiteralValue(value))
 		case rowTypeString:
 			if offset+4 > len(data) {
 				return nil, errCorruptedRowData
@@ -151,9 +152,9 @@ func EncodeSlottedRow(values []Value, columnTypes []uint8) ([]byte, error) {
 		}
 
 		switch value.Kind {
-		case ValueKindInt64:
+		case ValueKindIntegerLiteral, ValueKindSmallInt, ValueKindInt, ValueKindBigInt:
 			var err error
-			buf, err = appendSlottedIntegerValue(buf, columnTypes[i], value.I64)
+			buf, err = appendSlottedIntegerValue(buf, columnTypes[i], value.IntegerValue())
 			if err != nil {
 				return nil, errInvalidRowData
 			}
@@ -220,23 +221,23 @@ func DecodeSlottedRow(data []byte, columnTypes []uint8) ([]Value, error) {
 			if offset+2 > len(data) {
 				return nil, errInvalidRowData
 			}
-			value := int64(int16(binary.LittleEndian.Uint16(data[offset : offset+2])))
+			value := int16(binary.LittleEndian.Uint16(data[offset : offset+2]))
 			offset += 2
-			values = append(values, Int64Value(value))
+			values = append(values, SmallIntValue(value))
 		case CatalogColumnTypeInt:
 			if offset+4 > len(data) {
 				return nil, errInvalidRowData
 			}
-			value := int64(int32(binary.LittleEndian.Uint32(data[offset : offset+4])))
+			value := int32(binary.LittleEndian.Uint32(data[offset : offset+4]))
 			offset += 4
-			values = append(values, Int64Value(value))
+			values = append(values, IntValue(value))
 		case CatalogColumnTypeBigInt:
 			if offset+8 > len(data) {
 				return nil, errInvalidRowData
 			}
 			value := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
 			offset += 8
-			values = append(values, Int64Value(value))
+			values = append(values, BigIntValue(value))
 		case CatalogColumnTypeBool:
 			if offset >= len(data) {
 				return nil, errInvalidRowData

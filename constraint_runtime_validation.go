@@ -308,8 +308,8 @@ func buildRuntimeConstraintTupleKey(row []parser.Value, positions map[string]int
 
 func runtimeConstraintTupleKeyPart(value parser.Value) string {
 	switch value.Kind {
-	case parser.ValueKindInt64:
-		return "int:" + strconv.FormatInt(value.I64, 10)
+	case parser.ValueKindIntegerLiteral, parser.ValueKindSmallInt, parser.ValueKindInt, parser.ValueKindBigInt:
+		return "int:" + strconv.FormatInt(value.IntegerValue(), 10)
 	case parser.ValueKindString:
 		return "string:" + value.Str
 	case parser.ValueKindBool:

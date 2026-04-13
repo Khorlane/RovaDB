@@ -202,8 +202,8 @@ func materializeSystemCatalogRow(row []parser.Value) []any {
 	out := make([]any, 0, len(row))
 	for _, value := range row {
 		switch value.Kind {
-		case parser.ValueKindInt64:
-			out = append(out, value.I64)
+		case parser.ValueKindIntegerLiteral, parser.ValueKindSmallInt, parser.ValueKindInt, parser.ValueKindBigInt:
+			out = append(out, value.IntegerValue())
 		case parser.ValueKindString:
 			out = append(out, value.Str)
 		case parser.ValueKindBool:
@@ -1368,10 +1368,10 @@ func committedLocatorsByIDForTest(t *testing.T, db *DB, tableName string) map[in
 	}
 	byID := make(map[int]storage.RowLocator, len(rows))
 	for i, row := range rows {
-		if row[0].Kind != parser.ValueKindInt64 {
+		if !row[0].IsInteger() {
 			t.Fatalf("row[0] = %#v, want int value", row[0])
 		}
-		byID[int(row[0].I64)] = locators[i]
+		byID[int(row[0].IntegerValue())] = locators[i]
 	}
 	return byID
 }

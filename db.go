@@ -1300,8 +1300,8 @@ func apiValue(value parser.Value) any {
 	switch value.Kind {
 	case parser.ValueKindNull:
 		return nil
-	case parser.ValueKindInt64:
-		return int(value.I64)
+	case parser.ValueKindIntegerLiteral, parser.ValueKindSmallInt, parser.ValueKindInt, parser.ValueKindBigInt:
+		return int(value.IntegerValue())
 	case parser.ValueKindString:
 		return value.Str
 	case parser.ValueKindBool:

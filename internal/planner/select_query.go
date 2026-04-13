@@ -7,7 +7,10 @@ type ValueKind int
 const (
 	ValueKindInvalid ValueKind = iota
 	ValueKindNull
-	ValueKindInt64
+	ValueKindIntegerLiteral
+	ValueKindSmallInt
+	ValueKindInt
+	ValueKindBigInt
 	ValueKindString
 	ValueKindBool
 	ValueKindReal
@@ -16,6 +19,8 @@ const (
 
 type Value struct {
 	Kind             ValueKind
+	I16              int16
+	I32              int32
 	I64              int64
 	Str              string
 	Bool             bool
@@ -27,8 +32,24 @@ func NullValue() Value {
 	return Value{Kind: ValueKindNull}
 }
 
+func IntegerLiteralValue(v int64) Value {
+	return Value{Kind: ValueKindIntegerLiteral, I64: v}
+}
+
+func SmallIntValue(v int16) Value {
+	return Value{Kind: ValueKindSmallInt, I16: v}
+}
+
+func IntValue(v int32) Value {
+	return Value{Kind: ValueKindInt, I32: v}
+}
+
+func BigIntValue(v int64) Value {
+	return Value{Kind: ValueKindBigInt, I64: v}
+}
+
 func Int64Value(v int64) Value {
-	return Value{Kind: ValueKindInt64, I64: v}
+	return IntegerLiteralValue(v)
 }
 
 func StringValue(v string) Value {
@@ -51,8 +72,14 @@ func (v Value) ParserValue() parser.Value {
 	switch v.Kind {
 	case ValueKindNull:
 		return parser.NullValue()
-	case ValueKindInt64:
-		return parser.Int64Value(v.I64)
+	case ValueKindIntegerLiteral:
+		return parser.IntegerLiteralValue(v.I64)
+	case ValueKindSmallInt:
+		return parser.SmallIntValue(v.I16)
+	case ValueKindInt:
+		return parser.IntValue(v.I32)
+	case ValueKindBigInt:
+		return parser.BigIntValue(v.I64)
 	case ValueKindString:
 		return parser.StringValue(v.Str)
 	case ValueKindBool:
@@ -328,6 +355,8 @@ func valueExprFromParser(expr *parser.ValueExpr) *ValueExpr {
 func valueFromParser(v parser.Value) Value {
 	return Value{
 		Kind:             ValueKind(v.Kind),
+		I16:              v.I16,
+		I32:              v.I32,
 		I64:              v.I64,
 		Str:              v.Str,
 		Bool:             v.Bool,

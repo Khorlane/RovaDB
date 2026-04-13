@@ -22,7 +22,7 @@ func TestExecuteInsert(t *testing.T) {
 		t.Fatalf("Execute() affected = %d, want 1", affected)
 	}
 	row := tables["users"].Rows[0]
-	if len(row) != 2 || row[0] != parser.Int64Value(1) || row[1] != parser.StringValue("steve") {
+	if len(row) != 2 || row[0] != parser.IntValue(1) || row[1] != parser.StringValue("steve") {
 		t.Fatalf("Execute() row = %#v, want [1 'steve']", row)
 	}
 }
@@ -62,7 +62,7 @@ func TestExecuteInsertWithReorderedColumnList(t *testing.T) {
 		t.Fatalf("Execute() affected = %d, want 1", affected)
 	}
 	row := tables["users"].Rows[0]
-	if len(row) != 2 || row[0] != parser.Int64Value(1) || row[1] != parser.StringValue("steve") {
+	if len(row) != 2 || row[0] != parser.IntValue(1) || row[1] != parser.StringValue("steve") {
 		t.Fatalf("Execute() row = %#v, want [1 'steve']", row)
 	}
 }
@@ -122,7 +122,7 @@ func TestExecuteInsertNotAllColumnsSpecified(t *testing.T) {
 	if affected != 1 {
 		t.Fatalf("Execute() affected = %d, want 1", affected)
 	}
-	if got := tables["users"].Rows[0]; len(got) != 2 || got[0] != parser.Int64Value(1) || got[1] != parser.NullValue() {
+	if got := tables["users"].Rows[0]; len(got) != 2 || got[0] != parser.IntValue(1) || got[1] != parser.NullValue() {
 		t.Fatalf("Execute() row = %#v, want [1 NULL]", got)
 	}
 }
@@ -149,7 +149,7 @@ func TestExecuteInsertOmittedColumnsUseDefaultsAndNullability(t *testing.T) {
 		t.Fatalf("Execute() affected = %d, want 1", affected)
 	}
 	want := []parser.Value{
-		parser.Int64Value(1),
+		parser.IntValue(1),
 		parser.StringValue("ready"),
 		parser.BoolValue(true),
 		parser.NullValue(),
@@ -418,7 +418,7 @@ func TestExecuteInsertValueExprArithmetic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if affected != 1 || tables["users"].Rows[0][0] != parser.Int64Value(3) {
+	if affected != 1 || tables["users"].Rows[0][0] != parser.IntValue(3) {
 		t.Fatalf("rows = %#v, want [[3]]", tables["users"].Rows)
 	}
 }

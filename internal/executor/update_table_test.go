@@ -511,7 +511,7 @@ func TestExecuteUpdateAssignmentExprArithmetic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("executeUpdate() error = %v", err)
 	}
-	if affected != 1 || tables["users"].Rows[0][0] != parser.Int64Value(3) {
+	if affected != 1 || tables["users"].Rows[0][0] != parser.IntValue(3) {
 		t.Fatalf("rows = %#v, want id 3", tables["users"].Rows)
 	}
 }

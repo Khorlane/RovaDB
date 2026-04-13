@@ -458,8 +458,8 @@ func TestTablePageLocatorsRejectWrongPageType(t *testing.T) {
 
 func TestBuildSlottedTablePageDataStoresEncodedRows(t *testing.T) {
 	rows := [][]Value{
-		{Int64Value(1), StringValue("alice")},
-		{Int64Value(2), StringValue("bob")},
+		{IntValue(1), StringValue("alice")},
+		{IntValue(2), StringValue("bob")},
 	}
 	columnTypes := []uint8{CatalogColumnTypeInt, CatalogColumnTypeText}
 
@@ -512,7 +512,7 @@ func TestBuildSlottedTablePageDataUsesDeclaredIntegerWidths(t *testing.T) {
 		CatalogColumnTypeBigInt,
 	}
 	rows := [][]Value{
-		{Int64Value(-7), Int64Value(-8), Int64Value(-9)},
+		{SmallIntValue(-7), IntValue(-8), BigIntValue(-9)},
 	}
 
 	page, err := BuildSlottedTablePageData(10, columnTypes, rows)
@@ -570,7 +570,7 @@ func TestReadSlottedRowsFromTablePageDataPadsTrailingNulls(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("len(rows) = %d, want 1", len(rows))
 	}
-	want := []Value{Int64Value(1), StringValue("alice"), NullValue()}
+	want := []Value{IntValue(1), StringValue("alice"), NullValue()}
 	for i := range want {
 		if rows[0][i] != want[i] {
 			t.Fatalf("rows[0][%d] = %#v, want %#v", i, rows[0][i], want[i])
@@ -611,8 +611,8 @@ func TestReadSlottedRowsFromTablePageDataRejectsWrongPageType(t *testing.T) {
 
 func TestReadSlottedRowsWithLocators(t *testing.T) {
 	rows := [][]Value{
-		{Int64Value(1), StringValue("alice")},
-		{Int64Value(2), StringValue("bob")},
+		{IntValue(1), StringValue("alice")},
+		{IntValue(2), StringValue("bob")},
 	}
 	page, err := BuildSlottedTablePageData(14, []uint8{CatalogColumnTypeInt, CatalogColumnTypeText}, rows)
 	if err != nil {
@@ -668,7 +668,7 @@ func TestReadRowByLocatorFromTablePageData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadRowByLocatorFromTablePageData() error = %v", err)
 	}
-	want := []Value{Int64Value(2), StringValue("bob")}
+	want := []Value{IntValue(2), StringValue("bob")}
 	for i := range want {
 		if row[i] != want[i] {
 			t.Fatalf("row[%d] = %#v, want %#v", i, row[i], want[i])
@@ -692,7 +692,7 @@ func TestReadRowByLocatorFromTablePageDataPadsTrailingNulls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadRowByLocatorFromTablePageData() error = %v", err)
 	}
-	want := []Value{Int64Value(1), StringValue("alice"), NullValue()}
+	want := []Value{IntValue(1), StringValue("alice"), NullValue()}
 	for i := range want {
 		if row[i] != want[i] {
 			t.Fatalf("row[%d] = %#v, want %#v", i, row[i], want[i])

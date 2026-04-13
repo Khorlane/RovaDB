@@ -9,8 +9,14 @@ func storageValueFromParser(value parser.Value) storage.Value {
 	switch value.Kind {
 	case parser.ValueKindNull:
 		return storage.NullValue()
-	case parser.ValueKindInt64:
-		return storage.Int64Value(value.I64)
+	case parser.ValueKindIntegerLiteral:
+		return storage.IntegerLiteralValue(value.I64)
+	case parser.ValueKindSmallInt:
+		return storage.SmallIntValue(value.I16)
+	case parser.ValueKindInt:
+		return storage.IntValue(value.I32)
+	case parser.ValueKindBigInt:
+		return storage.BigIntValue(value.I64)
 	case parser.ValueKindString:
 		return storage.StringValue(value.Str)
 	case parser.ValueKindBool:
@@ -34,8 +40,14 @@ func parserValueFromStorage(value storage.Value) parser.Value {
 	switch value.Kind {
 	case storage.ValueKindNull:
 		return parser.NullValue()
-	case storage.ValueKindInt64:
-		return parser.Int64Value(value.I64)
+	case storage.ValueKindIntegerLiteral:
+		return parser.IntegerLiteralValue(value.I64)
+	case storage.ValueKindSmallInt:
+		return parser.SmallIntValue(value.I16)
+	case storage.ValueKindInt:
+		return parser.IntValue(value.I32)
+	case storage.ValueKindBigInt:
+		return parser.BigIntValue(value.I64)
 	case storage.ValueKindString:
 		return parser.StringValue(value.Str)
 	case storage.ValueKindBool:
@@ -75,8 +87,8 @@ func publicValueFromParser(value parser.Value) any {
 	switch value.Kind {
 	case parser.ValueKindNull:
 		return nil
-	case parser.ValueKindInt64:
-		return value.I64
+	case parser.ValueKindIntegerLiteral, parser.ValueKindSmallInt, parser.ValueKindInt, parser.ValueKindBigInt:
+		return value.Any()
 	case parser.ValueKindString:
 		return value.Str
 	case parser.ValueKindBool:

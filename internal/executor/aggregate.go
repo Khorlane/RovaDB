@@ -55,7 +55,7 @@ func aggregateMinMax(rows [][]parser.Value, arg *runtimeValueExpr, eval aggregat
 			continue
 		}
 		switch value.Kind {
-		case parser.ValueKindInt64, parser.ValueKindString, parser.ValueKindReal:
+		case parser.ValueKindIntegerLiteral, parser.ValueKindSmallInt, parser.ValueKindInt, parser.ValueKindBigInt, parser.ValueKindString, parser.ValueKindReal:
 		default:
 			return parser.Value{}, errTypeMismatch
 		}
@@ -89,8 +89,8 @@ func aggregateAvg(rows [][]parser.Value, arg *runtimeValueExpr, eval aggregateVa
 		switch value.Kind {
 		case parser.ValueKindNull:
 			continue
-		case parser.ValueKindInt64:
-			sum += float64(value.I64)
+		case parser.ValueKindIntegerLiteral, parser.ValueKindSmallInt, parser.ValueKindInt, parser.ValueKindBigInt:
+			sum += float64(value.IntegerValue())
 		case parser.ValueKindReal:
 			sum += value.F64
 		default:
@@ -115,8 +115,8 @@ func aggregateSum(rows [][]parser.Value, arg *runtimeValueExpr, eval aggregateVa
 		switch value.Kind {
 		case parser.ValueKindNull:
 			continue
-		case parser.ValueKindInt64:
-			sum += float64(value.I64)
+		case parser.ValueKindIntegerLiteral, parser.ValueKindSmallInt, parser.ValueKindInt, parser.ValueKindBigInt:
+			sum += float64(value.IntegerValue())
 		case parser.ValueKindReal:
 			sum += value.F64
 		default:

@@ -174,7 +174,7 @@ func valueMatchesColumnType(value parser.Value, typeName string) bool {
 	}
 	switch typeName {
 	case parser.ColumnTypeSmallInt, parser.ColumnTypeInt, parser.ColumnTypeBigInt:
-		return value.Kind == parser.ValueKindInt64
+		return value.IsInteger()
 	case parser.ColumnTypeText:
 		return value.Kind == parser.ValueKindString
 	case parser.ColumnTypeBool:
@@ -224,10 +224,20 @@ func normalizeIntegerColumnValue(value parser.Value, exactType parser.BoundInteg
 	if value.BoundIntegerType != parser.BoundIntegerTypeNone && value.BoundIntegerType != exactType {
 		return parser.Value{}, errTypeMismatch
 	}
-	if value.I64 < minValue || value.I64 > maxValue {
+	integerValue := value.IntegerValue()
+	if integerValue < minValue || integerValue > maxValue {
 		return parser.Value{}, errTypeMismatch
 	}
-	return parser.Int64Value(value.I64), nil
+	switch exactType {
+	case parser.BoundIntegerTypeInt16:
+		return parser.SmallIntValue(int16(integerValue)), nil
+	case parser.BoundIntegerTypeInt, parser.BoundIntegerTypeInt32:
+		return parser.IntValue(int32(integerValue)), nil
+	case parser.BoundIntegerTypeInt64:
+		return parser.BigIntValue(integerValue), nil
+	default:
+		return parser.Value{}, errTypeMismatch
+	}
 }
 
 func validateColumnValue(table *Table, columnIndex int, value parser.Value) error {

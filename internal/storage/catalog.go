@@ -478,14 +478,8 @@ func appendCatalogDefaultValue(buf []byte, column CatalogColumn) ([]byte, error)
 	switch column.DefaultValue.Kind {
 	case ValueKindNull:
 		return append(buf, rowTypeNull), nil
-	case ValueKindInt64:
-		if !publicIntInRange(column.DefaultValue.I64) {
-			return nil, errCorruptedCatalogPage
-		}
-		var raw [8]byte
-		buf = append(buf, rowTypeInt64)
-		binary.LittleEndian.PutUint64(raw[:], uint64(column.DefaultValue.I64))
-		return append(buf, raw[:]...), nil
+	case ValueKindIntegerLiteral, ValueKindSmallInt, ValueKindInt, ValueKindBigInt:
+		return appendCatalogIntegerDefaultValue(buf, column)
 	case ValueKindString:
 		var raw [4]byte
 		buf = append(buf, rowTypeString)
@@ -526,10 +520,7 @@ func readCatalogDefaultValue(data []byte, offset *int, column CatalogColumn) (Va
 		}
 		value := int64(binary.LittleEndian.Uint64(data[*offset : *offset+8]))
 		*offset += 8
-		if !publicIntInRange(value) {
-			return Value{}, errCorruptedCatalogPage
-		}
-		return Int64Value(value), nil
+		return catalogIntegerValueForColumn(column.Type, value)
 	case rowTypeString:
 		if *offset+4 > len(data) {
 			return Value{}, errCorruptedCatalogPage
@@ -572,7 +563,7 @@ func catalogDefaultValueMatchesColumnType(columnType uint8, value Value) bool {
 	switch value.Kind {
 	case ValueKindNull:
 		return true
-	case ValueKindInt64:
+	case ValueKindIntegerLiteral, ValueKindSmallInt, ValueKindInt, ValueKindBigInt:
 		return catalogColumnTypeIsInteger(columnType)
 	case ValueKindString:
 		return columnType == CatalogColumnTypeText
@@ -582,6 +573,51 @@ func catalogDefaultValueMatchesColumnType(columnType uint8, value Value) bool {
 		return columnType == CatalogColumnTypeReal
 	default:
 		return false
+	}
+}
+
+func appendCatalogIntegerDefaultValue(buf []byte, column CatalogColumn) ([]byte, error) {
+	integerValue := column.DefaultValue.IntegerValue()
+	switch column.Type {
+	case CatalogColumnTypeSmallInt:
+		if integerValue < math.MinInt16 || integerValue > math.MaxInt16 {
+			return nil, errCorruptedCatalogPage
+		}
+	case CatalogColumnTypeInt:
+		if !publicIntInRange(integerValue) {
+			return nil, errCorruptedCatalogPage
+		}
+	case CatalogColumnTypeBigInt:
+	default:
+		if !publicIntInRange(integerValue) {
+			return nil, errCorruptedCatalogPage
+		}
+	}
+	var raw [8]byte
+	buf = append(buf, rowTypeInt64)
+	binary.LittleEndian.PutUint64(raw[:], uint64(integerValue))
+	return append(buf, raw[:]...), nil
+}
+
+func catalogIntegerValueForColumn(columnType uint8, value int64) (Value, error) {
+	switch columnType {
+	case CatalogColumnTypeSmallInt:
+		if value < math.MinInt16 || value > math.MaxInt16 {
+			return Value{}, errCorruptedCatalogPage
+		}
+		return SmallIntValue(int16(value)), nil
+	case CatalogColumnTypeInt:
+		if !publicIntInRange(value) {
+			return Value{}, errCorruptedCatalogPage
+		}
+		return IntValue(int32(value)), nil
+	case CatalogColumnTypeBigInt:
+		return BigIntValue(value), nil
+	default:
+		if !publicIntInRange(value) {
+			return Value{}, errCorruptedCatalogPage
+		}
+		return IntegerLiteralValue(value), nil
 	}
 }
 

@@ -12,7 +12,10 @@ type ValueKind int
 const (
 	ValueKindInvalid ValueKind = iota
 	ValueKindNull
-	ValueKindInt64
+	ValueKindIntegerLiteral
+	ValueKindSmallInt
+	ValueKindInt
+	ValueKindBigInt
 	ValueKindString
 	ValueKindBool
 	ValueKindReal
@@ -69,6 +72,8 @@ Comparison semantics:
 // Value is the tiny internal value representation for Stage 1 literals.
 type Value struct {
 	Kind             ValueKind
+	I16              int16
+	I32              int32
 	I64              int64
 	Str              string
 	Bool             bool
@@ -82,13 +87,40 @@ func NullValue() Value {
 	return Value{Kind: ValueKindNull}
 }
 
-// Int64Value builds an int64 Value.
-func Int64Value(v int64) Value {
-	return Value{Kind: ValueKindInt64, I64: v}
+// IntegerLiteralValue builds an untyped integer literal value.
+func IntegerLiteralValue(v int64) Value {
+	return Value{Kind: ValueKindIntegerLiteral, I64: v}
 }
 
 func boundIntegerValue(v int64, boundType BoundIntegerType) Value {
-	return Value{Kind: ValueKindInt64, I64: v, BoundIntegerType: boundType}
+	value := IntegerLiteralValue(v)
+	switch boundType {
+	case BoundIntegerTypeInt16:
+		value = SmallIntValue(int16(v))
+	case BoundIntegerTypeInt, BoundIntegerTypeInt32:
+		value = IntValue(int32(v))
+	case BoundIntegerTypeInt64:
+		value = BigIntValue(v)
+	}
+	value.BoundIntegerType = boundType
+	return value
+}
+
+func SmallIntValue(v int16) Value {
+	return Value{Kind: ValueKindSmallInt, I16: v}
+}
+
+func IntValue(v int32) Value {
+	return Value{Kind: ValueKindInt, I32: v}
+}
+
+func BigIntValue(v int64) Value {
+	return Value{Kind: ValueKindBigInt, I64: v}
+}
+
+// Int64Value builds an untyped integer literal value.
+func Int64Value(v int64) Value {
+	return IntegerLiteralValue(v)
 }
 
 // PublicIntValue builds a public INT value and enforces the signed 32-bit INT
@@ -97,7 +129,7 @@ func PublicIntValue(v int64) (Value, error) {
 	if !PublicIntInRange(v) {
 		return Value{}, errors.New("integer out of range for INT")
 	}
-	return Int64Value(v), nil
+	return IntValue(int32(v)), nil
 }
 
 // StringValue builds a string Value.
@@ -125,7 +157,13 @@ func (v Value) Any() any {
 	switch v.Kind {
 	case ValueKindNull:
 		return nil
-	case ValueKindInt64:
+	case ValueKindIntegerLiteral:
+		return v.I64
+	case ValueKindSmallInt:
+		return v.I16
+	case ValueKindInt:
+		return v.I32
+	case ValueKindBigInt:
 		return v.I64
 	case ValueKindString:
 		return v.Str
@@ -137,6 +175,26 @@ func (v Value) Any() any {
 		return nil
 	default:
 		return nil
+	}
+}
+
+func (v Value) IsInteger() bool {
+	switch v.Kind {
+	case ValueKindIntegerLiteral, ValueKindSmallInt, ValueKindInt, ValueKindBigInt:
+		return true
+	default:
+		return false
+	}
+}
+
+func (v Value) IntegerValue() int64 {
+	switch v.Kind {
+	case ValueKindSmallInt:
+		return int64(v.I16)
+	case ValueKindInt:
+		return int64(v.I32)
+	default:
+		return v.I64
 	}
 }
 

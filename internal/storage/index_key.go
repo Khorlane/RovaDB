@@ -27,13 +27,14 @@ func EncodeIndexKey(values []Value) ([]byte, error) {
 		switch value.Kind {
 		case ValueKindNull:
 			buf = append(buf, indexKeyTypeNull)
-		case ValueKindInt64:
-			if !publicIntInRange(value.I64) {
+		case ValueKindIntegerLiteral, ValueKindSmallInt, ValueKindInt, ValueKindBigInt:
+			integerValue := value.IntegerValue()
+			if !publicIntInRange(integerValue) {
 				return nil, errCorruptedIndexPage
 			}
 			var raw [4]byte
 			buf = append(buf, indexKeyTypeInt)
-			binary.LittleEndian.PutUint32(raw[:], uint32(int32(value.I64)))
+			binary.LittleEndian.PutUint32(raw[:], uint32(int32(integerValue)))
 			buf = append(buf, raw[:]...)
 		case ValueKindBool:
 			buf = append(buf, indexKeyTypeBool)
@@ -92,7 +93,7 @@ func decodeIndexKey(data []byte) ([]Value, error) {
 			}
 			value := int64(int32(binary.LittleEndian.Uint32(data[offset : offset+4])))
 			offset += 4
-			values = append(values, Int64Value(value))
+			values = append(values, IntegerLiteralValue(value))
 		case indexKeyTypeBool:
 			if offset >= len(data) {
 				return nil, errCorruptedIndexPage
@@ -178,11 +179,11 @@ func compareIndexKeyValue(left, right Value) int {
 	switch left.Kind {
 	case ValueKindNull:
 		return 0
-	case ValueKindInt64:
+	case ValueKindIntegerLiteral, ValueKindSmallInt, ValueKindInt, ValueKindBigInt:
 		switch {
-		case left.I64 < right.I64:
+		case left.IntegerValue() < right.IntegerValue():
 			return -1
-		case left.I64 > right.I64:
+		case left.IntegerValue() > right.IntegerValue():
 			return 1
 		default:
 			return 0

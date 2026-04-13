@@ -436,7 +436,7 @@ func assertRowValuesEqual(t *testing.T, got, want []Value) {
 }
 
 func TestEncodeDecodeSlottedRowSingleInt(t *testing.T) {
-	values := []Value{Int64Value(42)}
+	values := []Value{IntValue(42)}
 	columnTypes := []uint8{CatalogColumnTypeInt}
 
 	encoded, err := EncodeSlottedRow(values, columnTypes)
@@ -501,7 +501,7 @@ func TestEncodeDecodeSlottedRowSingleText(t *testing.T) {
 
 func TestEncodeDecodeSlottedRowMixed(t *testing.T) {
 	values := []Value{
-		Int64Value(7),
+		IntValue(7),
 		BoolValue(true),
 		RealValue(10.25),
 		StringValue("alice"),
@@ -563,8 +563,8 @@ func TestEncodeDecodeSlottedRowWithNulls(t *testing.T) {
 
 func TestEncodeDecodeSlottedRowIntBoundaries(t *testing.T) {
 	values := []Value{
-		Int64Value(math.MinInt32),
-		Int64Value(math.MaxInt32),
+		IntValue(math.MinInt32),
+		IntValue(math.MaxInt32),
 	}
 	columnTypes := []uint8{CatalogColumnTypeInt, CatalogColumnTypeInt}
 
@@ -626,7 +626,7 @@ func TestDecodeSlottedRowRejectsTruncatedTextPayload(t *testing.T) {
 }
 
 func TestDecodeSlottedRowRejectsColumnCountMismatch(t *testing.T) {
-	encoded, err := EncodeSlottedRow([]Value{Int64Value(1)}, []uint8{CatalogColumnTypeInt})
+	encoded, err := EncodeSlottedRow([]Value{IntValue(1)}, []uint8{CatalogColumnTypeInt})
 	if err != nil {
 		t.Fatalf("EncodeSlottedRow() error = %v", err)
 	}
@@ -638,7 +638,7 @@ func TestDecodeSlottedRowRejectsColumnCountMismatch(t *testing.T) {
 }
 
 func TestDecodeSlottedRowRejectsUnsupportedType(t *testing.T) {
-	encoded, err := EncodeSlottedRow([]Value{Int64Value(1)}, []uint8{CatalogColumnTypeInt})
+	encoded, err := EncodeSlottedRow([]Value{IntValue(1)}, []uint8{CatalogColumnTypeInt})
 	if err != nil {
 		t.Fatalf("EncodeSlottedRow() error = %v", err)
 	}
@@ -667,9 +667,9 @@ func TestEncodeSlottedRowRejectsOutOfRangeInt(t *testing.T) {
 
 func TestEncodeDecodeSlottedRowSmallIntRoundTrip(t *testing.T) {
 	values := []Value{
-		Int64Value(math.MinInt16),
-		Int64Value(-42),
-		Int64Value(math.MaxInt16),
+		SmallIntValue(math.MinInt16),
+		SmallIntValue(-42),
+		SmallIntValue(math.MaxInt16),
 	}
 	columnTypes := []uint8{
 		CatalogColumnTypeSmallInt,
@@ -692,9 +692,9 @@ func TestEncodeDecodeSlottedRowSmallIntRoundTrip(t *testing.T) {
 
 func TestEncodeDecodeSlottedRowBigIntRoundTrip(t *testing.T) {
 	values := []Value{
-		Int64Value(math.MinInt64),
-		Int64Value(-1),
-		Int64Value(math.MaxInt64),
+		BigIntValue(math.MinInt64),
+		BigIntValue(-1),
+		BigIntValue(math.MaxInt64),
 	}
 	columnTypes := []uint8{
 		CatalogColumnTypeBigInt,
@@ -717,9 +717,9 @@ func TestEncodeDecodeSlottedRowBigIntRoundTrip(t *testing.T) {
 
 func TestEncodeSlottedRowUsesDeclaredIntegerWidths(t *testing.T) {
 	values := []Value{
-		Int64Value(-2),
-		Int64Value(-3),
-		Int64Value(-4),
+		SmallIntValue(-2),
+		IntValue(-3),
+		BigIntValue(-4),
 	}
 	columnTypes := []uint8{
 		CatalogColumnTypeSmallInt,
@@ -751,6 +751,9 @@ func TestEncodeSlottedRowUsesDeclaredIntegerWidths(t *testing.T) {
 	}
 
 	assertRowValuesEqual(t, decoded, values)
+	if decoded[0].Kind != ValueKindSmallInt || decoded[1].Kind != ValueKindInt || decoded[2].Kind != ValueKindBigInt {
+		t.Fatalf("decoded kinds = [%v %v %v], want [SMALLINT INT BIGINT]", decoded[0].Kind, decoded[1].Kind, decoded[2].Kind)
+	}
 }
 
 func TestEncodeSlottedRowRejectsOutOfRangeSmallInt(t *testing.T) {
@@ -762,7 +765,7 @@ func TestEncodeSlottedRowRejectsOutOfRangeSmallInt(t *testing.T) {
 
 func TestEncodeInsertDecodeSlottedRowRoundTrip(t *testing.T) {
 	values := []Value{
-		Int64Value(5),
+		IntValue(5),
 		StringValue("slot"),
 		BoolValue(true),
 		RealValue(1.5),

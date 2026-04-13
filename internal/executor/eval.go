@@ -36,15 +36,15 @@ func Eval(expr *parser.Expr) (parser.Value, error) {
 		if err != nil {
 			return parser.Value{}, err
 		}
-		if left.Kind != parser.ValueKindInt64 || right.Kind != parser.ValueKindInt64 {
+		if !left.IsInteger() || !right.IsInteger() {
 			return parser.Value{}, errInvalidExpression
 		}
 
 		switch expr.Op {
 		case parser.BinaryOpAdd:
-			return publicIntResult(left.I64 + right.I64)
+			return publicIntResult(left.IntegerValue() + right.IntegerValue())
 		case parser.BinaryOpSub:
-			return publicIntResult(left.I64 - right.I64)
+			return publicIntResult(left.IntegerValue() - right.IntegerValue())
 		default:
 			return parser.Value{}, errInvalidExpression
 		}
@@ -64,28 +64,14 @@ func compareValues(op string, left, right parser.Value) (bool, error) {
 			return false, errTypeMismatch
 		}
 	}
+	if left.IsInteger() && right.IsInteger() {
+		return compareIntegerValues(op, left.IntegerValue(), right.IntegerValue())
+	}
 	if left.Kind != right.Kind {
 		return false, errTypeMismatch
 	}
 
 	switch left.Kind {
-	case parser.ValueKindInt64:
-		switch op {
-		case "=":
-			return left.I64 == right.I64, nil
-		case "!=":
-			return left.I64 != right.I64, nil
-		case "<":
-			return left.I64 < right.I64, nil
-		case "<=":
-			return left.I64 <= right.I64, nil
-		case ">":
-			return left.I64 > right.I64, nil
-		case ">=":
-			return left.I64 >= right.I64, nil
-		default:
-			return false, errUnsupportedComparisonOp
-		}
 	case parser.ValueKindString:
 		cmp := compareTextValues(left.Str, right.Str)
 		switch op {
@@ -139,20 +125,14 @@ func compareSortableValues(left, right parser.Value) (int, error) {
 	if left.Kind == parser.ValueKindNull || right.Kind == parser.ValueKindNull {
 		return 0, errTypeMismatch
 	}
+	if left.IsInteger() && right.IsInteger() {
+		return compareSortableIntegerValues(left.IntegerValue(), right.IntegerValue()), nil
+	}
 	if left.Kind != right.Kind {
 		return 0, errTypeMismatch
 	}
 
 	switch left.Kind {
-	case parser.ValueKindInt64:
-		switch {
-		case left.I64 < right.I64:
-			return -1, nil
-		case left.I64 > right.I64:
-			return 1, nil
-		default:
-			return 0, nil
-		}
 	case parser.ValueKindString:
 		switch cmp := compareTextValues(left.Str, right.Str); {
 		case cmp < 0:
@@ -199,11 +179,11 @@ func evalScalarFunction(name string, arg parser.Value) (parser.Value, error) {
 		return publicIntResult(int64(len(arg.Str)))
 	case "ABS":
 		switch arg.Kind {
-		case parser.ValueKindInt64:
-			if arg.I64 < 0 {
-				return publicIntResult(-arg.I64)
+		case parser.ValueKindIntegerLiteral, parser.ValueKindSmallInt, parser.ValueKindInt, parser.ValueKindBigInt:
+			if arg.IntegerValue() < 0 {
+				return publicIntResult(-arg.IntegerValue())
 			}
-			return publicIntResult(arg.I64)
+			return publicIntResult(arg.IntegerValue())
 		case parser.ValueKindReal:
 			if arg.F64 < 0 {
 				return parser.RealValue(-arg.F64), nil
@@ -218,19 +198,20 @@ func evalScalarFunction(name string, arg parser.Value) (parser.Value, error) {
 }
 
 func evalBinaryValueExpr(op int, left, right parser.Value) (parser.Value, error) {
+	if left.IsInteger() && right.IsInteger() {
+		switch op {
+		case int(runtimeValueExprBinaryOpAdd):
+			return publicIntResult(left.IntegerValue() + right.IntegerValue())
+		case int(runtimeValueExprBinaryOpSub):
+			return publicIntResult(left.IntegerValue() - right.IntegerValue())
+		default:
+			return parser.Value{}, errInvalidExpression
+		}
+	}
 	if left.Kind != right.Kind {
 		return parser.Value{}, errTypeMismatch
 	}
 	switch left.Kind {
-	case parser.ValueKindInt64:
-		switch op {
-		case int(runtimeValueExprBinaryOpAdd):
-			return publicIntResult(left.I64 + right.I64)
-		case int(runtimeValueExprBinaryOpSub):
-			return publicIntResult(left.I64 - right.I64)
-		default:
-			return parser.Value{}, errInvalidExpression
-		}
 	case parser.ValueKindReal:
 		switch op {
 		case int(runtimeValueExprBinaryOpAdd):
@@ -247,4 +228,34 @@ func evalBinaryValueExpr(op int, left, right parser.Value) (parser.Value, error)
 
 func isAggregateExpr(expr *runtimeValueExpr) bool {
 	return expr != nil && expr.kind == runtimeValueExprKindAggregateCall
+}
+
+func compareIntegerValues(op string, left, right int64) (bool, error) {
+	switch op {
+	case "=":
+		return left == right, nil
+	case "!=":
+		return left != right, nil
+	case "<":
+		return left < right, nil
+	case "<=":
+		return left <= right, nil
+	case ">":
+		return left > right, nil
+	case ">=":
+		return left >= right, nil
+	default:
+		return false, errUnsupportedComparisonOp
+	}
+}
+
+func compareSortableIntegerValues(left, right int64) int {
+	switch {
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
 }

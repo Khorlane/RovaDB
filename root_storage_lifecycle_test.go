@@ -357,8 +357,8 @@ func TestJournalWrittenBeforeDatabaseOverwrite(t *testing.T) {
 			return err
 		}
 		values := parserValuesFromStorage(storageValues)
-		if values[0].I64 != 1 {
-			t.Fatalf("disk value before flush = %d, want 1", values[0].I64)
+		if values[0].IntegerValue() != 1 {
+			t.Fatalf("disk value before flush = %d, want 1", values[0].IntegerValue())
 		}
 		return nil
 	}
@@ -559,7 +559,7 @@ func TestStageDirtyStateUsesPrivateFramesAndLeavesCommittedReadUnchanged(t *test
 		t.Fatalf("ReadSlottedRowsFromTablePageData(private) error = %v", err)
 	}
 	privateRows := parserRowsFromStorage(storagePrivateRows)
-	if len(privateRows) != 1 || privateRows[0][0] != parser.Int64Value(2) {
+	if len(privateRows) != 1 || privateRows[0][0] != parser.IntValue(2) {
 		t.Fatalf("private rows = %#v, want [[2]]", privateRows)
 	}
 	db.pool.UnlatchExclusive(privateFrame)
@@ -604,7 +604,7 @@ func TestReaderHelpersStayOnCommittedRowsWhilePrivateFrameExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scanTableRows() error = %v", err)
 	}
-	if len(rows) != 1 || rows[0][0] != parser.Int64Value(1) || rows[0][1] != parser.StringValue("alice") {
+	if len(rows) != 1 || rows[0][0] != parser.IntValue(1) || rows[0][1] != parser.StringValue("alice") {
 		t.Fatalf("scanTableRows() = %#v, want committed row [1 alice]", rows)
 	}
 
@@ -615,7 +615,7 @@ func TestReaderHelpersStayOnCommittedRowsWhilePrivateFrameExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchRowByLocator() error = %v", err)
 	}
-	if len(row) != 2 || row[0] != parser.Int64Value(1) || row[1] != parser.StringValue("alice") {
+	if len(row) != 2 || row[0] != parser.IntValue(1) || row[1] != parser.StringValue("alice") {
 		t.Fatalf("fetchRowByLocator() = %#v, want committed row [1 alice]", row)
 	}
 
@@ -703,7 +703,7 @@ func TestRollbackDiscardsPrivatePagesAndFreshWriteRecreatesFromCommitted(t *test
 	if err != nil {
 		t.Fatalf("scanTableRows() after rollback error = %v", err)
 	}
-	if len(rows) != 1 || rows[0][0] != parser.Int64Value(1) {
+	if len(rows) != 1 || rows[0][0] != parser.IntValue(1) {
 		t.Fatalf("scanTableRows() after rollback = %#v, want [[1]]", rows)
 	}
 
@@ -716,7 +716,7 @@ func TestRollbackDiscardsPrivatePagesAndFreshWriteRecreatesFromCommitted(t *test
 		t.Fatalf("ReadSlottedRowsFromTablePageData(private after rollback) error = %v", err)
 	}
 	privateRows := parserRowsFromStorage(storagePrivateRows)
-	if len(privateRows) != 1 || privateRows[0][0] != parser.Int64Value(1) {
+	if len(privateRows) != 1 || privateRows[0][0] != parser.IntValue(1) {
 		t.Fatalf("privateRows after rollback = %#v, want recreated committed row [[1]]", privateRows)
 	}
 	db.pool.UnlatchExclusive(privateAfterRollback)
@@ -777,7 +777,7 @@ func TestCommitPromotesPrivatePagesAndReadersSeeNewContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scanTableRows(after commit) error = %v", err)
 	}
-	if len(rowsAfterCommit) != 1 || rowsAfterCommit[0][0] != parser.Int64Value(1) || rowsAfterCommit[0][1] != parser.StringValue("beth") {
+	if len(rowsAfterCommit) != 1 || rowsAfterCommit[0][0] != parser.IntValue(1) || rowsAfterCommit[0][1] != parser.StringValue("beth") {
 		t.Fatalf("scanTableRows(after commit) = %#v, want promoted row [1 beth]", rowsAfterCommit)
 	}
 
@@ -788,7 +788,7 @@ func TestCommitPromotesPrivatePagesAndReadersSeeNewContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchRowByLocator(after commit) error = %v", err)
 	}
-	if len(row) != 2 || row[0] != parser.Int64Value(1) || row[1] != parser.StringValue("beth") {
+	if len(row) != 2 || row[0] != parser.IntValue(1) || row[1] != parser.StringValue("beth") {
 		t.Fatalf("fetchRowByLocator(after commit) = %#v, want promoted row [1 beth]", row)
 	}
 
@@ -3996,7 +3996,7 @@ func TestFetchRowByLocatorReturnsPersistedBaseRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchRowByLocator() error = %v", err)
 	}
-	want := []parser.Value{parser.Int64Value(2), parser.StringValue("alice")}
+	want := []parser.Value{parser.IntValue(2), parser.StringValue("alice")}
 	for i := range want {
 		if row[i] != want[i] {
 			t.Fatalf("row[%d] = %#v, want %#v", i, row[i], want[i])
@@ -4069,7 +4069,7 @@ func TestFetchRowByLocatorFromIndexLeafSurvivesReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchRowByLocator() error = %v", err)
 	}
-	want := []parser.Value{parser.Int64Value(2), parser.StringValue("alice")}
+	want := []parser.Value{parser.IntValue(2), parser.StringValue("alice")}
 	for i := range want {
 		if row[i] != want[i] {
 			t.Fatalf("row[%d] = %#v, want %#v", i, row[i], want[i])
@@ -4328,7 +4328,7 @@ func TestDeleteRebuildsPersistedIndexEntriesAndSurvivesReopen(t *testing.T) {
 
 	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("bob")}, nil)
 	rows := assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("alice")}, [][]parser.Value{
-		{parser.Int64Value(1), parser.StringValue("alice"), parser.Int64Value(10)},
+		{parser.IntValue(1), parser.StringValue("alice"), parser.IntValue(10)},
 	})
 	if len(rows) != 1 {
 		t.Fatalf("len(rows) = %d, want 1", len(rows))
@@ -4343,7 +4343,7 @@ func TestDeleteRebuildsPersistedIndexEntriesAndSurvivesReopen(t *testing.T) {
 
 	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("bob")}, nil)
 	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("cara")}, [][]parser.Value{
-		{parser.Int64Value(3), parser.StringValue("cara"), parser.Int64Value(30)},
+		{parser.IntValue(3), parser.StringValue("cara"), parser.IntValue(30)},
 	})
 }
 
@@ -4374,7 +4374,7 @@ func TestUpdateIndexedColumnRebuildsPersistedIndexEntriesAndSurvivesReopen(t *te
 
 	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("bob")}, nil)
 	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("zoe")}, [][]parser.Value{
-		{parser.Int64Value(2), parser.StringValue("zoe"), parser.Int64Value(20)},
+		{parser.IntValue(2), parser.StringValue("zoe"), parser.IntValue(20)},
 	})
 
 	if err := db.Close(); err != nil {
@@ -4386,7 +4386,7 @@ func TestUpdateIndexedColumnRebuildsPersistedIndexEntriesAndSurvivesReopen(t *te
 
 	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("bob")}, nil)
 	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("zoe")}, [][]parser.Value{
-		{parser.Int64Value(2), parser.StringValue("zoe"), parser.Int64Value(20)},
+		{parser.IntValue(2), parser.StringValue("zoe"), parser.IntValue(20)},
 	})
 }
 
@@ -4418,10 +4418,10 @@ func TestUpdateNonIndexedColumnPreservesIndexMembership(t *testing.T) {
 	}
 
 	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("alice")}, [][]parser.Value{
-		{parser.Int64Value(1), parser.StringValue("alice"), parser.BoolValue(true)},
+		{parser.IntValue(1), parser.StringValue("alice"), parser.BoolValue(true)},
 	})
 	assertIndexedRowLookup(t, db, "users", "idx_users_name", []parser.Value{parser.StringValue("bob")}, [][]parser.Value{
-		{parser.Int64Value(2), parser.StringValue("bob"), parser.BoolValue(true)},
+		{parser.IntValue(2), parser.StringValue("bob"), parser.BoolValue(true)},
 	})
 }
 
@@ -8405,10 +8405,10 @@ func TestInsertPersistsRowsToOwnedDataPage(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("len(rows) = %d, want 2", len(rows))
 	}
-	if rows[0][0].I64 != 1 || rows[0][1].Str != "steve" {
+	if rows[0][0].IntegerValue() != 1 || rows[0][1].Str != "steve" {
 		t.Fatalf("rows[0] = %#v, want id=1 name=steve", rows[0])
 	}
-	if rows[1][0].I64 != 2 || rows[1][1].Str != "bob" {
+	if rows[1][0].IntegerValue() != 2 || rows[1][1].Str != "bob" {
 		t.Fatalf("rows[1] = %#v, want id=2 name=bob", rows[1])
 	}
 }
