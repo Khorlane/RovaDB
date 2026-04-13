@@ -142,6 +142,66 @@ func TestCatalogRoundTripIncludesRealType(t *testing.T) {
 	}
 }
 
+func TestCatalogRoundTripPreservesDeclaredIntegerWidths(t *testing.T) {
+	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_integer_widths.db"))
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+
+	want := &CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "numbers",
+				TableID:    1,
+				RootPageID: 1,
+				Columns: []CatalogColumn{
+					{Name: "small_col", Type: CatalogColumnTypeSmallInt},
+					{Name: "int_col", Type: CatalogColumnTypeInt},
+					{Name: "big_col", Type: CatalogColumnTypeBigInt},
+				},
+			},
+		},
+	}
+	if err := SaveCatalog(pager, want); err != nil {
+		t.Fatalf("SaveCatalog() error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	reopenPager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() reload error = %v", err)
+	}
+	got, err := LoadCatalog(reopenPager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+
+	if len(got.Tables) != 1 || len(got.Tables[0].Columns) != 3 {
+		t.Fatalf("got catalog = %#v, want one table with three declared integer widths", got)
+	}
+	types := []uint8{
+		got.Tables[0].Columns[0].Type,
+		got.Tables[0].Columns[1].Type,
+		got.Tables[0].Columns[2].Type,
+	}
+	wantTypes := []uint8{
+		CatalogColumnTypeSmallInt,
+		CatalogColumnTypeInt,
+		CatalogColumnTypeBigInt,
+	}
+	if fmt.Sprintf("%v", types) != fmt.Sprintf("%v", wantTypes) {
+		t.Fatalf("column types = %v, want %v", types, wantTypes)
+	}
+}
+
 func TestCatalogRoundTripPreservesColumnNullabilityAndDefaults(t *testing.T) {
 	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_coldefs.db"))
 	if err != nil {

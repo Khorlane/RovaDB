@@ -9,10 +9,12 @@ const (
 	catalogVersion = 8
 	catalogPageID  = 0
 
-	CatalogColumnTypeInt  = 1
-	CatalogColumnTypeText = 2
-	CatalogColumnTypeBool = 3
-	CatalogColumnTypeReal = 4
+	CatalogColumnTypeInt      = 1
+	CatalogColumnTypeText     = 2
+	CatalogColumnTypeBool     = 3
+	CatalogColumnTypeReal     = 4
+	CatalogColumnTypeSmallInt = 5
+	CatalogColumnTypeBigInt   = 6
 )
 
 // CatalogData is the tiny storage-side catalog DTO persisted through CAT/DIR storage.
@@ -451,7 +453,7 @@ func validateCatalogColumn(column CatalogColumn) error {
 	if column.Name == "" {
 		return errCorruptedCatalogPage
 	}
-	if column.Type != CatalogColumnTypeInt && column.Type != CatalogColumnTypeText && column.Type != CatalogColumnTypeBool && column.Type != CatalogColumnTypeReal {
+	if !catalogColumnTypeValid(column.Type) {
 		return errCorruptedCatalogPage
 	}
 	if !column.HasDefault {
@@ -571,13 +573,31 @@ func catalogDefaultValueMatchesColumnType(columnType uint8, value Value) bool {
 	case ValueKindNull:
 		return true
 	case ValueKindInt64:
-		return columnType == CatalogColumnTypeInt
+		return catalogColumnTypeIsInteger(columnType)
 	case ValueKindString:
 		return columnType == CatalogColumnTypeText
 	case ValueKindBool:
 		return columnType == CatalogColumnTypeBool
 	case ValueKindReal:
 		return columnType == CatalogColumnTypeReal
+	default:
+		return false
+	}
+}
+
+func catalogColumnTypeValid(columnType uint8) bool {
+	switch columnType {
+	case CatalogColumnTypeSmallInt, CatalogColumnTypeInt, CatalogColumnTypeBigInt, CatalogColumnTypeText, CatalogColumnTypeBool, CatalogColumnTypeReal:
+		return true
+	default:
+		return false
+	}
+}
+
+func catalogColumnTypeIsInteger(columnType uint8) bool {
+	switch columnType {
+	case CatalogColumnTypeSmallInt, CatalogColumnTypeInt, CatalogColumnTypeBigInt:
+		return true
 	default:
 		return false
 	}

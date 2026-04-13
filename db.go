@@ -2971,7 +2971,7 @@ func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
 		for _, column := range table.Columns {
 			entry.Columns = append(entry.Columns, storage.CatalogColumn{
 				Name:         column.Name,
-				Type:         catalogColumnType(column.Type),
+				Type:         declaredCatalogColumnType(column.Type),
 				NotNull:      column.NotNull,
 				HasDefault:   column.HasDefault,
 				DefaultValue: storageValueFromParser(column.DefaultValue),
@@ -3875,14 +3875,31 @@ func committedFreePageSet(pool *bufferpool.BufferPool, head storage.PageID) (map
 func storageColumnTypes(columns []parser.ColumnDef) []uint8 {
 	columnTypes := make([]uint8, 0, len(columns))
 	for _, column := range columns {
-		columnTypes = append(columnTypes, catalogColumnType(column.Type))
+		columnTypes = append(columnTypes, physicalStorageColumnType(column.Type))
 	}
 	return columnTypes
 }
 
-func catalogColumnType(columnType string) uint8 {
+func declaredCatalogColumnType(columnType string) uint8 {
 	switch columnType {
+	case parser.ColumnTypeSmallInt:
+		return storage.CatalogColumnTypeSmallInt
 	case parser.ColumnTypeInt:
+		return storage.CatalogColumnTypeInt
+	case parser.ColumnTypeBigInt:
+		return storage.CatalogColumnTypeBigInt
+	case parser.ColumnTypeBool:
+		return storage.CatalogColumnTypeBool
+	case parser.ColumnTypeReal:
+		return storage.CatalogColumnTypeReal
+	default:
+		return storage.CatalogColumnTypeText
+	}
+}
+
+func physicalStorageColumnType(columnType string) uint8 {
+	switch columnType {
+	case parser.ColumnTypeSmallInt, parser.ColumnTypeInt, parser.ColumnTypeBigInt:
 		return storage.CatalogColumnTypeInt
 	case parser.ColumnTypeBool:
 		return storage.CatalogColumnTypeBool
@@ -3895,8 +3912,12 @@ func catalogColumnType(columnType string) uint8 {
 
 func parserColumnType(columnType uint8) (string, error) {
 	switch columnType {
+	case storage.CatalogColumnTypeSmallInt:
+		return parser.ColumnTypeSmallInt, nil
 	case storage.CatalogColumnTypeInt:
 		return parser.ColumnTypeInt, nil
+	case storage.CatalogColumnTypeBigInt:
+		return parser.ColumnTypeBigInt, nil
 	case storage.CatalogColumnTypeBool:
 		return parser.ColumnTypeBool, nil
 	case storage.CatalogColumnTypeReal:

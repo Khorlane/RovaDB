@@ -79,6 +79,39 @@ func TestGetTableSchemaReturnsColumnDefinitions(t *testing.T) {
 	}
 }
 
+func TestGetTableSchemaPreservesDeclaredIntegerWidths(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE numbers (small_col SMALLINT, int_col INT, big_col BIGINT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	table, err := db.GetTableSchema("numbers")
+	if err != nil {
+		t.Fatalf("GetTableSchema() error = %v", err)
+	}
+
+	want := []ColumnInfo{
+		{Name: "small_col", Type: "SMALLINT"},
+		{Name: "int_col", Type: "INT"},
+		{Name: "big_col", Type: "BIGINT"},
+	}
+	if len(table.Columns) != len(want) {
+		t.Fatalf("len(GetTableSchema().Columns) = %d, want %d", len(table.Columns), len(want))
+	}
+	for i := range want {
+		if table.Columns[i] != want[i] {
+			t.Fatalf("GetTableSchema().Columns[%d] = %#v, want %#v", i, table.Columns[i], want[i])
+		}
+	}
+}
+
 func TestGetTableSchemaUnknownTableReturnsError(t *testing.T) {
 	path := testDBPath(t)
 
@@ -145,6 +178,90 @@ func TestCatalogIntrospectionWorksAfterReopen(t *testing.T) {
 	}
 	if table.Columns[1] != (ColumnInfo{Name: "active", Type: "BOOL", NotNull: true, HasDefault: true, DefaultValue: true}) {
 		t.Fatalf("GetTableSchema().Columns[1] after reopen = %#v, want %#v", table.Columns[1], ColumnInfo{Name: "active", Type: "BOOL", NotNull: true, HasDefault: true, DefaultValue: true})
+	}
+}
+
+func TestCatalogIntrospectionPreservesDeclaredIntegerWidthsAfterReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+
+	if _, err := db.Exec("CREATE TABLE numbers (small_col SMALLINT, int_col INT, big_col BIGINT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create numbers) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+
+	table, err := db.GetTableSchema("numbers")
+	if err != nil {
+		t.Fatalf("GetTableSchema() after reopen error = %v", err)
+	}
+	want := []ColumnInfo{
+		{Name: "small_col", Type: "SMALLINT"},
+		{Name: "int_col", Type: "INT"},
+		{Name: "big_col", Type: "BIGINT"},
+		{Name: "name", Type: "TEXT"},
+	}
+	if len(table.Columns) != len(want) {
+		t.Fatalf("len(GetTableSchema().Columns after reopen) = %d, want %d", len(table.Columns), len(want))
+	}
+	for i := range want {
+		if table.Columns[i] != want[i] {
+			t.Fatalf("GetTableSchema().Columns[%d] after reopen = %#v, want %#v", i, table.Columns[i], want[i])
+		}
+	}
+
+	rows, err := db.Query("SELECT table_id FROM sys_tables WHERE table_name = 'numbers'")
+	if err != nil {
+		t.Fatalf("Query(sys_tables) error = %v", err)
+	}
+	if !rows.Next() {
+		t.Fatal("sys_tables lookup for numbers returned no rows")
+	}
+	var tableID int
+	if err := rows.Scan(&tableID); err != nil {
+		t.Fatalf("Scan(sys_tables) error = %v", err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("Rows.Close(sys_tables) = %v", err)
+	}
+
+	rows, err = db.Query("SELECT column_name, column_type FROM sys_tb_columns WHERE table_id = ? ORDER BY ordinal_position", tableID)
+	if err != nil {
+		t.Fatalf("Query(sys_tb_columns) error = %v", err)
+	}
+	defer rows.Close()
+
+	var gotTypes []string
+	for rows.Next() {
+		var columnName string
+		var columnType string
+		if err := rows.Scan(&columnName, &columnType); err != nil {
+			t.Fatalf("Scan(sys_tb_columns) error = %v", err)
+		}
+		gotTypes = append(gotTypes, columnName+":"+columnType)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Rows.Err() = %v", err)
+	}
+	wantTypes := []string{
+		"small_col:SMALLINT",
+		"int_col:INT",
+		"big_col:BIGINT",
+		"name:TEXT",
+	}
+	if strings.Join(gotTypes, ",") != strings.Join(wantTypes, ",") {
+		t.Fatalf("sys_tb_columns declared types = %v, want %v", gotTypes, wantTypes)
 	}
 }
 
