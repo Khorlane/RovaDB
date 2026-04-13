@@ -2,10 +2,11 @@ package storage
 
 import (
 	"encoding/binary"
+	"math"
 )
 
 const (
-	catalogVersion = 7
+	catalogVersion = 8
 	catalogPageID  = 0
 
 	CatalogColumnTypeInt  = 1
@@ -34,8 +35,11 @@ type CatalogTable struct {
 
 // CatalogColumn is a persisted typed column entry.
 type CatalogColumn struct {
-	Name string
-	Type uint8
+	Name         string
+	Type         uint8
+	NotNull      bool
+	HasDefault   bool
+	DefaultValue Value
 }
 
 // CatalogIndex is a persisted index definition.
@@ -152,14 +156,24 @@ func encodeCatalogPayload(cat *CatalogData) ([]byte, error) {
 		buf = appendUint16(buf, uint16(len(table.Columns)))
 
 		for _, column := range table.Columns {
-			if column.Name == "" {
-				return nil, errCorruptedCatalogPage
-			}
-			if column.Type != CatalogColumnTypeInt && column.Type != CatalogColumnTypeText && column.Type != CatalogColumnTypeBool && column.Type != CatalogColumnTypeReal {
+			if err := validateCatalogColumn(column); err != nil {
 				return nil, errCorruptedCatalogPage
 			}
 			buf = appendString(buf, column.Name)
 			buf = append(buf, column.Type)
+			var columnFlags byte
+			if column.NotNull {
+				columnFlags |= 1 << 0
+			}
+			if column.HasDefault {
+				columnFlags |= 1 << 1
+			}
+			buf = append(buf, columnFlags)
+			var err error
+			buf, err = appendCatalogDefaultValue(buf, column)
+			if err != nil {
+				return nil, err
+			}
 		}
 		buf = appendUint16(buf, uint16(len(table.Indexes)))
 		for _, index := range table.Indexes {
@@ -233,18 +247,31 @@ func decodeCatalogPayload(pageData []byte) (int, *CatalogData, error) {
 			}
 			columnType := pageData[offset]
 			offset++
-			if columnType != CatalogColumnTypeInt && columnType != CatalogColumnTypeText && columnType != CatalogColumnTypeBool && columnType != CatalogColumnTypeReal {
+			if offset >= len(pageData) {
 				return 0, nil, errCorruptedCatalogPage
 			}
+			columnFlags := pageData[offset]
+			offset++
 			if _, exists := columnNames[columnName]; exists {
 				return 0, nil, errCorruptedCatalogPage
 			}
 			columnNames[columnName] = struct{}{}
 
-			table.Columns = append(table.Columns, CatalogColumn{
-				Name: columnName,
-				Type: columnType,
-			})
+			column := CatalogColumn{
+				Name:       columnName,
+				Type:       columnType,
+				NotNull:    columnFlags&(1<<0) != 0,
+				HasDefault: columnFlags&(1<<1) != 0,
+			}
+			defaultValue, err := readCatalogDefaultValue(pageData, &offset, column)
+			if err != nil {
+				return 0, nil, err
+			}
+			column.DefaultValue = defaultValue
+			if err := validateCatalogColumn(column); err != nil {
+				return 0, nil, err
+			}
+			table.Columns = append(table.Columns, column)
 		}
 		indexCount, ok := readUint16(pageData, &offset)
 		if !ok {
@@ -418,6 +445,142 @@ func readString(data []byte, offset *int) (string, bool) {
 	value := string(data[*offset : *offset+int(length)])
 	*offset += int(length)
 	return value, true
+}
+
+func validateCatalogColumn(column CatalogColumn) error {
+	if column.Name == "" {
+		return errCorruptedCatalogPage
+	}
+	if column.Type != CatalogColumnTypeInt && column.Type != CatalogColumnTypeText && column.Type != CatalogColumnTypeBool && column.Type != CatalogColumnTypeReal {
+		return errCorruptedCatalogPage
+	}
+	if !column.HasDefault {
+		if column.DefaultValue.Kind != ValueKindInvalid {
+			return errCorruptedCatalogPage
+		}
+		return nil
+	}
+	if !catalogDefaultValueMatchesColumnType(column.Type, column.DefaultValue) {
+		return errCorruptedCatalogPage
+	}
+	if column.NotNull && column.DefaultValue.Kind == ValueKindNull {
+		return errCorruptedCatalogPage
+	}
+	return nil
+}
+
+func appendCatalogDefaultValue(buf []byte, column CatalogColumn) ([]byte, error) {
+	if !column.HasDefault {
+		return buf, nil
+	}
+	switch column.DefaultValue.Kind {
+	case ValueKindNull:
+		return append(buf, rowTypeNull), nil
+	case ValueKindInt64:
+		if !publicIntInRange(column.DefaultValue.I64) {
+			return nil, errCorruptedCatalogPage
+		}
+		var raw [8]byte
+		buf = append(buf, rowTypeInt64)
+		binary.LittleEndian.PutUint64(raw[:], uint64(column.DefaultValue.I64))
+		return append(buf, raw[:]...), nil
+	case ValueKindString:
+		var raw [4]byte
+		buf = append(buf, rowTypeString)
+		binary.LittleEndian.PutUint32(raw[:], uint32(len(column.DefaultValue.Str)))
+		buf = append(buf, raw[:]...)
+		return append(buf, column.DefaultValue.Str...), nil
+	case ValueKindBool:
+		buf = append(buf, rowTypeBool)
+		if column.DefaultValue.Bool {
+			return append(buf, 1), nil
+		}
+		return append(buf, 0), nil
+	case ValueKindReal:
+		var raw [8]byte
+		buf = append(buf, rowTypeReal)
+		binary.LittleEndian.PutUint64(raw[:], math.Float64bits(column.DefaultValue.F64))
+		return append(buf, raw[:]...), nil
+	default:
+		return nil, errCorruptedCatalogPage
+	}
+}
+
+func readCatalogDefaultValue(data []byte, offset *int, column CatalogColumn) (Value, error) {
+	if !column.HasDefault {
+		return Value{}, nil
+	}
+	if *offset >= len(data) {
+		return Value{}, errCorruptedCatalogPage
+	}
+	tag := data[*offset]
+	*offset++
+	switch tag {
+	case rowTypeNull:
+		return NullValue(), nil
+	case rowTypeInt64:
+		if *offset+8 > len(data) {
+			return Value{}, errCorruptedCatalogPage
+		}
+		value := int64(binary.LittleEndian.Uint64(data[*offset : *offset+8]))
+		*offset += 8
+		if !publicIntInRange(value) {
+			return Value{}, errCorruptedCatalogPage
+		}
+		return Int64Value(value), nil
+	case rowTypeString:
+		if *offset+4 > len(data) {
+			return Value{}, errCorruptedCatalogPage
+		}
+		length := int(binary.LittleEndian.Uint32(data[*offset : *offset+4]))
+		*offset += 4
+		if *offset+length > len(data) {
+			return Value{}, errCorruptedCatalogPage
+		}
+		value := StringValue(string(data[*offset : *offset+length]))
+		*offset += length
+		return value, nil
+	case rowTypeBool:
+		if *offset >= len(data) {
+			return Value{}, errCorruptedCatalogPage
+		}
+		switch data[*offset] {
+		case 0:
+			*offset++
+			return BoolValue(false), nil
+		case 1:
+			*offset++
+			return BoolValue(true), nil
+		default:
+			return Value{}, errCorruptedCatalogPage
+		}
+	case rowTypeReal:
+		if *offset+8 > len(data) {
+			return Value{}, errCorruptedCatalogPage
+		}
+		value := RealValue(math.Float64frombits(binary.LittleEndian.Uint64(data[*offset : *offset+8])))
+		*offset += 8
+		return value, nil
+	default:
+		return Value{}, errCorruptedCatalogPage
+	}
+}
+
+func catalogDefaultValueMatchesColumnType(columnType uint8, value Value) bool {
+	switch value.Kind {
+	case ValueKindNull:
+		return true
+	case ValueKindInt64:
+		return columnType == CatalogColumnTypeInt
+	case ValueKindString:
+		return columnType == CatalogColumnTypeText
+	case ValueKindBool:
+		return columnType == CatalogColumnTypeBool
+	case ValueKindReal:
+		return columnType == CatalogColumnTypeReal
+	default:
+		return false
+	}
 }
 
 func readCatalogIndex(data []byte, offset *int, columnNames map[string]struct{}, indexNames map[string]struct{}) (CatalogIndex, error) {

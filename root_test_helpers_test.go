@@ -621,7 +621,7 @@ func assertAutocommitClean(t *testing.T, db *DB, path string) {
 
 func corruptedIndexCatalogBytes(_ uint32) []byte {
 	buf := make([]byte, 0, storage.PageSize)
-	buf = appendUint32LE(buf, 7)
+	buf = appendUint32LE(buf, 8)
 	buf = appendUint32LE(buf, 1)
 	buf = appendStringLE(buf, "users")
 	buf = appendUint32LE(buf, 7)
@@ -629,6 +629,7 @@ func corruptedIndexCatalogBytes(_ uint32) []byte {
 	buf = appendUint16LE(buf, 1)
 	buf = appendStringLE(buf, "id")
 	buf = append(buf, storage.CatalogColumnTypeInt)
+	buf = append(buf, 0)
 	buf = appendUint16LE(buf, 1)
 	buf = appendStringLE(buf, "idx_users_missing")
 	buf = append(buf, 0)

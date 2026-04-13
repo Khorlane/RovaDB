@@ -2970,8 +2970,11 @@ func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
 		}
 		for _, column := range table.Columns {
 			entry.Columns = append(entry.Columns, storage.CatalogColumn{
-				Name: column.Name,
-				Type: catalogColumnType(column.Type),
+				Name:         column.Name,
+				Type:         catalogColumnType(column.Type),
+				NotNull:      column.NotNull,
+				HasDefault:   column.HasDefault,
+				DefaultValue: storageValueFromParser(column.DefaultValue),
 			})
 		}
 		indexNames := make([]string, 0, len(table.IndexDefs))
@@ -3076,7 +3079,13 @@ func tablesFromCatalog(catalog *storage.CatalogData) (map[string]*executor.Table
 			if err != nil {
 				return nil, err
 			}
-			columns = append(columns, parser.ColumnDef{Name: column.Name, Type: columnType})
+			columns = append(columns, parser.ColumnDef{
+				Name:         column.Name,
+				Type:         columnType,
+				NotNull:      column.NotNull,
+				HasDefault:   column.HasDefault,
+				DefaultValue: parserValueFromStorage(column.DefaultValue),
+			})
 		}
 		tables[table.Name] = &executor.Table{
 			Name:           table.Name,

@@ -2,6 +2,7 @@ package rovadb
 
 import (
 	"errors"
+	"github.com/Khorlane/RovaDB/internal/parser"
 	"strings"
 	"testing"
 )
@@ -74,6 +75,54 @@ func TestExecCreateTableBoolSchema(t *testing.T) {
 	for i := range want {
 		if reloaded[i].Name != want[i].name || reloaded[i].Type != want[i].typ {
 			t.Fatalf("reopened.tables[\"flags\"].Columns[%d] = %#v, want name=%q type=%q", i, reloaded[i], want[i].name, want[i].typ)
+		}
+	}
+}
+
+func TestExecCreateTablePersistsColumnNullabilityAndDefaults(t *testing.T) {
+	path := testDBPath(t)
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+
+	if _, err := db.Exec("CREATE TABLE flags (id INT, name TEXT DEFAULT 'ready', active BOOL NOT NULL, score REAL NOT NULL DEFAULT 1.25)"); err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+
+	got := db.tables["flags"].Columns
+	want := []parser.ColumnDef{
+		{Name: "id", Type: parser.ColumnTypeInt},
+		{Name: "name", Type: parser.ColumnTypeText, HasDefault: true, DefaultValue: parser.StringValue("ready")},
+		{Name: "active", Type: parser.ColumnTypeBool, NotNull: true},
+		{Name: "score", Type: parser.ColumnTypeReal, NotNull: true, HasDefault: true, DefaultValue: parser.RealValue(1.25)},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len(db.tables[\"flags\"].Columns) = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("db.tables[\"flags\"].Columns[%d] = %#v, want %#v", i, got[i], want[i])
+		}
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer reopened.Close()
+
+	reloaded := reopened.tables["flags"].Columns
+	if len(reloaded) != len(want) {
+		t.Fatalf("len(reopened.tables[\"flags\"].Columns) = %d, want %d", len(reloaded), len(want))
+	}
+	for i := range want {
+		if reloaded[i] != want[i] {
+			t.Fatalf("reopened.tables[\"flags\"].Columns[%d] = %#v, want %#v", i, reloaded[i], want[i])
 		}
 	}
 }

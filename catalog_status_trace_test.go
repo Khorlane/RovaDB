@@ -51,7 +51,7 @@ func TestGetTableSchemaReturnsColumnDefinitions(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL, score REAL)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT DEFAULT 'ready', active BOOL NOT NULL, score REAL NOT NULL DEFAULT 1.25)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 
@@ -68,9 +68,9 @@ func TestGetTableSchemaReturnsColumnDefinitions(t *testing.T) {
 
 	want := []ColumnInfo{
 		{Name: "id", Type: "INT"},
-		{Name: "name", Type: "TEXT"},
-		{Name: "active", Type: "BOOL"},
-		{Name: "score", Type: "REAL"},
+		{Name: "name", Type: "TEXT", HasDefault: true, DefaultValue: "ready"},
+		{Name: "active", Type: "BOOL", NotNull: true},
+		{Name: "score", Type: "REAL", NotNull: true, HasDefault: true, DefaultValue: 1.25},
 	}
 	for i := range want {
 		if table.Columns[i] != want[i] {
@@ -112,7 +112,7 @@ func TestCatalogIntrospectionWorksAfterReopen(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create users) error = %v", err)
 	}
-	if _, err := db.Exec("CREATE TABLE flags (id INT, active BOOL)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE flags (id INT, active BOOL NOT NULL DEFAULT TRUE)"); err != nil {
 		t.Fatalf("Exec(create flags) error = %v", err)
 	}
 	if err := db.Close(); err != nil {
@@ -143,8 +143,8 @@ func TestCatalogIntrospectionWorksAfterReopen(t *testing.T) {
 	if len(table.Columns) != 2 {
 		t.Fatalf("len(GetTableSchema().Columns after reopen) = %d, want 2", len(table.Columns))
 	}
-	if table.Columns[1] != (ColumnInfo{Name: "active", Type: "BOOL"}) {
-		t.Fatalf("GetTableSchema().Columns[1] after reopen = %#v, want %#v", table.Columns[1], ColumnInfo{Name: "active", Type: "BOOL"})
+	if table.Columns[1] != (ColumnInfo{Name: "active", Type: "BOOL", NotNull: true, HasDefault: true, DefaultValue: true}) {
+		t.Fatalf("GetTableSchema().Columns[1] after reopen = %#v, want %#v", table.Columns[1], ColumnInfo{Name: "active", Type: "BOOL", NotNull: true, HasDefault: true, DefaultValue: true})
 	}
 }
 

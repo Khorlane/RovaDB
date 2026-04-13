@@ -3692,8 +3692,8 @@ func TestCatalogRoundTripPreservesIndexMetadataForOpen(t *testing.T) {
 	if index.Name != "id" || index.Unique || len(index.Columns) != 1 || index.Columns[0].Name != "id" || index.Columns[0].Desc {
 		t.Fatalf("catalog.Tables[0].Indexes[0] = %#v, want named single-column ASC non-unique id index", index)
 	}
-	if catalog.Version != 7 {
-		t.Fatalf("catalog.Version = %d, want 7", catalog.Version)
+	if catalog.Version != 8 {
+		t.Fatalf("catalog.Version = %d, want 8", catalog.Version)
 	}
 	if usersTable.RootPageID != 0 {
 		t.Fatalf("catalog.Tables[0].RootPageID = %d, want 0 on new writes", usersTable.RootPageID)
@@ -6097,8 +6097,8 @@ func TestDirectoryWritePathWritesIDMappingsOnly(t *testing.T) {
 		t.Fatalf("rawDB.Close() error = %v", err)
 	}
 
-	if catalog.Version != 7 {
-		t.Fatalf("catalog.Version = %d, want 7", catalog.Version)
+	if catalog.Version != 8 {
+		t.Fatalf("catalog.Version = %d, want 8", catalog.Version)
 	}
 	for _, table := range catalog.Tables {
 		if table.RootPageID != 0 {

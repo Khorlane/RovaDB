@@ -142,6 +142,185 @@ func TestCatalogRoundTripIncludesRealType(t *testing.T) {
 	}
 }
 
+func TestCatalogRoundTripPreservesColumnNullabilityAndDefaults(t *testing.T) {
+	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_coldefs.db"))
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+
+	want := &CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "users",
+				TableID:    1,
+				RootPageID: 1,
+				Columns: []CatalogColumn{
+					{Name: "id", Type: CatalogColumnTypeInt, NotNull: false},
+					{Name: "name", Type: CatalogColumnTypeText, HasDefault: true, DefaultValue: StringValue("ready")},
+					{Name: "active", Type: CatalogColumnTypeBool, NotNull: true},
+					{Name: "score", Type: CatalogColumnTypeReal, NotNull: true, HasDefault: true, DefaultValue: RealValue(1.25)},
+				},
+			},
+		},
+	}
+	if err := SaveCatalog(pager, want); err != nil {
+		t.Fatalf("SaveCatalog() error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	pager, err = NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() reload error = %v", err)
+	}
+	got, err := LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+
+	columns := got.Tables[0].Columns
+	if len(columns) != 4 {
+		t.Fatalf("len(got.Tables[0].Columns) = %d, want 4", len(columns))
+	}
+	if columns[0].NotNull || columns[0].HasDefault || columns[0].DefaultValue.Kind != ValueKindInvalid {
+		t.Fatalf("columns[0] = %#v, want nullable column without default", columns[0])
+	}
+	if !columns[1].HasDefault || columns[1].DefaultValue != StringValue("ready") {
+		t.Fatalf("columns[1] = %#v, want TEXT DEFAULT 'ready'", columns[1])
+	}
+	if !columns[2].NotNull || columns[2].HasDefault {
+		t.Fatalf("columns[2] = %#v, want NOT NULL without default", columns[2])
+	}
+	if !columns[3].NotNull || !columns[3].HasDefault || columns[3].DefaultValue != RealValue(1.25) {
+		t.Fatalf("columns[3] = %#v, want NOT NULL DEFAULT 1.25", columns[3])
+	}
+}
+
+func TestSaveCatalogRejectsInconsistentColumnDefaultMetadata(t *testing.T) {
+	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_invalid_defaults.db"))
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		column CatalogColumn
+	}{
+		{
+			name:   "not null default null",
+			column: CatalogColumn{Name: "id", Type: CatalogColumnTypeInt, NotNull: true, HasDefault: true, DefaultValue: NullValue()},
+		},
+		{
+			name:   "default payload without has default flag",
+			column: CatalogColumn{Name: "name", Type: CatalogColumnTypeText, DefaultValue: StringValue("ready")},
+		},
+		{
+			name:   "type mismatch",
+			column: CatalogColumn{Name: "active", Type: CatalogColumnTypeBool, HasDefault: true, DefaultValue: Int64Value(1)},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := SaveCatalog(pager, &CatalogData{
+				Tables: []CatalogTable{{
+					Name:       "users",
+					TableID:    1,
+					RootPageID: 1,
+					Columns:    []CatalogColumn{tc.column},
+				}},
+			})
+			if !errors.Is(err, errCorruptedCatalogPage) {
+				t.Fatalf("SaveCatalog() error = %v, want %v", err, errCorruptedCatalogPage)
+			}
+		})
+	}
+}
+
+func TestLoadCatalogRejectsMalformedColumnDefaultMetadata(t *testing.T) {
+	tests := []struct {
+		name         string
+		columnName   string
+		columnType   uint8
+		notNull      bool
+		defaultBytes []byte
+	}{
+		{
+			name:         "not null default null",
+			columnName:   "id",
+			columnType:   CatalogColumnTypeInt,
+			notNull:      true,
+			defaultBytes: []byte{rowTypeNull},
+		},
+		{
+			name:       "type mismatch",
+			columnName: "active",
+			columnType: CatalogColumnTypeBool,
+			defaultBytes: func() []byte {
+				buf := []byte{rowTypeInt64}
+				var raw [8]byte
+				binary.LittleEndian.PutUint64(raw[:], 1)
+				return append(buf, raw[:]...)
+			}(),
+		},
+		{
+			name:         "invalid default tag",
+			columnName:   "score",
+			columnType:   CatalogColumnTypeReal,
+			defaultBytes: []byte{255},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := make([]byte, 0, PageSize)
+			payload = appendUint32(payload, catalogVersion)
+			payload = appendUint32(payload, 1)
+			payload = appendString(payload, "users")
+			payload = appendUint32(payload, 1)
+			payload = appendUint32(payload, 0)
+			payload = appendUint16(payload, 1)
+			payload = appendString(payload, tc.columnName)
+			payload = append(payload, tc.columnType)
+			var flags byte = 1 << 1
+			if tc.notNull {
+				flags |= 1 << 0
+			}
+			payload = append(payload, flags)
+			payload = append(payload, tc.defaultBytes...)
+			payload = appendUint16(payload, 0)
+			payload, err := appendCatalogConstraints(payload, CatalogTable{
+				Name:    "users",
+				TableID: 1,
+				Columns: []CatalogColumn{{Name: tc.columnName, Type: tc.columnType}},
+			})
+			if err != nil {
+				t.Fatalf("appendCatalogConstraints() error = %v", err)
+			}
+			page := make([]byte, PageSize)
+			copy(page, payload)
+
+			_, err = loadCatalogPageData(page)
+			if !errors.Is(err, errCorruptedCatalogPage) {
+				t.Fatalf("loadCatalogPageData() error = %v, want %v", err, errCorruptedCatalogPage)
+			}
+		})
+	}
+}
+
 func TestLoadCatalogRejectsLegacyPayloadVersions(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -20,8 +20,11 @@ type TableInfo struct {
 
 // ColumnInfo describes one column in the public catalog API.
 type ColumnInfo struct {
-	Name string
-	Type string
+	Name         string
+	Type         string
+	NotNull      bool
+	HasDefault   bool
+	DefaultValue any
 }
 
 // ListTables returns catalog metadata for all tables in the open database.
@@ -367,8 +370,11 @@ func publicTableInfo(table *executor.Table) TableInfo {
 	columns := make([]ColumnInfo, 0, len(table.Columns))
 	for _, column := range table.Columns {
 		columns = append(columns, ColumnInfo{
-			Name: column.Name,
-			Type: column.Type,
+			Name:         column.Name,
+			Type:         column.Type,
+			NotNull:      column.NotNull,
+			HasDefault:   column.HasDefault,
+			DefaultValue: publicValueFromParser(column.DefaultValue),
 		})
 	}
 	return TableInfo{

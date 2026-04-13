@@ -368,7 +368,7 @@ RovaDB exposes a small public catalog API for listing tables and reading table s
 - `ListTables()`
 - `GetTableSchema(table)`
 
-`ListTables()` returns table names and column definitions for all tables in the open database. `GetTableSchema(table)` returns the same metadata for one table.
+`ListTables()` returns table names and column definitions for all tables in the open database. `GetTableSchema(table)` returns the same metadata for one table. Column definitions include the declared type plus persisted `NOT NULL` and literal `DEFAULT` metadata when present.
 
 ## Canonical Example
 
