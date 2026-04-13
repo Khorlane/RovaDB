@@ -31,8 +31,8 @@ func TestOpenRejectsOrphanWALWhenDBFileIsMissing(t *testing.T) {
 }
 
 func TestVersionReturnsCurrentProductVersion(t *testing.T) {
-	if got := Version(); got != "v0.45.0-physical-integer-widths" {
-		t.Fatalf("Version() = %q, want %q", got, "v0.45.0-physical-integer-widths")
+	if got := Version(); got != "v0.46.0-strict-integer-semantics" {
+		t.Fatalf("Version() = %q, want %q", got, "v0.46.0-strict-integer-semantics")
 	}
 }
 
