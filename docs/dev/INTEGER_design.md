@@ -4,6 +4,8 @@ This document defines the intended design for integer semantics in RovaDB.
 
 It currently focuses on correcting the meaning of the public `INT` type and preparing the codebase for possible future support of additional integer widths.
 
+For the dedicated physical-widths milestone scope, see `docs/dev/PHYSICAL_INTEGER_WIDTHS_design.md`. That note now locks the exact `SMALLINT` / `INT` / `BIGINT` mapping, physical widths, and strict write / `Scan` contract for later implementation slices.
+
 It is an implementation-oriented design note. SQL syntax and user-visible statement semantics remain defined in `docs/dev/RovaDB_SQL_Language_Spec.md`.
 
 ## Purpose
@@ -44,7 +46,7 @@ That meaning should be consistent across:
 
 ## Non-Goals
 
-This document does not make `SMALLINT` or `BIGINT` public schema types yet.
+This document does not itself make `SMALLINT` or `BIGINT` public schema types yet.
 
 The following are out of scope for the current change unless explicitly added later:
 
@@ -61,12 +63,12 @@ For the current public surface:
 - `INT` means signed 32-bit integer semantics
 - values outside the supported `INT` range must fail rather than silently truncating
 
-Future direction will add:
+Future direction may add:
 
 - `SMALLINT`
 - `BIGINT`
 
-But the current change should not expose those types yet.
+But the current change should not expose those types yet. If later work proceeds, the exact multi-width contract is governed by `docs/dev/PHYSICAL_INTEGER_WIDTHS_design.md`.
 
 ## Affected Layers
 
