@@ -57,16 +57,8 @@ func (p *alterTableTokenParser) parseAddColumn(tableName string) (*AlterTableAdd
 		return nil, newParseError("unsupported alter table form")
 	}
 
-	columnTok, err := p.expect(tokenIdentifier)
-	if err != nil || !isIdentifier(columnTok.Lexeme) {
-		return nil, newParseError("unsupported alter table form")
-	}
-
-	typeTok := p.current()
-	switch typeTok.Kind {
-	case tokenKeywordInt, tokenKeywordText:
-		p.pos++
-	default:
+	column, err := p.parseColumnDef()
+	if err != nil {
 		return nil, newParseError("unsupported alter table form")
 	}
 
@@ -76,10 +68,7 @@ func (p *alterTableTokenParser) parseAddColumn(tableName string) (*AlterTableAdd
 
 	return &AlterTableAddColumnStmt{
 		TableName: tableName,
-		Column: ColumnDef{
-			Name: columnTok.Lexeme,
-			Type: normalizeColumnType(typeTok.Kind),
-		},
+		Column:    column,
 	}, nil
 }
 
@@ -282,4 +271,62 @@ func (p *alterTableTokenParser) parseForeignKeyOnDeleteClause() (ForeignKeyDelet
 	default:
 		return "", newParseError("unsupported alter table form")
 	}
+}
+
+func (p *alterTableTokenParser) parseColumnDef() (ColumnDef, error) {
+	nameTok, err := p.expect(tokenIdentifier)
+	if err != nil || !isIdentifier(nameTok.Lexeme) {
+		return ColumnDef{}, newParseError("unsupported alter table form")
+	}
+
+	columnType, err := p.parseColumnType()
+	if err != nil {
+		return ColumnDef{}, err
+	}
+
+	column := ColumnDef{Name: nameTok.Lexeme, Type: columnType}
+
+	if p.current().Kind == tokenKeywordNot {
+		p.pos++
+		if _, err := p.expect(tokenKeywordNull); err != nil {
+			return ColumnDef{}, newParseError("unsupported alter table form")
+		}
+		column.NotNull = true
+	}
+
+	if p.current().Kind == tokenKeywordDefault {
+		p.pos++
+		defaultValue, err := p.parseColumnDefaultLiteral()
+		if err != nil {
+			return ColumnDef{}, err
+		}
+		if column.NotNull && defaultValue.Kind == ValueKindNull {
+			return ColumnDef{}, newParseError("unsupported alter table form")
+		}
+		column.HasDefault = true
+		column.DefaultValue = defaultValue
+	}
+
+	return column, nil
+}
+
+func (p *alterTableTokenParser) parseColumnType() (string, error) {
+	typeTok := p.current()
+	switch typeTok.Kind {
+	case tokenKeywordInt, tokenKeywordText, tokenKeywordBool, tokenKeywordReal:
+		p.pos++
+		return normalizeColumnType(typeTok.Kind), nil
+	default:
+		return "", newParseError("unsupported alter table form")
+	}
+}
+
+func (p *alterTableTokenParser) parseColumnDefaultLiteral() (Value, error) {
+	tok := p.current()
+	value, ok := parseLiteralToken(tok)
+	if !ok || value.Kind == ValueKindPlaceholder {
+		return Value{}, newParseError("unsupported alter table form")
+	}
+	p.pos++
+	return value, nil
 }

@@ -243,15 +243,56 @@ func (p *createTableTokenParser) parseColumnDef() (ColumnDef, error) {
 		return ColumnDef{}, newParseError("unsupported query form")
 	}
 
+	columnType, err := p.parseColumnType()
+	if err != nil {
+		return ColumnDef{}, newParseError("unsupported query form")
+	}
+
+	column := ColumnDef{Name: nameTok.Lexeme, Type: columnType}
+
+	if p.current().Kind == tokenKeywordNot {
+		p.pos++
+		if _, err := p.expect(tokenKeywordNull); err != nil {
+			return ColumnDef{}, newParseError("unsupported query form")
+		}
+		column.NotNull = true
+	}
+
+	if p.current().Kind == tokenKeywordDefault {
+		p.pos++
+		defaultValue, err := p.parseColumnDefaultLiteral()
+		if err != nil {
+			return ColumnDef{}, err
+		}
+		if column.NotNull && defaultValue.Kind == ValueKindNull {
+			return ColumnDef{}, newParseError("unsupported query form")
+		}
+		column.HasDefault = true
+		column.DefaultValue = defaultValue
+	}
+
+	return column, nil
+}
+
+func (p *createTableTokenParser) parseColumnType() (string, error) {
 	typeTok := p.current()
 	switch typeTok.Kind {
 	case tokenKeywordInt, tokenKeywordText, tokenKeywordBool, tokenKeywordReal:
 		p.pos++
+		return normalizeColumnType(typeTok.Kind), nil
 	default:
-		return ColumnDef{}, newParseError("unsupported query form")
+		return "", newParseError("unsupported query form")
 	}
+}
 
-	return ColumnDef{Name: nameTok.Lexeme, Type: normalizeColumnType(typeTok.Kind)}, nil
+func (p *createTableTokenParser) parseColumnDefaultLiteral() (Value, error) {
+	tok := p.current()
+	value, ok := parseLiteralToken(tok)
+	if !ok || value.Kind == ValueKindPlaceholder {
+		return Value{}, newParseError("unsupported query form")
+	}
+	p.pos++
+	return value, nil
 }
 
 func (p *createTableTokenParser) current() token {

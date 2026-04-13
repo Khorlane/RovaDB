@@ -19,6 +19,66 @@ func TestParseAlterTableAddColumn(t *testing.T) {
 	}
 }
 
+func TestParseAlterTableAddColumnMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want ColumnDef
+	}{
+		{
+			name: "plain int",
+			sql:  "ALTER TABLE users ADD COLUMN id INT",
+			want: ColumnDef{Name: "id", Type: ColumnTypeInt},
+		},
+		{
+			name: "int default",
+			sql:  "ALTER TABLE users ADD COLUMN id INT DEFAULT 0",
+			want: ColumnDef{Name: "id", Type: ColumnTypeInt, HasDefault: true, DefaultValue: Int64Value(0)},
+		},
+		{
+			name: "int not null",
+			sql:  "ALTER TABLE users ADD COLUMN id INT NOT NULL",
+			want: ColumnDef{Name: "id", Type: ColumnTypeInt, NotNull: true},
+		},
+		{
+			name: "int not null default",
+			sql:  "ALTER TABLE users ADD COLUMN id INT NOT NULL DEFAULT 0",
+			want: ColumnDef{Name: "id", Type: ColumnTypeInt, NotNull: true, HasDefault: true, DefaultValue: Int64Value(0)},
+		},
+		{
+			name: "text default",
+			sql:  "ALTER TABLE users ADD COLUMN name TEXT DEFAULT 'x'",
+			want: ColumnDef{Name: "name", Type: ColumnTypeText, HasDefault: true, DefaultValue: StringValue("x")},
+		},
+		{
+			name: "bool default",
+			sql:  "ALTER TABLE users ADD COLUMN flag BOOL NOT NULL DEFAULT TRUE",
+			want: ColumnDef{Name: "flag", Type: ColumnTypeBool, NotNull: true, HasDefault: true, DefaultValue: BoolValue(true)},
+		},
+		{
+			name: "real default",
+			sql:  "ALTER TABLE users ADD COLUMN score REAL DEFAULT 1.5",
+			want: ColumnDef{Name: "score", Type: ColumnTypeReal, HasDefault: true, DefaultValue: RealValue(1.5)},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stmt, err := parseAlterTableTokens(tc.sql)
+			if err != nil {
+				t.Fatalf("parseAlterTableTokens() error = %v", err)
+			}
+			got, ok := stmt.(*AlterTableAddColumnStmt)
+			if !ok {
+				t.Fatalf("stmt type = %T, want *AlterTableAddColumnStmt", stmt)
+			}
+			if got.Column != tc.want {
+				t.Fatalf("Column = %#v, want %#v", got.Column, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseAlterTableViaParse(t *testing.T) {
 	stmt, err := Parse("ALTER TABLE users ADD COLUMN age INT")
 	if err != nil {
@@ -130,7 +190,6 @@ func TestParseAlterTableUnsupportedForm(t *testing.T) {
 		"ALTER TABLE users DROP COLUMN age",
 		"ALTER TABLE users ADD age INT",
 		"ALTER TABLE users ADD COLUMN",
-		"ALTER TABLE users ADD COLUMN age BOOL",
 		"ALTER TABLE users ADD PRIMARY KEY (id) USING INDEX idx_users_pk",
 		"ALTER TABLE users ADD CONSTRAINT pk_users PRIMARY KEY () USING INDEX idx_users_pk",
 		"ALTER TABLE users ADD CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES teams (id) USING INDEX idx_users_team",
@@ -156,11 +215,19 @@ func TestParseAlterTableTokensUnsupportedForm(t *testing.T) {
 		"ALTER TABLE users DROP COLUMN age",
 		"ALTER TABLE users ADD age INT",
 		"ALTER TABLE users ADD COLUMN",
-		"ALTER TABLE users ADD COLUMN age BOOL",
 		"ALTER TABLE users ADD COLUMN age INT extra",
 		"ALTER TABLE users ADD CONSTRAINT pk_users PRIMARY KEY (id)",
 		"ALTER TABLE users ADD CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES teams (id) USING INDEX idx_users_team ON DELETE SET NULL",
 		"ALTER TABLE users DROP PRIMARY KEY extra",
+		"ALTER TABLE users ADD COLUMN age INT DEFAULT",
+		"ALTER TABLE users ADD COLUMN age INT DEFAULT ?",
+		"ALTER TABLE users ADD COLUMN age INT DEFAULT 1 + 2",
+		"ALTER TABLE users ADD COLUMN age INT DEFAULT now()",
+		"ALTER TABLE users ADD COLUMN age INT DEFAULT CURRENT_TIMESTAMP",
+		"ALTER TABLE users ADD COLUMN age INT DEFAULT other_col",
+		"ALTER TABLE users ADD COLUMN age INT NOT",
+		"ALTER TABLE users ADD COLUMN age INT NOT NULL DEFAULT NULL",
+		"ALTER TABLE users ADD COLUMN age INT DEFAULT 0 DEFAULT 1",
 	}
 
 	for _, input := range tests {

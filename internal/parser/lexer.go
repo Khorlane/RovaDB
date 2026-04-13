@@ -20,6 +20,7 @@ const (
 	tokenKeywordConstraint
 	tokenKeywordCreate
 	tokenKeywordCascade
+	tokenKeywordDefault
 	tokenKeywordDelete
 	tokenKeywordDrop
 	tokenKeywordCommit
@@ -32,6 +33,7 @@ const (
 	tokenKeywordJoin
 	tokenKeywordKey
 	tokenKeywordNot
+	tokenKeywordNull
 	tokenKeywordOn
 	tokenKeywordPrimary
 	tokenKeywordForeign
@@ -226,6 +228,8 @@ func classifyWord(word string) tokenKind {
 		return tokenKeywordCreate
 	case "CASCADE":
 		return tokenKeywordCascade
+	case "DEFAULT":
+		return tokenKeywordDefault
 	case "DELETE":
 		return tokenKeywordDelete
 	case "DROP":
@@ -250,6 +254,8 @@ func classifyWord(word string) tokenKind {
 		return tokenKeywordKey
 	case "NOT":
 		return tokenKeywordNot
+	case "NULL":
+		return tokenKeywordNull
 	case "ON":
 		return tokenKeywordOn
 	case "PRIMARY":

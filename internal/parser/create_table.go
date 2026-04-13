@@ -50,8 +50,11 @@ Comparison semantics:
 
 // ColumnDef is the tiny parsed form for a typed column definition.
 type ColumnDef struct {
-	Name string
-	Type string
+	Name         string
+	Type         string
+	NotNull      bool
+	HasDefault   bool
+	DefaultValue Value
 }
 
 type ForeignKeyDeleteAction string

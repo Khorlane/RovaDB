@@ -74,6 +74,8 @@ func parseLiteralToken(tok token) (Value, bool) {
 		default:
 			return Value{}, false
 		}
+	case tokenKeywordNull:
+		return NullValue(), true
 	default:
 		return Value{}, false
 	}

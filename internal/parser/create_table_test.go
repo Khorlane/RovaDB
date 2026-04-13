@@ -2,6 +2,65 @@ package parser
 
 import "testing"
 
+func TestParseCreateTableColumnDefinitionMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want ColumnDef
+	}{
+		{
+			name: "plain int",
+			sql:  "CREATE TABLE t (id INT)",
+			want: ColumnDef{Name: "id", Type: ColumnTypeInt},
+		},
+		{
+			name: "int default",
+			sql:  "CREATE TABLE t (id INT DEFAULT 0)",
+			want: ColumnDef{Name: "id", Type: ColumnTypeInt, HasDefault: true, DefaultValue: Int64Value(0)},
+		},
+		{
+			name: "int not null",
+			sql:  "CREATE TABLE t (id INT NOT NULL)",
+			want: ColumnDef{Name: "id", Type: ColumnTypeInt, NotNull: true},
+		},
+		{
+			name: "int not null default",
+			sql:  "CREATE TABLE t (id INT NOT NULL DEFAULT 0)",
+			want: ColumnDef{Name: "id", Type: ColumnTypeInt, NotNull: true, HasDefault: true, DefaultValue: Int64Value(0)},
+		},
+		{
+			name: "text default",
+			sql:  "CREATE TABLE t (name TEXT DEFAULT 'x')",
+			want: ColumnDef{Name: "name", Type: ColumnTypeText, HasDefault: true, DefaultValue: StringValue("x")},
+		},
+		{
+			name: "bool default",
+			sql:  "CREATE TABLE t (flag BOOL NOT NULL DEFAULT TRUE)",
+			want: ColumnDef{Name: "flag", Type: ColumnTypeBool, NotNull: true, HasDefault: true, DefaultValue: BoolValue(true)},
+		},
+		{
+			name: "real default",
+			sql:  "CREATE TABLE t (score REAL DEFAULT 1.5)",
+			want: ColumnDef{Name: "score", Type: ColumnTypeReal, HasDefault: true, DefaultValue: RealValue(1.5)},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseCreateTableTokens(tc.sql)
+			if err != nil {
+				t.Fatalf("parseCreateTableTokens() error = %v", err)
+			}
+			if len(got.Columns) != 1 {
+				t.Fatalf("len(Columns) = %d, want 1", len(got.Columns))
+			}
+			if got.Columns[0] != tc.want {
+				t.Fatalf("Columns[0] = %#v, want %#v", got.Columns[0], tc.want)
+			}
+		})
+	}
+}
+
 func TestParseCreateTable(t *testing.T) {
 	got, err := parseCreateTable("CREATE TABLE users (id INT, name TEXT)")
 	if err != nil {
@@ -263,6 +322,32 @@ func TestParseCreateTableInvalid(t *testing.T) {
 			got, err := parseCreateTable(tc.input)
 			if err == nil {
 				t.Fatalf("parseCreateTable() = %#v, want error", got)
+			}
+		})
+	}
+}
+
+func TestParseCreateTableRejectsInvalidColumnClauses(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "default without literal", input: "CREATE TABLE t (id INT DEFAULT)"},
+		{name: "duplicate default", input: "CREATE TABLE t (id INT DEFAULT 0 DEFAULT 1)"},
+		{name: "malformed not null", input: "CREATE TABLE t (id INT NOT)"},
+		{name: "expression default", input: "CREATE TABLE t (id INT DEFAULT 1 + 2)"},
+		{name: "function default", input: "CREATE TABLE t (id INT DEFAULT now())"},
+		{name: "special form default", input: "CREATE TABLE t (id INT DEFAULT CURRENT_TIMESTAMP)"},
+		{name: "placeholder default", input: "CREATE TABLE t (id INT DEFAULT ?)"},
+		{name: "column reference default", input: "CREATE TABLE t (id INT DEFAULT other_col)"},
+		{name: "not null default null", input: "CREATE TABLE t (id INT NOT NULL DEFAULT NULL)"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseCreateTableTokens(tc.input)
+			if err == nil {
+				t.Fatalf("parseCreateTableTokens() = %#v, want error", got)
 			}
 		})
 	}

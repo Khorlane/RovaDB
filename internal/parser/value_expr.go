@@ -159,7 +159,7 @@ func (p *valueExprTokenParser) parsePrimary() (*ValueExpr, bool) {
 		default:
 			return &ValueExpr{Kind: ValueExprKindColumnRef, Qualifier: qualifier, Column: column}, true
 		}
-	case tokenNumber, tokenString, tokenPlaceholder:
+	case tokenKeywordNull, tokenNumber, tokenString, tokenPlaceholder:
 		value, ok := parseLiteralToken(p.current())
 		if !ok {
 			return nil, false
