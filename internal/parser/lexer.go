@@ -52,7 +52,9 @@ const (
 	tokenKeywordUpdate
 	tokenKeywordValues
 	tokenKeywordWhere
+	tokenKeywordSmallInt
 	tokenKeywordInt
+	tokenKeywordBigInt
 	tokenKeywordText
 	tokenKeywordBool
 	tokenKeywordReal
@@ -292,8 +294,12 @@ func classifyWord(word string) tokenKind {
 		return tokenKeywordValues
 	case "WHERE":
 		return tokenKeywordWhere
+	case ColumnTypeSmallInt:
+		return tokenKeywordSmallInt
 	case ColumnTypeInt:
 		return tokenKeywordInt
+	case ColumnTypeBigInt:
+		return tokenKeywordBigInt
 	case ColumnTypeText:
 		return tokenKeywordText
 	case ColumnTypeBool:

@@ -277,7 +277,7 @@ func (p *createTableTokenParser) parseColumnDef() (ColumnDef, error) {
 func (p *createTableTokenParser) parseColumnType() (string, error) {
 	typeTok := p.current()
 	switch typeTok.Kind {
-	case tokenKeywordInt, tokenKeywordText, tokenKeywordBool, tokenKeywordReal:
+	case tokenKeywordSmallInt, tokenKeywordInt, tokenKeywordBigInt, tokenKeywordText, tokenKeywordBool, tokenKeywordReal:
 		p.pos++
 		return normalizeColumnType(typeTok.Kind), nil
 	default:
@@ -313,8 +313,12 @@ func (p *createTableTokenParser) expect(kind tokenKind) (token, error) {
 
 func normalizeColumnType(kind tokenKind) string {
 	switch kind {
+	case tokenKeywordSmallInt:
+		return ColumnTypeSmallInt
 	case tokenKeywordInt:
 		return ColumnTypeInt
+	case tokenKeywordBigInt:
+		return ColumnTypeBigInt
 	case tokenKeywordText:
 		return ColumnTypeText
 	case tokenKeywordBool:

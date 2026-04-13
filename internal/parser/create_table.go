@@ -8,10 +8,12 @@ import (
 var errUnsupportedStatement = newParseError("unsupported query form")
 
 const (
-	ColumnTypeInt  = "INT"
-	ColumnTypeText = "TEXT"
-	ColumnTypeBool = "BOOL"
-	ColumnTypeReal = "REAL"
+	ColumnTypeSmallInt = "SMALLINT"
+	ColumnTypeInt      = "INT"
+	ColumnTypeBigInt   = "BIGINT"
+	ColumnTypeText     = "TEXT"
+	ColumnTypeBool     = "BOOL"
+	ColumnTypeReal     = "REAL"
 )
 
 /*

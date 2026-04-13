@@ -9,9 +9,19 @@ func TestParseCreateTableColumnDefinitionMetadata(t *testing.T) {
 		want ColumnDef
 	}{
 		{
+			name: "smallint",
+			sql:  "CREATE TABLE t (id SMALLINT)",
+			want: ColumnDef{Name: "id", Type: ColumnTypeSmallInt},
+		},
+		{
 			name: "plain int",
 			sql:  "CREATE TABLE t (id INT)",
 			want: ColumnDef{Name: "id", Type: ColumnTypeInt},
+		},
+		{
+			name: "bigint",
+			sql:  "CREATE TABLE t (id BIGINT)",
+			want: ColumnDef{Name: "id", Type: ColumnTypeBigInt},
 		},
 		{
 			name: "int default",
@@ -259,6 +269,65 @@ func TestParseCreateTableMixedRealSchema(t *testing.T) {
 		{Name: "b", Type: ColumnTypeReal},
 		{Name: "c", Type: ColumnTypeText},
 		{Name: "d", Type: ColumnTypeBool},
+	}
+	if len(got.Columns) != len(want) {
+		t.Fatalf("len(parseCreateTable().Columns) = %d, want %d", len(got.Columns), len(want))
+	}
+	for i := range want {
+		if got.Columns[i] != want[i] {
+			t.Fatalf("parseCreateTable().Columns[%d] = %#v, want %#v", i, got.Columns[i], want[i])
+		}
+	}
+}
+
+func TestParseCreateTableIntegerWidthTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want ColumnDef
+	}{
+		{
+			name: "smallint",
+			sql:  "CREATE TABLE t (id SMALLINT)",
+			want: ColumnDef{Name: "id", Type: ColumnTypeSmallInt},
+		},
+		{
+			name: "int",
+			sql:  "CREATE TABLE t (id INT)",
+			want: ColumnDef{Name: "id", Type: ColumnTypeInt},
+		},
+		{
+			name: "bigint",
+			sql:  "CREATE TABLE t (id BIGINT)",
+			want: ColumnDef{Name: "id", Type: ColumnTypeBigInt},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseCreateTable(tc.sql)
+			if err != nil {
+				t.Fatalf("parseCreateTable() error = %v", err)
+			}
+			if len(got.Columns) != 1 {
+				t.Fatalf("len(parseCreateTable().Columns) = %d, want 1", len(got.Columns))
+			}
+			if got.Columns[0] != tc.want {
+				t.Fatalf("parseCreateTable().Columns[0] = %#v, want %#v", got.Columns[0], tc.want)
+			}
+		})
+	}
+}
+
+func TestParseCreateTableMixedIntegerWidthSchema(t *testing.T) {
+	got, err := parseCreateTable("CREATE TABLE t (small_col SMALLINT, int_col INT, big_col BIGINT)")
+	if err != nil {
+		t.Fatalf("parseCreateTable() error = %v", err)
+	}
+	want := []ColumnDef{
+		{Name: "small_col", Type: ColumnTypeSmallInt},
+		{Name: "int_col", Type: ColumnTypeInt},
+		{Name: "big_col", Type: ColumnTypeBigInt},
 	}
 	if len(got.Columns) != len(want) {
 		t.Fatalf("len(parseCreateTable().Columns) = %d, want %d", len(got.Columns), len(want))

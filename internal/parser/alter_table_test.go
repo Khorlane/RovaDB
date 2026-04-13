@@ -26,9 +26,19 @@ func TestParseAlterTableAddColumnMetadata(t *testing.T) {
 		want ColumnDef
 	}{
 		{
+			name: "smallint",
+			sql:  "ALTER TABLE users ADD COLUMN id SMALLINT",
+			want: ColumnDef{Name: "id", Type: ColumnTypeSmallInt},
+		},
+		{
 			name: "plain int",
 			sql:  "ALTER TABLE users ADD COLUMN id INT",
 			want: ColumnDef{Name: "id", Type: ColumnTypeInt},
+		},
+		{
+			name: "bigint",
+			sql:  "ALTER TABLE users ADD COLUMN id BIGINT",
+			want: ColumnDef{Name: "id", Type: ColumnTypeBigInt},
 		},
 		{
 			name: "int default",
@@ -59,6 +69,41 @@ func TestParseAlterTableAddColumnMetadata(t *testing.T) {
 			name: "real default",
 			sql:  "ALTER TABLE users ADD COLUMN score REAL DEFAULT 1.5",
 			want: ColumnDef{Name: "score", Type: ColumnTypeReal, HasDefault: true, DefaultValue: RealValue(1.5)},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stmt, err := parseAlterTableTokens(tc.sql)
+			if err != nil {
+				t.Fatalf("parseAlterTableTokens() error = %v", err)
+			}
+			got, ok := stmt.(*AlterTableAddColumnStmt)
+			if !ok {
+				t.Fatalf("stmt type = %T, want *AlterTableAddColumnStmt", stmt)
+			}
+			if got.Column != tc.want {
+				t.Fatalf("Column = %#v, want %#v", got.Column, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseAlterTableAddColumnIntegerWidthTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want ColumnDef
+	}{
+		{
+			name: "smallint",
+			sql:  "ALTER TABLE users ADD COLUMN age SMALLINT",
+			want: ColumnDef{Name: "age", Type: ColumnTypeSmallInt},
+		},
+		{
+			name: "bigint",
+			sql:  "ALTER TABLE users ADD COLUMN age BIGINT",
+			want: ColumnDef{Name: "age", Type: ColumnTypeBigInt},
 		},
 	}
 
