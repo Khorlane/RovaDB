@@ -300,7 +300,7 @@ func TestStage9APIPositionalArgsExampleFlow(t *testing.T) {
 	defer db.Close()
 
 	var active bool
-	if err := db.QueryRow("SELECT name, active FROM users WHERE id = ?", 2).Scan(&name, &active); err != nil {
+	if err := db.QueryRow("SELECT name, active FROM users WHERE id = ?", int32(2)).Scan(&name, &active); err != nil {
 		t.Fatalf("QueryRow().Scan() error = %v", err)
 	}
 	if name != "Bob" || active {

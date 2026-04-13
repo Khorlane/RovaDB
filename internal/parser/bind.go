@@ -210,12 +210,6 @@ func bindArgumentValue(arg any) (Value, error) {
 	switch v := arg.(type) {
 	case nil:
 		return NullValue(), nil
-	case int:
-		value, err := bindPublicIntValue(v)
-		if err != nil {
-			return Value{}, newBindError(err.Error())
-		}
-		return value, nil
 	case int16:
 		return boundIntegerValue(int64(v), BoundIntegerTypeInt16), nil
 	case int32:

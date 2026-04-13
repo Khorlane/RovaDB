@@ -234,7 +234,7 @@ func normalizeIntegerColumnValue(value parser.Value, exactType parser.BoundInteg
 	switch exactType {
 	case parser.BoundIntegerTypeInt16:
 		return parser.SmallIntValue(int16(integerValue)), nil
-	case parser.BoundIntegerTypeInt, parser.BoundIntegerTypeInt32:
+	case parser.BoundIntegerTypeInt32:
 		return parser.IntValue(int32(integerValue)), nil
 	case parser.BoundIntegerTypeInt64:
 		return parser.BigIntValue(integerValue), nil

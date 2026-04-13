@@ -980,7 +980,7 @@ func TestQueryAPIPlaceholderArgsWhereClause(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	rows, err := db.Query("SELECT name FROM users WHERE id = ?", 1)
+	rows, err := db.Query("SELECT name FROM users WHERE id = ?", int32(1))
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -1039,7 +1039,7 @@ func TestQueryAPILiteralAndBoundQueriesMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query(literal) error = %v", err)
 	}
-	boundRows, err := db.Query("SELECT name FROM users WHERE id = ?", 1)
+	boundRows, err := db.Query("SELECT name FROM users WHERE id = ?", int32(1))
 	if err != nil {
 		t.Fatalf("Query(bound) error = %v", err)
 	}
@@ -1078,7 +1078,7 @@ func TestQueryAPIPlaceholderArgsRespectBooleanPrecedence(t *testing.T) {
 		}
 	}
 
-	rows, err := db.Query("SELECT id FROM users WHERE id = ? OR id = ? AND name = ? ORDER BY id", 1, 2, "bob")
+	rows, err := db.Query("SELECT id FROM users WHERE id = ? OR id = ? AND name = ? ORDER BY id", int32(1), int32(2), "bob")
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -1087,6 +1087,44 @@ func TestQueryAPIPlaceholderArgsRespectBooleanPrecedence(t *testing.T) {
 	}
 	if rows.data[0][0] != 1 || rows.data[1][0] != 2 {
 		t.Fatalf("rows.data = %#v, want [[1] [2]]", rows.data)
+	}
+}
+
+func TestQueryAPIPlaceholderRejectsUnsupportedIntegerTypesAtBindTime(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		arg  any
+	}{
+		{name: "int", arg: int(1)},
+		{name: "int8", arg: int8(1)},
+		{name: "uint", arg: uint(1)},
+		{name: "uint32", arg: uint32(1)},
+		{name: "uint64", arg: uint64(1)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := db.Query("SELECT name FROM users WHERE id = ?", tc.arg)
+			if err != nil {
+				t.Fatalf("Query() transport error = %v", err)
+			}
+			if rows == nil || rows.err == nil || !strings.Contains(rows.err.Error(), "unsupported placeholder argument type") {
+				t.Fatalf("rows = %#v, want unsupported placeholder argument type error", rows)
+			}
+		})
 	}
 }
 
@@ -3687,7 +3725,7 @@ func TestQueryRowPlaceholderArgsWhereClause(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	row := db.QueryRow("SELECT name FROM users WHERE id = ?", 1)
+	row := db.QueryRow("SELECT name FROM users WHERE id = ?", int32(1))
 	var name string
 	if err := row.Scan(&name); err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -3714,7 +3752,7 @@ func TestQueryRowPlaceholderArgsReflectsUpdatedRow(t *testing.T) {
 		t.Fatalf("Exec(update with placeholders) error = %v", err)
 	}
 
-	row := db.QueryRow("SELECT name FROM users WHERE id = ?", 1)
+	row := db.QueryRow("SELECT name FROM users WHERE id = ?", int32(1))
 	var name string
 	if err := row.Scan(&name); err != nil {
 		t.Fatalf("Scan() error = %v", err)

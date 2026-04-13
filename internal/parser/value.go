@@ -29,7 +29,6 @@ type BoundIntegerType int
 
 const (
 	BoundIntegerTypeNone BoundIntegerType = iota
-	BoundIntegerTypeInt
 	BoundIntegerTypeInt16
 	BoundIntegerTypeInt32
 	BoundIntegerTypeInt64
@@ -97,7 +96,7 @@ func boundIntegerValue(v int64, boundType BoundIntegerType) Value {
 	switch boundType {
 	case BoundIntegerTypeInt16:
 		value = SmallIntValue(int16(v))
-	case BoundIntegerTypeInt, BoundIntegerTypeInt32:
+	case BoundIntegerTypeInt32:
 		value = IntValue(int32(v))
 	case BoundIntegerTypeInt64:
 		value = BigIntValue(v)
@@ -256,13 +255,4 @@ func parseRealLiteral(token string) (float64, bool) {
 
 func parseInt64Literal(token string) (int64, error) {
 	return strconv.ParseInt(token, 10, 64)
-}
-
-func bindPublicIntValue(v int) (Value, error) {
-	value, err := PublicIntValue(int64(v))
-	if err != nil {
-		return Value{}, errors.New("integer argument out of range for INT")
-	}
-	value.BoundIntegerType = BoundIntegerTypeInt
-	return value, nil
 }

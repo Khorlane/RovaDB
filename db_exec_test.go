@@ -504,23 +504,30 @@ func TestExecInsertTypedIntegerColumnsRequireExactGoTypes(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
-		args []any
+		name     string
+		args     []any
+		wantBind bool
 	}{
 		{name: "smallint rejects int32", args: []any{int32(11), int32(22), int64(33), "bad-small"}},
 		{name: "smallint rejects int64", args: []any{int64(11), int32(22), int64(33), "bad-small"}},
-		{name: "smallint rejects int", args: []any{int(11), int32(22), int64(33), "bad-small"}},
+		{name: "smallint rejects int", args: []any{int(11), int32(22), int64(33), "bad-small"}, wantBind: true},
 		{name: "int rejects int16", args: []any{int16(11), int16(22), int64(33), "bad-int"}},
 		{name: "int rejects int64", args: []any{int16(11), int64(22), int64(33), "bad-int"}},
-		{name: "int rejects int", args: []any{int16(11), int(22), int64(33), "bad-int"}},
+		{name: "int rejects int", args: []any{int16(11), int(22), int64(33), "bad-int"}, wantBind: true},
 		{name: "bigint rejects int16", args: []any{int16(11), int32(22), int16(33), "bad-big"}},
 		{name: "bigint rejects int32", args: []any{int16(11), int32(22), int32(33), "bad-big"}},
-		{name: "bigint rejects int", args: []any{int16(11), int32(22), int(33), "bad-big"}},
+		{name: "bigint rejects int", args: []any{int16(11), int32(22), int(33), "bad-big"}, wantBind: true},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := db.Exec("INSERT INTO numbers VALUES (?, ?, ?, ?)", tc.args...)
+			if tc.wantBind {
+				if err == nil || !strings.Contains(err.Error(), "unsupported placeholder argument type") {
+					t.Fatalf("Exec(insert) error = %v, want bind-time unsupported placeholder type error", err)
+				}
+				return
+			}
 			var dbErr *DBError
 			if !errors.As(err, &dbErr) || dbErr.Kind != ErrExec {
 				t.Fatalf("Exec(insert) error = %v, want exec-type mismatch error", err)
@@ -558,20 +565,27 @@ func TestExecUpdateTypedIntegerColumnsRequireExactGoTypes(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
-		args []any
+		name     string
+		args     []any
+		wantBind bool
 	}{
 		{name: "smallint rejects int32", args: []any{int32(11), int32(22), int64(33), int32(1)}},
-		{name: "smallint rejects int", args: []any{int(11), int32(22), int64(33), int32(1)}},
+		{name: "smallint rejects int", args: []any{int(11), int32(22), int64(33), int32(1)}, wantBind: true},
 		{name: "int rejects int16", args: []any{int16(11), int16(22), int64(33), int32(1)}},
 		{name: "int rejects int64", args: []any{int16(11), int64(22), int64(33), int32(1)}},
 		{name: "bigint rejects int32", args: []any{int16(11), int32(22), int32(33), int32(1)}},
-		{name: "bigint rejects int", args: []any{int16(11), int32(22), int(33), int32(1)}},
+		{name: "bigint rejects int", args: []any{int16(11), int32(22), int(33), int32(1)}, wantBind: true},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := db.Exec("UPDATE numbers SET small_col = ?, int_col = ?, big_col = ? WHERE id = ?", tc.args...)
+			if tc.wantBind {
+				if err == nil || !strings.Contains(err.Error(), "unsupported placeholder argument type") {
+					t.Fatalf("Exec(update) error = %v, want bind-time unsupported placeholder type error", err)
+				}
+				return
+			}
 			var dbErr *DBError
 			if !errors.As(err, &dbErr) || dbErr.Kind != ErrExec {
 				t.Fatalf("Exec(update) error = %v, want exec-type mismatch error", err)
@@ -1230,7 +1244,7 @@ func TestExecAPIPlaceholderArgsDelete(t *testing.T) {
 		}
 	}
 
-	result, err := db.Exec("DELETE FROM users WHERE id = ?", 1)
+	result, err := db.Exec("DELETE FROM users WHERE id = ?", int32(1))
 	if err != nil {
 		t.Fatalf("Exec(delete with placeholder) error = %v", err)
 	}
@@ -1261,7 +1275,7 @@ func TestExecAPIPlaceholderArgsCountMismatchInsertHasNoSideEffects(t *testing.T)
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 
-	if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", 1); err == nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", int32(1)); err == nil {
 		t.Fatal("Exec(insert with too few args) error = nil, want error")
 	}
 
@@ -1353,7 +1367,7 @@ func TestExecAPIValueExprInsertAndUpdate(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO users VALUES (1, LOWER(?))", "STEVE"); err != nil {
 		t.Fatalf("Exec(insert with value expr) error = %v", err)
 	}
-	if _, err := db.Exec("UPDATE users SET name = UPPER(name) WHERE id = ?", 1); err != nil {
+	if _, err := db.Exec("UPDATE users SET name = UPPER(name) WHERE id = ?", int32(1)); err != nil {
 		t.Fatalf("Exec(update with value expr) error = %v", err)
 	}
 
@@ -1363,6 +1377,38 @@ func TestExecAPIValueExprInsertAndUpdate(t *testing.T) {
 	}
 	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 1 || rows.data[0][0] != "STEVE" {
 		t.Fatalf("rows.data = %#v, want [[\"STEVE\"]]", rows.data)
+	}
+}
+
+func TestExecAPIPlaceholderRejectsUnsupportedIntegerTypesAtBindTime(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		arg  any
+	}{
+		{name: "int", arg: int(1)},
+		{name: "int8", arg: int8(1)},
+		{name: "uint", arg: uint(1)},
+		{name: "uint32", arg: uint32(1)},
+		{name: "uint64", arg: uint64(1)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := db.Exec("INSERT INTO users VALUES (?, ?)", tc.arg, "alice")
+			if err == nil || !strings.Contains(err.Error(), "unsupported placeholder argument type") {
+				t.Fatalf("Exec(insert) error = %v, want unsupported placeholder argument type", err)
+			}
+		})
 	}
 }
 

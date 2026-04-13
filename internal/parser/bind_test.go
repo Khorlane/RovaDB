@@ -11,7 +11,7 @@ func TestBindPlaceholdersSelectWhere(t *testing.T) {
 		t.Fatalf("Parse() error = %v", err)
 	}
 
-	if err := BindPlaceholders(stmt, []any{1}); err != nil {
+	if err := BindPlaceholders(stmt, []any{int32(1)}); err != nil {
 		t.Fatalf("BindPlaceholders() error = %v", err)
 	}
 
@@ -22,8 +22,11 @@ func TestBindPlaceholdersSelectWhere(t *testing.T) {
 	if sel.Where == nil || len(sel.Where.Items) != 1 {
 		t.Fatalf("sel.Where = %#v, want one condition", sel.Where)
 	}
-	if got, want := sel.Where.Items[0].Condition.Right, boundIntegerValue(1, BoundIntegerTypeInt); got != want {
+	if got, want := sel.Where.Items[0].Condition.Right, boundIntegerValue(1, BoundIntegerTypeInt32); got != want {
 		t.Fatalf("sel.Where.Items[0].Condition.Right = %#v, want %#v", got, want)
+	}
+	if sel.Where.Items[0].Condition.Right.Kind == ValueKindIntegerLiteral {
+		t.Fatalf("bound placeholder kind = %v, want typed integer kind", sel.Where.Items[0].Condition.Right.Kind)
 	}
 }
 
@@ -45,7 +48,7 @@ func TestBindPlaceholdersCountMismatchTooManyArgs(t *testing.T) {
 		t.Fatalf("Parse() error = %v", err)
 	}
 
-	err = BindPlaceholders(stmt, []any{1, "steve"})
+	err = BindPlaceholders(stmt, []any{int32(1), "steve"})
 	if err == nil || !strings.Contains(err.Error(), "placeholder count mismatch") {
 		t.Fatalf("BindPlaceholders() error = %v, want placeholder count mismatch", err)
 	}
@@ -57,7 +60,7 @@ func TestBindPlaceholdersSelectWhereOrdering(t *testing.T) {
 		t.Fatalf("Parse() error = %v", err)
 	}
 
-	if err := BindPlaceholders(stmt, []any{1, "steve"}); err != nil {
+	if err := BindPlaceholders(stmt, []any{int32(1), "steve"}); err != nil {
 		t.Fatalf("BindPlaceholders() error = %v", err)
 	}
 
@@ -68,7 +71,7 @@ func TestBindPlaceholdersSelectWhereOrdering(t *testing.T) {
 	if sel.Where == nil || len(sel.Where.Items) != 2 {
 		t.Fatalf("sel.Where = %#v, want two conditions", sel.Where)
 	}
-	if got, want := sel.Where.Items[0].Condition.Right, boundIntegerValue(1, BoundIntegerTypeInt); got != want {
+	if got, want := sel.Where.Items[0].Condition.Right, boundIntegerValue(1, BoundIntegerTypeInt32); got != want {
 		t.Fatalf("first bound value = %#v, want %#v", got, want)
 	}
 	if sel.Where.Items[1].Condition.Right != StringValue("steve") {
@@ -82,7 +85,7 @@ func TestBindPlaceholdersUpdateOrdering(t *testing.T) {
 		t.Fatalf("Parse() error = %v", err)
 	}
 
-	if err := BindPlaceholders(stmt, []any{"sam", true, 1}); err != nil {
+	if err := BindPlaceholders(stmt, []any{"sam", true, int32(1)}); err != nil {
 		t.Fatalf("BindPlaceholders() error = %v", err)
 	}
 
@@ -102,7 +105,7 @@ func TestBindPlaceholdersUpdateOrdering(t *testing.T) {
 	if update.Where == nil || len(update.Where.Items) != 1 {
 		t.Fatalf("update.Where = %#v, want one condition", update.Where)
 	}
-	if got, want := update.Where.Items[0].Condition.Right, boundIntegerValue(1, BoundIntegerTypeInt); got != want {
+	if got, want := update.Where.Items[0].Condition.Right, boundIntegerValue(1, BoundIntegerTypeInt32); got != want {
 		t.Fatalf("where value = %#v, want %#v", got, want)
 	}
 }
@@ -113,7 +116,6 @@ func TestBindArgumentValueSupportedTypes(t *testing.T) {
 		arg  any
 		want Value
 	}{
-		{name: "int", arg: 1, want: boundIntegerValue(1, BoundIntegerTypeInt)},
 		{name: "int16", arg: int16(1), want: boundIntegerValue(1, BoundIntegerTypeInt16)},
 		{name: "int32", arg: int32(1), want: boundIntegerValue(1, BoundIntegerTypeInt32)},
 		{name: "int64", arg: int64(1), want: boundIntegerValue(1, BoundIntegerTypeInt64)},
@@ -133,6 +135,9 @@ func TestBindArgumentValueSupportedTypes(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("bindArgumentValue() = %#v, want %#v", got, tc.want)
 			}
+			if tc.want.IsTypedInteger() && got.Kind == ValueKindIntegerLiteral {
+				t.Fatalf("bindArgumentValue() kind = %v, want typed integer kind", got.Kind)
+			}
 		})
 	}
 }
@@ -142,6 +147,12 @@ func TestBindArgumentValueUnsupportedTypes(t *testing.T) {
 		name string
 		arg  any
 	}{
+		{name: "int", arg: int(1)},
+		{name: "int8", arg: int8(1)},
+		{name: "uint", arg: uint(1)},
+		{name: "uint32", arg: uint32(1)},
+		{name: "uint64", arg: uint64(1)},
+		{name: "uintptr", arg: uintptr(1)},
 		{name: "float32", arg: float32(3.14)},
 		{name: "struct", arg: struct{}{}},
 		{name: "slice", arg: []string{"x"}},

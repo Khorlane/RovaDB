@@ -43,9 +43,9 @@ func TestParseAcceptsBoundaryIntLiterals(t *testing.T) {
 	}
 }
 
-func TestBindArgumentValueRejectsOutOfRangeInt(t *testing.T) {
-	_, err := bindArgumentValue(2147483648)
-	if err == nil || !strings.Contains(err.Error(), "out of range for INT") {
-		t.Fatalf("bindArgumentValue(out of range int) error = %v, want out-of-range bind error", err)
+func TestBindArgumentValueRejectsGoInt(t *testing.T) {
+	_, err := bindArgumentValue(int(1))
+	if err == nil || !strings.Contains(err.Error(), "unsupported placeholder argument type") {
+		t.Fatalf("bindArgumentValue(int) error = %v, want unsupported placeholder argument type", err)
 	}
 }
