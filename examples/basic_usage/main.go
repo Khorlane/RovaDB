@@ -42,7 +42,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	var activeCount int
+	var activeCount int64
 	if err := tx.QueryRow("SELECT COUNT(*) FROM users WHERE active = ?", true).Scan(&activeCount); err != nil {
 		_ = tx.Rollback()
 		log.Fatal(err)

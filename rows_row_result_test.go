@@ -18,7 +18,7 @@ func TestRowsScanBeforeNext(t *testing.T) {
 	}
 	defer rows.Close()
 
-	var got int
+	var got int64
 	err = rows.Scan(&got)
 	if !errors.Is(err, ErrScanBeforeNext) {
 		t.Fatalf("Scan() error = %v, want ErrScanBeforeNext", err)
@@ -41,7 +41,7 @@ func TestRowsScanAfterIterationEnds(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("Next() first = false, want true")
 	}
-	var got int
+	var got int64
 	if err := rows.Scan(&got); err != nil {
 		t.Fatalf("Scan() first error = %v", err)
 	}
@@ -112,7 +112,7 @@ func TestQueryZeroRowSelectCleanup(t *testing.T) {
 		t.Fatal("Next() = true, want false")
 	}
 
-	var id int
+	var id int32
 	var name string
 	err = rows.Scan(&id, &name)
 	if !errors.Is(err, ErrScanBeforeNext) {
@@ -388,12 +388,12 @@ func TestResultRowsAffectedHelpers(t *testing.T) {
 }
 
 func TestRowsScanHappyPath(t *testing.T) {
-	rows := newRows(nil, [][]any{{1, "a"}})
+	rows := newRows(nil, [][]any{{int64(1), "a"}})
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
 
-	var i int
+	var i int64
 	var s string
 	if err := rows.Scan(&i, &s); err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -446,6 +446,15 @@ func TestRowsScanAfterExhaustion(t *testing.T) {
 }
 
 func TestRowsScanTypeMismatchCases(t *testing.T) {
+	t.Run("untyped int64 into int", func(t *testing.T) {
+		rows := newRows(nil, [][]any{{int64(1)}})
+		rows.Next()
+		var i int
+		if err := rows.Scan(&i); !errors.Is(err, ErrUnsupportedScanType) {
+			t.Fatalf("Scan() error = %v, want ErrUnsupportedScanType", err)
+		}
+	})
+
 	t.Run("string into int", func(t *testing.T) {
 		rows := newRows(nil, [][]any{{"a"}})
 		rows.Next()
@@ -623,7 +632,7 @@ func TestRowsScanDeferredQueryErrorPassthrough(t *testing.T) {
 	wantErr := errors.New("deferred")
 	rows := &Rows{idx: -1, err: wantErr}
 
-	var i int
+	var i int64
 	if err := rows.Scan(&i); !errors.Is(err, wantErr) {
 		t.Fatalf("Scan() = %v, want %v", err, wantErr)
 	}
@@ -635,7 +644,7 @@ func TestRowsScanClosedRows(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	var i int
+	var i int64
 	if err := rows.Scan(&i); !errors.Is(err, ErrRowsClosed) {
 		t.Fatalf("Scan() on closed rows = %v, want ErrRowsClosed", err)
 	}

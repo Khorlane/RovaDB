@@ -1692,7 +1692,7 @@ func TestQueryAcceptsBoundaryIntLiteral(t *testing.T) {
 	}
 	defer db.Close()
 
-	var got int
+	var got int64
 	if err := db.QueryRow("SELECT 2147483647").Scan(&got); err != nil {
 		t.Fatalf("QueryRow().Scan() error = %v", err)
 	}
@@ -1708,7 +1708,7 @@ func TestQueryRowReturnsBoundaryIntResult(t *testing.T) {
 	}
 	defer db.Close()
 
-	var got int
+	var got int64
 	if err := db.QueryRow("SELECT 2147483647").Scan(&got); err != nil {
 		t.Fatalf("QueryRow().Scan() error = %v", err)
 	}

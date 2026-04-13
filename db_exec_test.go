@@ -820,6 +820,33 @@ func TestTypedIntegerScanRequiresExactDestinationTypes(t *testing.T) {
 		t.Fatalf("row.Scan(exact types) = (%d, %d, %d), want (11, 22, 33)", small, regular, big)
 	}
 
+	rows, err = db.Query("SELECT small_col + 1, int_col + 1, big_col + 1 FROM numbers WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Query(typed arithmetic rows) error = %v", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("rows.Next() typed arithmetic = false, want true")
+	}
+	small, regular, big = 0, 0, 0
+	if err := rows.Scan(&small, &regular, &big); err != nil {
+		t.Fatalf("rows.Scan(typed arithmetic exact types) error = %v", err)
+	}
+	if small != 12 || regular != 23 || big != 34 {
+		t.Fatalf("rows.Scan(typed arithmetic exact types) = (%d, %d, %d), want (12, 23, 34)", small, regular, big)
+	}
+
+	if err := db.QueryRow("SELECT small_col + 1, int_col + 1, big_col + 1 FROM numbers WHERE id = 1").Scan(&small, &regular, &big); err != nil {
+		t.Fatalf("row.Scan(typed arithmetic exact types) error = %v", err)
+	}
+	if small != 12 || regular != 23 || big != 34 {
+		t.Fatalf("row.Scan(typed arithmetic exact types) = (%d, %d, %d), want (12, 23, 34)", small, regular, big)
+	}
+
+	if err := db.QueryRow("SELECT small_col + 1, int_col + 1, big_col + 1 FROM numbers WHERE id = 1").Scan(new(int32), new(int32), new(int64)); !errors.Is(err, ErrUnsupportedScanType) {
+		t.Fatalf("row.Scan(typed arithmetic width mismatch) error = %v, want ErrUnsupportedScanType", err)
+	}
+
 	for _, tc := range []struct {
 		name string
 		dest []any

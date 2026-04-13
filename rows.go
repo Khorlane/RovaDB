@@ -122,8 +122,6 @@ func (r *Rows) Scan(dest ...any) error {
 
 	for _, assignment := range assignments {
 		switch d := assignment.dest.(type) {
-		case *int:
-			*d = assignment.value.(int)
 		case *int16:
 			*d = assignment.value.(int16)
 		case *int32:
@@ -155,26 +153,11 @@ func (r *Rows) scanTypeAt(idx int) string {
 
 func scanAssignableValue(dest any, src any, scanType string) (any, error) {
 	switch d := dest.(type) {
-	case *int:
-		if d == nil {
-			return nil, ErrUnsupportedScanType
-		}
-		if scanType == "SMALLINT" || scanType == "INT" || scanType == "BIGINT" {
-			return nil, ErrUnsupportedScanType
-		}
-		switch n := src.(type) {
-		case int:
-			return n, nil
-		case int64:
-			return intFromInt64(n)
-		default:
-			return nil, ErrUnsupportedScanType
-		}
 	case *int16:
 		if d == nil {
 			return nil, ErrUnsupportedScanType
 		}
-		if scanType != "SMALLINT" {
+		if scanType != "" && scanType != "SMALLINT" {
 			return nil, ErrUnsupportedScanType
 		}
 		n, ok := src.(int16)
@@ -186,7 +169,7 @@ func scanAssignableValue(dest any, src any, scanType string) (any, error) {
 		if d == nil {
 			return nil, ErrUnsupportedScanType
 		}
-		if scanType != "INT" {
+		if scanType != "" && scanType != "INT" {
 			return nil, ErrUnsupportedScanType
 		}
 		n, ok := src.(int32)
@@ -198,7 +181,7 @@ func scanAssignableValue(dest any, src any, scanType string) (any, error) {
 		if d == nil {
 			return nil, ErrUnsupportedScanType
 		}
-		if scanType != "BIGINT" {
+		if scanType != "" && scanType != "BIGINT" {
 			return nil, ErrUnsupportedScanType
 		}
 		n, ok := src.(int64)
@@ -241,15 +224,6 @@ func scanAssignableValue(dest any, src any, scanType string) (any, error) {
 	default:
 		return nil, ErrUnsupportedScanType
 	}
-}
-
-func intFromInt64(value int64) (int, error) {
-	maxInt := int64(int(^uint(0) >> 1))
-	minInt := -maxInt - 1
-	if value < minInt || value > maxInt {
-		return 0, ErrUnsupportedScanType
-	}
-	return int(value), nil
 }
 
 // Scan reads exactly one row from the wrapped Rows result.

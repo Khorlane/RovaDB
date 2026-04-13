@@ -1763,7 +1763,7 @@ func TestQuerySelectExpressionProjection(t *testing.T) {
 		t.Fatal("Next() = false, want true")
 	}
 	var lower string
-	var length int
+	var length int64
 	if err := rows.Scan(&lower, &length); err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -3531,7 +3531,7 @@ func TestRowScanSuccessSingleRow(t *testing.T) {
 
 	row := db.QueryRow("SELECT 1")
 
-	var i int
+	var i int64
 	if err := row.Scan(&i); err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -4020,7 +4020,7 @@ func TestQuerySelectLiteral(t *testing.T) {
 	tests := []struct {
 		name  string
 		sql   string
-		value int
+		value int64
 	}{
 		{name: "select one", sql: "SELECT 1", value: 1},
 		{name: "select forty two", sql: "SELECT 42", value: 42},
@@ -4058,7 +4058,7 @@ func TestQuerySelectLiteral(t *testing.T) {
 				t.Fatal("Next() = false, want true")
 			}
 
-			var got int
+			var got int64
 			if err := rows.Scan(&got); err != nil {
 				t.Fatalf("Scan() error = %v", err)
 			}
@@ -4304,6 +4304,92 @@ func TestRowsScanRealIntoWrongDestination(t *testing.T) {
 	err = rows.Scan(&got)
 	if !errors.Is(err, ErrUnsupportedScanType) {
 		t.Fatalf("Scan() error = %v, want ErrUnsupportedScanType", err)
+	}
+}
+
+func TestUntypedIntegerResultsScanOnlyIntoInt64(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO users VALUES (1)",
+		"INSERT INTO users VALUES (2)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	tests := []struct {
+		name string
+		sql  string
+		want int64
+	}{
+		{name: "literal", sql: "SELECT 1", want: 1},
+		{name: "literal arithmetic", sql: "SELECT 1 + 2", want: 3},
+		{name: "count star", sql: "SELECT COUNT(*) FROM users", want: 2},
+	}
+
+	for _, tc := range tests {
+		t.Run("Rows.Scan "+tc.name, func(t *testing.T) {
+			rows, err := db.Query(tc.sql)
+			if err != nil {
+				t.Fatalf("Query(%q) error = %v", tc.sql, err)
+			}
+			defer rows.Close()
+
+			if !rows.Next() {
+				t.Fatalf("Next(%q) = false, want true", tc.sql)
+			}
+
+			var got int64
+			if err := rows.Scan(&got); err != nil {
+				t.Fatalf("Scan(%q, *int64) error = %v", tc.sql, err)
+			}
+			if got != tc.want {
+				t.Fatalf("Scan(%q, *int64) = %d, want %d", tc.sql, got, tc.want)
+			}
+		})
+
+		t.Run("Rows.Scan rejects int "+tc.name, func(t *testing.T) {
+			rows, err := db.Query(tc.sql)
+			if err != nil {
+				t.Fatalf("Query(%q) error = %v", tc.sql, err)
+			}
+			defer rows.Close()
+
+			if !rows.Next() {
+				t.Fatalf("Next(%q) = false, want true", tc.sql)
+			}
+
+			var got int
+			if err := rows.Scan(&got); !errors.Is(err, ErrUnsupportedScanType) {
+				t.Fatalf("Scan(%q, *int) error = %v, want ErrUnsupportedScanType", tc.sql, err)
+			}
+		})
+
+		t.Run("Row.Scan "+tc.name, func(t *testing.T) {
+			var got int64
+			if err := db.QueryRow(tc.sql).Scan(&got); err != nil {
+				t.Fatalf("QueryRow(%q).Scan(*int64) error = %v", tc.sql, err)
+			}
+			if got != tc.want {
+				t.Fatalf("QueryRow(%q).Scan(*int64) = %d, want %d", tc.sql, got, tc.want)
+			}
+		})
+
+		t.Run("Row.Scan rejects int "+tc.name, func(t *testing.T) {
+			var got int
+			if err := db.QueryRow(tc.sql).Scan(&got); !errors.Is(err, ErrUnsupportedScanType) {
+				t.Fatalf("QueryRow(%q).Scan(*int) error = %v, want ErrUnsupportedScanType", tc.sql, err)
+			}
+		})
 	}
 }
 
