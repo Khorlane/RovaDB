@@ -184,7 +184,7 @@ Only the following SQL forms are supported today.
 - `CREATE INDEX ...`
 - `DROP INDEX <name>`
 - `DROP TABLE <name>`
-- `ALTER TABLE <table> ADD COLUMN <column> <type>`
+- `ALTER TABLE <table> ADD COLUMN <column-definition>`
 - `ALTER TABLE <table> ADD CONSTRAINT <name> PRIMARY KEY (...) USING INDEX <index>`
 - `ALTER TABLE <table> ADD CONSTRAINT <name> FOREIGN KEY (...) REFERENCES <parent> (...) USING INDEX <index> ON DELETE RESTRICT|CASCADE`
 - `ALTER TABLE <table> DROP PRIMARY KEY`
@@ -304,6 +304,23 @@ Destructive DDL behavior:
 - `BOOL`
 - `REAL`
 
+### Column nullability and literal defaults
+
+- supported column forms are `<name> <type>`, `<name> <type> DEFAULT <literal>`, `<name> <type> NOT NULL`, and `<name> <type> NOT NULL DEFAULT <literal>`
+- `DEFAULT` is literal-only for this milestone and applies only when an `INSERT` omits the column
+- explicit `NULL` is rejected for `NOT NULL` columns on both `INSERT` and `UPDATE`
+- `ALTER TABLE ... ADD COLUMN` uses the same supported column forms
+- adding `NOT NULL` without a default is rejected for non-empty tables
+- adding a defaulted column exposes that default for existing rows and for future inserts, including after reopen
+
+Examples:
+
+- `CREATE TABLE users (id INT NOT NULL, name TEXT DEFAULT 'ready', active BOOL NOT NULL DEFAULT TRUE, score REAL DEFAULT 0.0)`
+- `INSERT INTO users (id) VALUES (1)` stores `name='ready'`, `active=TRUE`, and `score=0.0`
+- `INSERT INTO users VALUES (2, 'sam', NULL, 1.25)` fails because `active` is `NOT NULL`
+- `ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'new'` exposes `'new'` for existing rows and later omitted inserts
+- `ALTER TABLE users ADD COLUMN active BOOL NOT NULL DEFAULT TRUE` backfills existing rows logically and keeps future omitted inserts valid
+
 ### BOOL semantics
 
 - BOOL literals are unquoted `TRUE` and `FALSE`
@@ -379,7 +396,7 @@ if err != nil {
 }
 defer db.Close()
 
-if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL)"); err != nil {
+if _, err := db.Exec("CREATE TABLE users (id INT NOT NULL, name TEXT DEFAULT 'ready', active BOOL NOT NULL DEFAULT TRUE, score REAL DEFAULT 0.0)"); err != nil {
 	log.Fatal(err)
 }
 
@@ -387,11 +404,11 @@ tx, err := db.Begin()
 if err != nil {
 	log.Fatal(err)
 }
-if _, err := tx.Exec("INSERT INTO users VALUES (?, ?, ?)", 1, "Alice", true); err != nil {
+if _, err := tx.Exec("INSERT INTO users VALUES (?, ?, ?, ?)", 1, "Alice", false, 7.5); err != nil {
 	_ = tx.Rollback()
 	log.Fatal(err)
 }
-if _, err := tx.Exec("INSERT INTO users VALUES (?, ?, ?)", 2, "Bob", false); err != nil {
+if _, err := tx.Exec("INSERT INTO users (id) VALUES (?)", 2); err != nil {
 	_ = tx.Rollback()
 	log.Fatal(err)
 }
@@ -426,6 +443,8 @@ if err := rows.Err(); err != nil {
 	log.Fatal(err)
 }
 ```
+
+This stores `Alice` exactly as provided, while the second row uses the schema defaults because the `INSERT` omits `name`, `active`, and `score`.
 
 Explicit transactions are opt-in through the Go API. Plain `DB.Exec`, `DB.Query`, and `DB.QueryRow` keep their existing autocommit behavior when you do not call `Begin()`.
 

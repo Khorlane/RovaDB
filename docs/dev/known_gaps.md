@@ -26,7 +26,7 @@ Status values:
 - [kg023] Engine `done` Enforce a bounded indexable TEXT size
 - [dx005] Physical Storage Layer milestone `done`
 - [dx006] Physical Storage Polish milestone `done`
-- [dx001] Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc
+- [dx001] Column nullability and literal defaults `done`
 - [dx002] Explore planner usage for multi-column indexes
 - [dx003] Primary key support `done`
 - [dx004] Foreign key support `done`
@@ -190,24 +190,20 @@ Truthfulness:
 - it builds on the completed `v0.37.0-physical-storage-layer` baseline
 - it does not reintroduce support for pre-physstore table storage
 
-### Column nullability and literal defaults design follow-through [dx001]
+### `done` Column nullability and literal defaults [dx001]
 
-Design scope for column-level `NOT NULL` and literal `DEFAULT` is now locked in:
+Resolved direction:
+
+- column definitions now persist `NOT NULL` and literal `DEFAULT` metadata
+- `CREATE TABLE` and `ALTER TABLE ... ADD COLUMN` accept the documented column forms
+- `DEFAULT` applies on `INSERT` omission only
+- explicit `NULL` is rejected for `NOT NULL` columns on `INSERT` and `UPDATE`
+- `ALTER TABLE ... ADD COLUMN <col> <type> NOT NULL` is rejected for non-empty tables unless a literal default is present
+- existing rows observe `NULL` or the literal default after `ALTER TABLE ... ADD COLUMN`, and reopen preserves the same logical row behavior
+
+Reference:
 
 - `docs/dev/COLUMN_NULLABILITY_DEFAULTS_design.md`
-
-Remaining work for later slices:
-
-- parser recognition for the documented column forms
-- catalog/storage representation for nullability and literal defaults
-- executor/runtime enforcement on `INSERT` and `UPDATE`
-- `ALTER TABLE ... ADD COLUMN` enforcement and existing-row behavior
-
-Current context:
-
-- current column definitions only carry `name` and `type`
-- current `ALTER TABLE ... ADD COLUMN` behavior is catalog-only and pads existing rows with `NULL`
-- there is no current parser or executor support for `NOT NULL` or `DEFAULT`
 
 ### Explore planner usage for multi-column indexes [dx002]
 

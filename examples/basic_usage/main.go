@@ -16,7 +16,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE users (id INT NOT NULL, name TEXT DEFAULT 'ready', active BOOL NOT NULL DEFAULT TRUE, score REAL DEFAULT 0.0)"); err != nil {
 		log.Fatal(err)
 	}
 
@@ -28,14 +28,18 @@ func main() {
 		id     int
 		name   string
 		active bool
+		score  float64
 	}{
-		{id: 1, name: "Alice", active: true},
-		{id: 2, name: "Bob", active: false},
+		{id: 1, name: "Alice", active: false, score: 7.5},
 	} {
-		if _, err := tx.Exec("INSERT INTO users VALUES (?, ?, ?)", user.id, user.name, user.active); err != nil {
+		if _, err := tx.Exec("INSERT INTO users VALUES (?, ?, ?, ?)", user.id, user.name, user.active, user.score); err != nil {
 			_ = tx.Rollback()
 			log.Fatal(err)
 		}
+	}
+	if _, err := tx.Exec("INSERT INTO users (id) VALUES (?)", 2); err != nil {
+		_ = tx.Rollback()
+		log.Fatal(err)
 	}
 
 	var activeCount int
@@ -65,7 +69,7 @@ func main() {
 }
 
 func printActiveUsers(db *rovadb.DB, label string) {
-	rows, err := db.Query("SELECT id, name FROM users WHERE active = ? ORDER BY id", true)
+	rows, err := db.Query("SELECT id, name, score FROM users WHERE active = ? ORDER BY id", true)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -76,10 +80,11 @@ func printActiveUsers(db *rovadb.DB, label string) {
 	for rows.Next() {
 		var id int
 		var name string
-		if err := rows.Scan(&id, &name); err != nil {
+		var score float64
+		if err := rows.Scan(&id, &name, &score); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("%d %s\n", id, name)
+		fmt.Printf("%d %s score=%0.1f\n", id, name, score)
 	}
 	if err := rows.Err(); err != nil {
 		log.Fatal(err)
@@ -87,12 +92,13 @@ func printActiveUsers(db *rovadb.DB, label string) {
 }
 
 func printUserStatusByID(db *rovadb.DB, id int) {
-	row := db.QueryRow("SELECT name, active FROM users WHERE id = ?", id)
+	row := db.QueryRow("SELECT name, active, score FROM users WHERE id = ?", id)
 
 	var name string
 	var active bool
-	if err := row.Scan(&name, &active); err != nil {
+	var score float64
+	if err := row.Scan(&name, &active, &score); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("after reopen: id=%d name=%s active=%v\n", id, name, active)
+	fmt.Printf("after reopen: id=%d name=%s active=%v score=%0.1f\n", id, name, active, score)
 }

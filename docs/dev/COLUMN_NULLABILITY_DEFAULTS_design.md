@@ -1,8 +1,8 @@
 # Column Nullability and Literal Defaults Design
 
-This document defines the intended design scope for column-level `NOT NULL` and literal `DEFAULT` support in RovaDB.
+This document defines the locked design scope for column-level `NOT NULL` and literal `DEFAULT` support in RovaDB.
 
-It is a design note for later parser, catalog, executor, and integration work. It does not implement or widen the current SQL surface by itself. SQL syntax and user-visible statement semantics remain defined in `docs/dev/RovaDB_SQL_Language_Spec.md` once follow-on slices make this feature executable.
+The behavior described here is now implemented and serves as the milestone contract for parser, catalog, executor, reopen/lifecycle, and `ALTER TABLE ... ADD COLUMN` behavior. It also remains the boundary for rejecting wider default semantics such as expressions, functions, and special forms.
 
 ## Goal
 
@@ -33,9 +33,6 @@ It is a design note for later parser, catalog, executor, and integration work. I
 - `CURRENT_TIMESTAMP`-style special forms
 - implicit or computed defaults of any kind
 - new datatypes such as `SMALLINT`, `BIGINT`, `DATE`, `TIME`, and `TIMESTAMP`
-- parser implementation
-- catalog/storage-format changes
-- executor/runtime changes
 - error-message wording standardization beyond the rejection rules in this document
 
 Any widening of default semantics is a separate milestone.
@@ -149,9 +146,9 @@ The following rules are locked for later implementation:
 
 This slice does not widen accepted default syntax beyond literal forms. Future support for richer defaults must be introduced by a separate milestone and design pass.
 
-## Test Placement Guidance For Later Slices
+## Test Placement Guidance
 
-Follow-on implementation slices should keep coverage close to the owning layer:
+Coverage for this milestone should stay close to the owning layer:
 
 - parser coverage should go into existing parser test files
 - catalog persistence coverage should go into existing storage/catalog test files
@@ -159,12 +156,10 @@ Follow-on implementation slices should keep coverage close to the owning layer:
 - lifecycle, reopen, recovery, and storage-format validation should prefer existing `integration_*` coverage
 - avoid unnecessary new root-level test files
 
-## Follow-On Work
+## Boundary Reminder
 
-Later slices can implement this design in stages, but they should stay within the surface locked here:
+This milestone is complete within the surface locked here:
 
-- parser recognition for `NOT NULL` and `DEFAULT <literal>`
-- catalog representation for nullability and literal defaults
-- `INSERT` / `UPDATE` enforcement
-- `ALTER TABLE ... ADD COLUMN` enforcement and backfill behavior
-- SQL language spec updates once executable behavior lands
+- literal defaults only
+- no expression, function, placeholder, column-reference, or special-form defaults
+- no widening to new datatypes such as `SMALLINT`, `BIGINT`, `DATE`, `TIME`, or `TIMESTAMP`

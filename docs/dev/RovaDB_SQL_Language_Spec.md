@@ -47,6 +47,13 @@ table-element:
 column-definition:
 >>-column-name--type-name--><
 ```
+Column definitions also support:
+
+- no trailing clause
+- `DEFAULT <literal>`
+- `NOT NULL`
+- `NOT NULL DEFAULT <literal>`
+
 constraint-definition:
 >>-CONSTRAINT--constraint-name--+---------------------------------------------------------------+--><
                                 '-PRIMARY KEY--(--column-list--)--USING INDEX--index-name-------'
@@ -193,8 +200,12 @@ boolean-operator:
 **ALTER TABLE ... ADD COLUMN semantics**
 
 - `ALTER TABLE ... ADD COLUMN` appends the new column to the end of the table schema
-- existing stored rows are not rewritten when the column is added
-- existing rows read after the schema change yield `NULL` for the added column unless and until later writes populate it
+- column definitions may use the same supported `NOT NULL` and literal `DEFAULT` forms as `CREATE TABLE`
+- adding a nullable column without a default exposes `NULL` for pre-existing rows
+- adding a nullable column with a literal default exposes that default for pre-existing rows
+- adding a `NOT NULL` column without a default is allowed only when the target table is empty
+- adding a `NOT NULL` column with a literal default is allowed and exposes that default for pre-existing rows
+- future inserts use the updated column metadata, including default-on-omission behavior
 
 **PRIMARY KEY semantics**
 
@@ -393,12 +404,13 @@ Initial aggregate query scope:
 
 Representative accepted examples:
 
-- `CREATE TABLE users (id INT, name TEXT, active BOOL, score REAL)`
+- `CREATE TABLE users (id INT NOT NULL, name TEXT DEFAULT 'ready', active BOOL NOT NULL DEFAULT TRUE, score REAL DEFAULT 0.0)`
 - `CREATE UNIQUE INDEX idx_users_name ON users (name ASC)`
 - `CREATE INDEX idx_users_name_score ON users (name ASC, score DESC)`
 - `DROP TABLE users`
 - `DROP INDEX idx_users_name`
 - `ALTER TABLE users ADD COLUMN created_at TEXT`
+- `ALTER TABLE users ADD COLUMN active BOOL NOT NULL DEFAULT TRUE`
 - `ALTER TABLE users ADD CONSTRAINT pk_users PRIMARY KEY (id) USING INDEX idx_users_pk`
 - `ALTER TABLE users ADD CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES teams (id) USING INDEX idx_users_team ON DELETE RESTRICT`
 - `ALTER TABLE users DROP PRIMARY KEY`
