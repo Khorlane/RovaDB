@@ -18,7 +18,7 @@ func Eval(expr *parser.Expr) (parser.Value, error) {
 
 	switch expr.Kind {
 	case parser.ExprKindInt64Literal:
-		return publicIntResult(expr.I64)
+		return buildUntypedIntegerLiteralResult(expr.I64)
 	case parser.ExprKindRealLiteral:
 		return parser.RealValue(expr.F64), nil
 	case parser.ExprKindStringLiteral:
@@ -176,7 +176,7 @@ func evalScalarFunction(name string, arg parser.Value) (parser.Value, error) {
 		if arg.Kind != parser.ValueKindString {
 			return parser.Value{}, errTypeMismatch
 		}
-		return publicIntResult(int64(len(arg.Str)))
+		return buildUntypedIntegerLiteralResult(int64(len(arg.Str)))
 	case "ABS":
 		switch arg.Kind {
 		case parser.ValueKindIntegerLiteral, parser.ValueKindSmallInt, parser.ValueKindInt, parser.ValueKindBigInt:
@@ -275,12 +275,23 @@ func resolveUntypedIntegerLiteralToValueKind(value parser.Value, targetKind pars
 	}
 	switch targetKind {
 	case parser.ValueKindSmallInt:
-		return normalizeIntegerColumnValue(value, parser.BoundIntegerTypeInt16, -1<<15, 1<<15-1)
+		return resolveUntypedIntegerLiteralToExactWidth(value, targetKind)
 	case parser.ValueKindInt:
-		return normalizeIntegerColumnValue(value, parser.BoundIntegerTypeInt32, -1<<31, 1<<31-1)
+		return resolveUntypedIntegerLiteralToExactWidth(value, targetKind)
 	case parser.ValueKindBigInt:
-		return normalizeIntegerColumnValue(value, parser.BoundIntegerTypeInt64, -1<<63, 1<<63-1)
+		return resolveUntypedIntegerLiteralToExactWidth(value, targetKind)
 	default:
 		return value, nil
 	}
+}
+
+func resolveUntypedIntegerLiteralToExactWidth(value parser.Value, targetKind parser.ValueKind) (parser.Value, error) {
+	if !value.IsIntegerLiteral() {
+		return parser.Value{}, errTypeMismatch
+	}
+	resolved, err := buildExactWidthIntegerValue(targetKind, value.I64)
+	if err == errIntOutOfRange {
+		return parser.Value{}, errTypeMismatch
+	}
+	return resolved, err
 }

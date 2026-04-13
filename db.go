@@ -1073,7 +1073,7 @@ func (db *DB) projectAllRowsFromIndexOnly(handoff *executor.IndexOnlyExecutionHa
 	projectedColumnType := projectedColumnTypeByName(table, handoff.ColumnName())
 	projected := make([][]any, 0, len(values))
 	for _, value := range values {
-		projectedValue, err := rebindProjectedIndexValue(parserValueFromStorage(value), projectedColumnType)
+		projectedValue, err := rebindLegacySimpleIndexProjectedValue(parserValueFromStorage(value), projectedColumnType)
 		if err != nil {
 			return nil, err
 		}
@@ -1305,7 +1305,10 @@ func apiValue(value parser.Value) any {
 	return value.Any()
 }
 
-func rebindProjectedIndexValue(value parser.Value, columnType string) (parser.Value, error) {
+// rebindLegacySimpleIndexProjectedValue isolates the legacy simple-index path
+// that still decodes schema-less integer keys before the root layer restores
+// the declared exact-width integer type for index-only projection.
+func rebindLegacySimpleIndexProjectedValue(value parser.Value, columnType string) (parser.Value, error) {
 	if !value.IsIntegerLiteral() {
 		return value, nil
 	}

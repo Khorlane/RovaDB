@@ -168,41 +168,6 @@ func evalInsertValueExpr(expr *parser.ValueExpr) (parser.Value, error) {
 	}
 }
 
-func valueMatchesColumnType(value parser.Value, typeName string) bool {
-	if value.Kind == parser.ValueKindNull {
-		return true
-	}
-	switch typeName {
-	case parser.ColumnTypeSmallInt:
-		return integerValueMatchesExactColumnType(value, parser.BoundIntegerTypeInt16)
-	case parser.ColumnTypeInt:
-		return integerValueMatchesExactColumnType(value, parser.BoundIntegerTypeInt32)
-	case parser.ColumnTypeBigInt:
-		return integerValueMatchesExactColumnType(value, parser.BoundIntegerTypeInt64)
-	case parser.ColumnTypeText:
-		return value.Kind == parser.ValueKindString
-	case parser.ColumnTypeBool:
-		return value.Kind == parser.ValueKindBool
-	case parser.ColumnTypeReal:
-		return value.Kind == parser.ValueKindReal
-	default:
-		return false
-	}
-}
-
-func integerValueMatchesExactColumnType(value parser.Value, exactType parser.BoundIntegerType) bool {
-	if !value.IsInteger() {
-		return false
-	}
-	if value.IsIntegerLiteral() {
-		return true
-	}
-	if value.BoundIntegerType != parser.BoundIntegerTypeNone {
-		return value.BoundIntegerType == exactType
-	}
-	return integerBoundTypeForValue(value) == exactType
-}
-
 func normalizeColumnValue(table *Table, columnIndex int, value parser.Value) (parser.Value, error) {
 	if table == nil || columnIndex < 0 || columnIndex >= len(table.Columns) {
 		return parser.Value{}, errColumnDoesNotExist
@@ -219,57 +184,88 @@ func normalizeColumnValue(table *Table, columnIndex int, value parser.Value) (pa
 }
 
 func normalizeColumnValueForDef(column parser.ColumnDef, value parser.Value) (parser.Value, error) {
-	if !valueMatchesColumnType(value, column.Type) {
-		return parser.Value{}, errTypeMismatch
-	}
+	return normalizeColumnScalarValue(column.Type, value)
+}
+
+func normalizeColumnScalarValue(typeName string, value parser.Value) (parser.Value, error) {
 	if value.Kind == parser.ValueKindNull {
 		return value, nil
 	}
-	switch column.Type {
+	switch typeName {
 	case parser.ColumnTypeSmallInt:
-		return normalizeIntegerColumnValue(value, parser.BoundIntegerTypeInt16, math.MinInt16, math.MaxInt16)
+		return normalizeExactWidthIntegerColumnValue(value, parser.BoundIntegerTypeInt16)
 	case parser.ColumnTypeInt:
-		return normalizeIntegerColumnValue(value, parser.BoundIntegerTypeInt32, math.MinInt32, math.MaxInt32)
+		return normalizeExactWidthIntegerColumnValue(value, parser.BoundIntegerTypeInt32)
 	case parser.ColumnTypeBigInt:
-		return normalizeIntegerColumnValue(value, parser.BoundIntegerTypeInt64, math.MinInt64, math.MaxInt64)
-	default:
+		return normalizeExactWidthIntegerColumnValue(value, parser.BoundIntegerTypeInt64)
+	case parser.ColumnTypeText:
+		if value.Kind != parser.ValueKindString {
+			return parser.Value{}, errTypeMismatch
+		}
 		return value, nil
+	case parser.ColumnTypeBool:
+		if value.Kind != parser.ValueKindBool {
+			return parser.Value{}, errTypeMismatch
+		}
+		return value, nil
+	case parser.ColumnTypeReal:
+		if value.Kind != parser.ValueKindReal {
+			return parser.Value{}, errTypeMismatch
+		}
+		return value, nil
+	default:
+		return parser.Value{}, errTypeMismatch
 	}
 }
 
-func normalizeIntegerColumnValue(value parser.Value, exactType parser.BoundIntegerType, minValue, maxValue int64) (parser.Value, error) {
+func normalizeExactWidthIntegerColumnValue(value parser.Value, exactType parser.BoundIntegerType) (parser.Value, error) {
+	if value.IsIntegerLiteral() {
+		return normalizeUntypedIntegerLiteralForColumn(value.I64, exactType)
+	}
 	if value.BoundIntegerType != parser.BoundIntegerTypeNone && value.BoundIntegerType != exactType {
 		return parser.Value{}, errTypeMismatch
 	}
-	if value.IsTypedInteger() && integerBoundTypeForValue(value) != exactType {
-		return parser.Value{}, errTypeMismatch
-	}
-	integerValue := value.IntegerValue()
-	if integerValue < minValue || integerValue > maxValue {
-		return parser.Value{}, errTypeMismatch
-	}
+	return normalizeTypedIntegerValueForColumn(value, exactType)
+}
+
+func normalizeUntypedIntegerLiteralForColumn(value int64, exactType parser.BoundIntegerType) (parser.Value, error) {
 	switch exactType {
 	case parser.BoundIntegerTypeInt16:
-		return parser.SmallIntValue(int16(integerValue)), nil
+		if value < math.MinInt16 || value > math.MaxInt16 {
+			return parser.Value{}, errTypeMismatch
+		}
+		return parser.SmallIntValue(int16(value)), nil
 	case parser.BoundIntegerTypeInt32:
-		return parser.IntValue(int32(integerValue)), nil
+		if value < math.MinInt32 || value > math.MaxInt32 {
+			return parser.Value{}, errTypeMismatch
+		}
+		return parser.IntValue(int32(value)), nil
 	case parser.BoundIntegerTypeInt64:
-		return parser.BigIntValue(integerValue), nil
+		return parser.BigIntValue(value), nil
 	default:
 		return parser.Value{}, errTypeMismatch
 	}
 }
 
-func integerBoundTypeForValue(value parser.Value) parser.BoundIntegerType {
-	switch value.Kind {
-	case parser.ValueKindSmallInt:
-		return parser.BoundIntegerTypeInt16
-	case parser.ValueKindInt:
-		return parser.BoundIntegerTypeInt32
-	case parser.ValueKindBigInt:
-		return parser.BoundIntegerTypeInt64
+func normalizeTypedIntegerValueForColumn(value parser.Value, exactType parser.BoundIntegerType) (parser.Value, error) {
+	switch exactType {
+	case parser.BoundIntegerTypeInt16:
+		if value.Kind != parser.ValueKindSmallInt {
+			return parser.Value{}, errTypeMismatch
+		}
+		return parser.SmallIntValue(value.I16), nil
+	case parser.BoundIntegerTypeInt32:
+		if value.Kind != parser.ValueKindInt {
+			return parser.Value{}, errTypeMismatch
+		}
+		return parser.IntValue(value.I32), nil
+	case parser.BoundIntegerTypeInt64:
+		if value.Kind != parser.ValueKindBigInt {
+			return parser.Value{}, errTypeMismatch
+		}
+		return parser.BigIntValue(value.I64), nil
 	default:
-		return parser.BoundIntegerTypeNone
+		return parser.Value{}, errTypeMismatch
 	}
 }
 

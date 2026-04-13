@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"errors"
 	"strconv"
 	"strings"
 )
@@ -120,15 +119,6 @@ func BigIntValue(v int64) Value {
 // Int64Value builds an untyped integer literal value.
 func Int64Value(v int64) Value {
 	return IntegerLiteralValue(v)
-}
-
-// PublicIntValue builds a public INT value and enforces the signed 32-bit INT
-// contract exposed by the SQL layer.
-func PublicIntValue(v int64) (Value, error) {
-	if !PublicIntInRange(v) {
-		return Value{}, errors.New("integer out of range for INT")
-	}
-	return IntValue(int32(v)), nil
 }
 
 // StringValue builds a string Value.

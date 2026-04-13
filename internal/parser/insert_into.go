@@ -31,7 +31,7 @@ func parseLiteralValue(token string) (Value, bool) {
 		return BoolValue(false), true
 	}
 
-	value, ok := parsePublicIntLiteral(token)
+	value, ok := parseUntypedIntegerLiteral(token)
 	if ok {
 		return Int64Value(value), true
 	}
@@ -51,7 +51,7 @@ func parseLiteralToken(tok token) (Value, bool) {
 	case tokenPlaceholder:
 		return PlaceholderValue(), true
 	case tokenNumber:
-		if value, ok := parsePublicIntLiteral(tok.Lexeme); ok {
+		if value, ok := parseUntypedIntegerLiteral(tok.Lexeme); ok {
 			return Int64Value(value), true
 		}
 		if value, ok := parseRealLiteral(tok.Lexeme); ok {

@@ -424,6 +424,12 @@ func TestExecuteInsertValueExprArithmetic(t *testing.T) {
 }
 
 func TestNormalizeColumnValueForDefRequiresExactIntegerWidths(t *testing.T) {
+	boundInt32Value := func(v int32) parser.Value {
+		value := parser.IntValue(v)
+		value.BoundIntegerType = parser.BoundIntegerTypeInt32
+		return value
+	}
+
 	tests := []struct {
 		name      string
 		column    parser.ColumnDef
@@ -450,6 +456,12 @@ func TestNormalizeColumnValueForDefRequiresExactIntegerWidths(t *testing.T) {
 			wantError: errTypeMismatch,
 		},
 		{
+			name:      "smallint rejects bound int32 placeholder",
+			column:    parser.ColumnDef{Name: "small_col", Type: parser.ColumnTypeSmallInt},
+			value:     boundInt32Value(7),
+			wantError: errTypeMismatch,
+		},
+		{
 			name:      "smallint rejects typed bigint",
 			column:    parser.ColumnDef{Name: "small_col", Type: parser.ColumnTypeSmallInt},
 			value:     parser.BigIntValue(7),
@@ -465,6 +477,12 @@ func TestNormalizeColumnValueForDefRequiresExactIntegerWidths(t *testing.T) {
 			name:   "int accepts exact typed value",
 			column: parser.ColumnDef{Name: "int_col", Type: parser.ColumnTypeInt},
 			value:  parser.IntValue(42),
+			want:   parser.IntValue(42),
+		},
+		{
+			name:   "int accepts bound int32 placeholder",
+			column: parser.ColumnDef{Name: "int_col", Type: parser.ColumnTypeInt},
+			value:  boundInt32Value(42),
 			want:   parser.IntValue(42),
 		},
 		{

@@ -78,7 +78,7 @@ func executeJoinSelect(plan *selectPlanBridge, tables map[string]*Table) ([][]pa
 		if len(plan.query.orderBys) > 0 || plan.query.orderBy != nil {
 			return nil, errCountOrderByUnsupported
 		}
-		value, err := publicIntResult(int64(len(joinedRows)))
+		value, err := buildUntypedIntegerLiteralResult(int64(len(joinedRows)))
 		if err != nil {
 			return nil, err
 		}
@@ -108,7 +108,7 @@ func executeJoinAggregateSelectRows(sel *runtimeSelectQuery, rows [][]parser.Val
 		return nil, err
 	}
 	if sel.isCountStar {
-		value, err := publicIntResult(int64(len(rows)))
+		value, err := buildUntypedIntegerLiteralResult(int64(len(rows)))
 		if err != nil {
 			return nil, err
 		}

@@ -210,7 +210,7 @@ func parseIntLiteral(token string) (*Expr, bool) {
 		return nil, false
 	}
 
-	value, ok := parsePublicIntLiteral(token)
+	value, ok := parseUntypedIntegerLiteral(token)
 	if !ok {
 		return nil, false
 	}

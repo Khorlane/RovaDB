@@ -17,7 +17,7 @@ func evalAggregateExprRows(expr *runtimeValueExpr, rows [][]parser.Value, eval a
 	switch name {
 	case "COUNT":
 		if expr.starArg {
-			return publicIntResult(int64(len(rows)))
+			return buildUntypedIntegerLiteralResult(int64(len(rows)))
 		}
 		count := int64(0)
 		for _, row := range rows {
@@ -29,7 +29,7 @@ func evalAggregateExprRows(expr *runtimeValueExpr, rows [][]parser.Value, eval a
 				count++
 			}
 		}
-		return publicIntResult(count)
+		return buildUntypedIntegerLiteralResult(count)
 	case "MIN":
 		return aggregateMinMax(rows, expr.arg, eval, true)
 	case "MAX":

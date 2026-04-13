@@ -120,7 +120,7 @@ func executeSelectRows(sel *runtimeSelectQuery, table *Table, candidateRows [][]
 				count++
 			}
 		}
-		value, err := publicIntResult(count)
+		value, err := buildUntypedIntegerLiteralResult(count)
 		if err != nil {
 			return nil, err
 		}
@@ -201,7 +201,7 @@ func executeAggregateSelectRows(sel *runtimeSelectQuery, table *Table, rows [][]
 		return nil, err
 	}
 	if sel.isCountStar {
-		value, err := publicIntResult(int64(len(rows)))
+		value, err := buildUntypedIntegerLiteralResult(int64(len(rows)))
 		if err != nil {
 			return nil, err
 		}

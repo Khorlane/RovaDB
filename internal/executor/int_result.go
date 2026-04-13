@@ -8,16 +8,17 @@ import (
 
 var errIntOutOfRange = newExecError("integer out of range")
 
-// publicIntResult keeps executor-owned untyped integer expression results as
-// SQL integer literals until a later typed context forces resolution.
-func publicIntResult(v int64) (parser.Value, error) {
-	if !parser.PublicIntInRange(v) {
+// buildUntypedIntegerLiteralResult keeps executor-owned expression results on
+// the intentionally narrow untyped SQL integer-literal path until a later
+// exact-width context forces resolution.
+func buildUntypedIntegerLiteralResult(v int64) (parser.Value, error) {
+	if v < math.MinInt32 || v > math.MaxInt32 {
 		return parser.Value{}, errIntOutOfRange
 	}
 	return parser.IntegerLiteralValue(v), nil
 }
 
-func integerValueBounds(kind parser.ValueKind) (int64, int64, bool) {
+func exactWidthIntegerBounds(kind parser.ValueKind) (int64, int64, bool) {
 	switch kind {
 	case parser.ValueKindSmallInt:
 		return math.MinInt16, math.MaxInt16, true
@@ -30,8 +31,8 @@ func integerValueBounds(kind parser.ValueKind) (int64, int64, bool) {
 	}
 }
 
-func buildTypedIntegerValue(kind parser.ValueKind, value int64) (parser.Value, error) {
-	minValue, maxValue, ok := integerValueBounds(kind)
+func buildExactWidthIntegerValue(kind parser.ValueKind, value int64) (parser.Value, error) {
+	minValue, maxValue, ok := exactWidthIntegerBounds(kind)
 	if !ok {
 		return parser.Value{}, errTypeMismatch
 	}
@@ -130,9 +131,9 @@ func evalIntegerArithmeticResult(op int, left, right parser.Value) (parser.Value
 	}
 
 	if resultKind == parser.ValueKindIntegerLiteral {
-		return publicIntResult(result)
+		return buildUntypedIntegerLiteralResult(result)
 	}
-	return buildTypedIntegerValue(resultKind, result)
+	return buildExactWidthIntegerValue(resultKind, result)
 }
 
 func evalIntegerAbsResult(value parser.Value) (parser.Value, error) {
@@ -141,7 +142,7 @@ func evalIntegerAbsResult(value parser.Value) (parser.Value, error) {
 		return parser.Value{}, errIntOutOfRange
 	}
 	if value.IsIntegerLiteral() {
-		return publicIntResult(absValue)
+		return buildUntypedIntegerLiteralResult(absValue)
 	}
-	return buildTypedIntegerValue(value.Kind, absValue)
+	return buildExactWidthIntegerValue(value.Kind, absValue)
 }
