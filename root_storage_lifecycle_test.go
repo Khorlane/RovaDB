@@ -1385,7 +1385,7 @@ func TestApplyErrorTriggersRollback(t *testing.T) {
 		table.Rows = append(table.Rows, []parser.Value{parser.Int64Value(2)})
 		table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
 
-		tablePageData, err := storage.BuildSlottedTablePageData(uint32(table.RootPageID()), parserRowsToStorage(table.Rows))
+		tablePageData, err := storage.BuildSlottedTablePageData(uint32(table.RootPageID()), storageColumnTypes(table.Columns), parserRowsToStorage(table.Rows))
 		if err != nil {
 			return err
 		}
@@ -4906,7 +4906,7 @@ func TestOpenRejectsExactStorageRowCountMismatch(t *testing.T) {
 
 	rootPage := pager.NewPage()
 	storage.InitTableRootPage(rootPage)
-	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.Int64Value(1)}))
+	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.Int64Value(1)}), []uint8{storage.CatalogColumnTypeInt})
 	if err != nil {
 		t.Fatalf("EncodeRow() error = %v", err)
 	}
@@ -6842,7 +6842,7 @@ func TestOpenIgnoresTrailingUncommittedWALFrames(t *testing.T) {
 		t.Fatalf("pager.Get(data) error = %v", err)
 	}
 	uncommitted := append([]byte(nil), rootPage.Data()...)
-	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.Int64Value(2)}))
+	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.Int64Value(2)}), []uint8{storage.CatalogColumnTypeInt})
 	if err != nil {
 		t.Fatalf("EncodeSlottedRow() error = %v", err)
 	}
@@ -6972,7 +6972,7 @@ func TestOpenReplaysMultipleCommittedWALTransactions(t *testing.T) {
 		t.Fatalf("pager.Get(root) error = %v", err)
 	}
 	older := storage.InitializeTablePage(uint32(rootPageID))
-	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.Int64Value(1)}))
+	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.Int64Value(1)}), []uint8{storage.CatalogColumnTypeInt})
 	if err != nil {
 		t.Fatalf("EncodeSlottedRow() error = %v", err)
 	}

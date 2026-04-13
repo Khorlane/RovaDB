@@ -133,8 +133,11 @@ func DecodeRow(data []byte) ([]Value, error) {
 }
 
 // EncodeSlottedRow encodes one row payload using the slotted-page row format.
-func EncodeSlottedRow(values []Value) ([]byte, error) {
+func EncodeSlottedRow(values []Value, columnTypes []uint8) ([]byte, error) {
 	columnCount := len(values)
+	if columnCount != len(columnTypes) {
+		return nil, errInvalidRowData
+	}
 	nullBitmapByteCount := (columnCount + 7) / 8
 
 	buf := make([]byte, 4+nullBitmapByteCount)
@@ -149,12 +152,11 @@ func EncodeSlottedRow(values []Value) ([]byte, error) {
 
 		switch value.Kind {
 		case ValueKindInt64:
-			if !publicIntInRange(value.I64) {
+			var err error
+			buf, err = appendSlottedIntegerValue(buf, columnTypes[i], value.I64)
+			if err != nil {
 				return nil, errInvalidRowData
 			}
-			var raw [4]byte
-			binary.LittleEndian.PutUint32(raw[:], uint32(int32(value.I64)))
-			buf = append(buf, raw[:]...)
 		case ValueKindBool:
 			if value.Bool {
 				buf = append(buf, 1)
@@ -214,12 +216,26 @@ func DecodeSlottedRow(data []byte, columnTypes []uint8) ([]Value, error) {
 		}
 
 		switch columnType {
+		case CatalogColumnTypeSmallInt:
+			if offset+2 > len(data) {
+				return nil, errInvalidRowData
+			}
+			value := int64(int16(binary.LittleEndian.Uint16(data[offset : offset+2])))
+			offset += 2
+			values = append(values, Int64Value(value))
 		case CatalogColumnTypeInt:
 			if offset+4 > len(data) {
 				return nil, errInvalidRowData
 			}
 			value := int64(int32(binary.LittleEndian.Uint32(data[offset : offset+4])))
 			offset += 4
+			values = append(values, Int64Value(value))
+		case CatalogColumnTypeBigInt:
+			if offset+8 > len(data) {
+				return nil, errInvalidRowData
+			}
+			value := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+			offset += 8
 			values = append(values, Int64Value(value))
 		case CatalogColumnTypeBool:
 			if offset >= len(data) {
@@ -261,6 +277,31 @@ func DecodeSlottedRow(data []byte, columnTypes []uint8) ([]Value, error) {
 		return nil, errInvalidRowData
 	}
 	return values, nil
+}
+
+func appendSlottedIntegerValue(buf []byte, columnType uint8, value int64) ([]byte, error) {
+	switch columnType {
+	case CatalogColumnTypeSmallInt:
+		if value < math.MinInt16 || value > math.MaxInt16 {
+			return nil, errInvalidRowData
+		}
+		var raw [2]byte
+		binary.LittleEndian.PutUint16(raw[:], uint16(int16(value)))
+		return append(buf, raw[:]...), nil
+	case CatalogColumnTypeInt:
+		if value < math.MinInt32 || value > math.MaxInt32 {
+			return nil, errInvalidRowData
+		}
+		var raw [4]byte
+		binary.LittleEndian.PutUint32(raw[:], uint32(int32(value)))
+		return append(buf, raw[:]...), nil
+	case CatalogColumnTypeBigInt:
+		var raw [8]byte
+		binary.LittleEndian.PutUint64(raw[:], uint64(value))
+		return append(buf, raw[:]...), nil
+	default:
+		return nil, errInvalidRowData
+	}
 }
 
 func publicIntInRange(v int64) bool {

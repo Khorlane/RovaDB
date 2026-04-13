@@ -648,19 +648,19 @@ func decodeSlottedRowPayload(payload []byte, columnTypes []uint8) ([]Value, erro
 	return row, nil
 }
 
-func BuildSlottedTablePageData(pageID uint32, rows [][]Value) ([]byte, error) {
-	page, _, err := BuildSlottedTablePageDataWithLocators(pageID, rows)
+func BuildSlottedTablePageData(pageID uint32, columnTypes []uint8, rows [][]Value) ([]byte, error) {
+	page, _, err := BuildSlottedTablePageDataWithLocators(pageID, columnTypes, rows)
 	if err != nil {
 		return nil, err
 	}
 	return page, nil
 }
 
-func BuildSlottedTablePageDataWithLocators(pageID uint32, rows [][]Value) ([]byte, []RowLocator, error) {
+func BuildSlottedTablePageDataWithLocators(pageID uint32, columnTypes []uint8, rows [][]Value) ([]byte, []RowLocator, error) {
 	page := InitializeTablePage(pageID)
 	locators := make([]RowLocator, 0, len(rows))
 	for _, row := range rows {
-		encoded, err := EncodeSlottedRow(row)
+		encoded, err := EncodeSlottedRow(row, columnTypes)
 		if err != nil {
 			return nil, nil, err
 		}

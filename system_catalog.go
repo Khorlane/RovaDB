@@ -156,7 +156,7 @@ func (db *DB) rebuildSystemCatalogRows(tables map[string]*executor.Table, newPag
 			return nil, false, newStorageError("corrupted catalog page")
 		}
 		if _, isNew := newPageIDs[table.RootPageID()]; isNew {
-			rootPageData, err := storage.BuildSlottedTablePageData(uint32(table.RootPageID()), nil)
+			rootPageData, err := storage.BuildSlottedTablePageData(uint32(table.RootPageID()), nil, nil)
 			if err != nil {
 				return nil, false, wrapStorageError(err)
 			}

@@ -314,7 +314,7 @@ func (db *DB) insertRowIntoPhysicalStorageState(table *executor.Table, row []par
 		return storage.RowLocator{}, wrapStorageError(err)
 	}
 
-	rowBytes, err := storage.EncodeSlottedRow(storageValuesFromParser(row))
+	rowBytes, err := storage.EncodeSlottedRow(storageValuesFromParser(row), storageColumnTypes(table.Columns))
 	if err != nil {
 		return storage.RowLocator{}, wrapStorageError(err)
 	}
@@ -518,7 +518,7 @@ func (db *DB) stageUpdatedRowViaPhysicalStorage(table *executor.Table, locator s
 		return storage.RowLocator{}, wrapStorageError(err)
 	}
 
-	rowBytes, err := storage.EncodeSlottedRow(storageValuesFromParser(row))
+	rowBytes, err := storage.EncodeSlottedRow(storageValuesFromParser(row), storageColumnTypes(table.Columns))
 	if err != nil {
 		return storage.RowLocator{}, wrapStorageError(err)
 	}

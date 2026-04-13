@@ -1594,7 +1594,7 @@ func (db *DB) applyStagedCreate(stagedTables map[string]*executor.Table, tableNa
 	nextFreshID++
 	table.SetPhysicalTableRootMeta(tableHeaderPageID, storage.CurrentTableStorageFormatVersion, 0, 0, 0)
 
-	rootPageData, err := storage.BuildSlottedTablePageData(uint32(rootPageID), nil)
+	rootPageData, err := storage.BuildSlottedTablePageData(uint32(rootPageID), nil, nil)
 	if err != nil {
 		return wrapStorageError(err)
 	}
@@ -3899,8 +3899,12 @@ func declaredCatalogColumnType(columnType string) uint8 {
 
 func physicalStorageColumnType(columnType string) uint8 {
 	switch columnType {
-	case parser.ColumnTypeSmallInt, parser.ColumnTypeInt, parser.ColumnTypeBigInt:
+	case parser.ColumnTypeSmallInt:
+		return storage.CatalogColumnTypeSmallInt
+	case parser.ColumnTypeInt:
 		return storage.CatalogColumnTypeInt
+	case parser.ColumnTypeBigInt:
+		return storage.CatalogColumnTypeBigInt
 	case parser.ColumnTypeBool:
 		return storage.CatalogColumnTypeBool
 	case parser.ColumnTypeReal:
