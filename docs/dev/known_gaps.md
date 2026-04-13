@@ -190,27 +190,18 @@ Truthfulness:
 - it builds on the completed `v0.37.0-physical-storage-layer` baseline
 - it does not reintroduce support for pre-physstore table storage
 
-### Explore `NOT NULL`, `NOT NULL WITH DEFAULT`, etc [dx001]
+### Column nullability and literal defaults design follow-through [dx001]
 
-Exploration scope:
+Design scope for column-level `NOT NULL` and literal `DEFAULT` is now locked in:
 
-- whether RovaDB should add column-level
-  - `NOT NULL`
-  - `NOT NULL WITH DEFAULT`
-  - `NOT NULL WITH DEFAULT <value>`
-- whether those clauses should be supported in:
-  - `CREATE TABLE`
-  - `ALTER TABLE ... ADD COLUMN`
+- `docs/dev/COLUMN_NULLABILITY_DEFAULTS_design.md`
 
-Questions to resolve:
+Remaining work for later slices:
 
-- what syntax should be accepted
-- what runtime enforcement should occur on `INSERT` and `UPDATE`
-- how `ALTER TABLE ... ADD COLUMN` should behave for existing rows
-- whether `NOT NULL` without `DEFAULT` is allowed when adding a column to a non-empty table
-- how defaults should be represented in catalog metadata
-- whether defaults are limited to literals or can include expressions
-- what error wording and compatibility rules should be standardized
+- parser recognition for the documented column forms
+- catalog/storage representation for nullability and literal defaults
+- executor/runtime enforcement on `INSERT` and `UPDATE`
+- `ALTER TABLE ... ADD COLUMN` enforcement and existing-row behavior
 
 Current context:
 
