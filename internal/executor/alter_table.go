@@ -18,16 +18,29 @@ func executeAlterTableAddColumn(stmt *parser.AlterTableAddColumnStmt, tables map
 			return 0, errColumnDoesNotExist
 		}
 	}
+	if stmt.Column.NotNull && !stmt.Column.HasDefault && tableHasRows(table) {
+		return 0, newExecError("cannot add NOT NULL column without DEFAULT to non-empty table")
+	}
 
 	table.Columns = append(table.Columns, stmt.Column)
 	for i := range table.Rows {
-		table.Rows[i] = padRowToWidth(table.Rows[i], len(table.Columns))
+		table.Rows[i] = ExpandRowToSchema(table.Rows[i], table.Columns)
 	}
 	if err := rebuildIndexesForTable(table); err != nil {
 		return 0, err
 	}
 
 	return 0, nil
+}
+
+func tableHasRows(table *Table) bool {
+	if table == nil {
+		return false
+	}
+	if table.Rows != nil {
+		return len(table.Rows) != 0
+	}
+	return table.PersistedRowCount() != 0
 }
 
 func executeAlterTableAddPrimaryKey(stmt *parser.AlterTableAddPrimaryKeyStmt, tables map[string]*Table) (int64, error) {

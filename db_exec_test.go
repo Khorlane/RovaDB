@@ -620,6 +620,83 @@ func TestExecAPIAllowsAlterTable(t *testing.T) {
 	}
 }
 
+func TestExecAlterTableAddColumnAppliesExistingRowDefaultsAndNullability(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT)",
+		"INSERT INTO users VALUES (1)",
+		"INSERT INTO users VALUES (2)",
+		"ALTER TABLE users ADD COLUMN nickname TEXT",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT id, nickname FROM users ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query(nullable no default) error = %v", err)
+	}
+	if got := rows.data; len(got) != 2 || got[0][0] != 1 || got[0][1] != nil || got[1][0] != 2 || got[1][1] != nil {
+		t.Fatalf("nullable no default rows = %#v, want [[1 nil] [2 nil]]", got)
+	}
+	rows.Close()
+
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN score REAL NOT NULL DEFAULT 1.5"); err != nil {
+		t.Fatalf("Exec(add score) error = %v", err)
+	}
+	rows, err = db.Query("SELECT id, score FROM users ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query(not null default) error = %v", err)
+	}
+	if got := rows.data; len(got) != 2 || got[0][0] != 1 || got[0][1] != 1.5 || got[1][0] != 2 || got[1][1] != 1.5 {
+		t.Fatalf("not null default rows = %#v, want [[1 1.5] [2 1.5]]", got)
+	}
+	rows.Close()
+
+	if _, err := db.Exec("INSERT INTO users (id) VALUES (3)"); err != nil {
+		t.Fatalf("Exec(insert after alter) error = %v", err)
+	}
+	rows, err = db.Query("SELECT id, nickname, score FROM users ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query(post alter insert) error = %v", err)
+	}
+	if got := rows.data; len(got) != 3 || got[2][0] != 3 || got[2][1] != nil || got[2][2] != 1.5 {
+		t.Fatalf("post alter insert rows = %#v, want row 3 to use NULL/default fill", got)
+	}
+	rows.Close()
+}
+
+func TestExecAlterTableAddColumnNotNullWithoutDefaultRequiresEmptyTable(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE empty_users (id INT)"); err != nil {
+		t.Fatalf("Exec(create empty_users) error = %v", err)
+	}
+	if _, err := db.Exec("ALTER TABLE empty_users ADD COLUMN active BOOL NOT NULL"); err != nil {
+		t.Fatalf("Exec(alter empty table) error = %v", err)
+	}
+
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create users) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert users) error = %v", err)
+	}
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN active BOOL NOT NULL"); err == nil || err.Error() != "execution: cannot add NOT NULL column without DEFAULT to non-empty table" {
+		t.Fatalf("Exec(alter populated table) error = %v, want non-empty table failure", err)
+	}
+}
+
 func TestExecAPIAcceptsTrailingSemicolon(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

@@ -1644,8 +1644,8 @@ func (db *DB) applyStagedCatalogOnly(stagedTables map[string]*executor.Table) er
 	}
 
 	// Schema metadata changes such as ALTER TABLE ... ADD COLUMN are catalog-only
-	// here. Existing stored rows are not rewritten; older rows are padded in
-	// memory when materialized against the wider schema.
+	// here. Existing stored rows are not rewritten; older rows are expanded on
+	// materialization using committed column defaults/nullability metadata.
 	return db.stageSchemaState(stagedTables, nil)
 }
 
@@ -3440,7 +3440,7 @@ func loadPersistedRows(pool *bufferpool.BufferPool, tables map[string]*executor.
 			if len(row) > len(table.Columns) {
 				return newStorageError("row width mismatch")
 			}
-			table.Rows = append(table.Rows, padRowToSchema(row, len(table.Columns)))
+			table.Rows = append(table.Rows, executor.ExpandRowToSchema(row, table.Columns))
 		}
 	}
 
@@ -3527,11 +3527,15 @@ func (db *DB) fetchRowByLocator(table *executor.Table, locator storage.RowLocato
 		return nil, wrapStorageError(err)
 	}
 
-	row, err := storage.ReadRowByLocatorFromTablePageData(pageData, locator, storageColumnTypes(table.Columns))
+	payload, err := storage.ExtractSlottedRowPayload(pageData, int(locator.SlotID))
 	if err != nil {
 		return nil, wrapStorageError(err)
 	}
-	return append([]parser.Value(nil), parserValuesFromStorage(row)...), nil
+	row, err := decodeStoredRowPayload(payload, table.Columns)
+	if err != nil {
+		return nil, wrapStorageError(err)
+	}
+	return append([]parser.Value(nil), row...), nil
 }
 
 func loadCommittedTableRowsAndLocators(pool *bufferpool.BufferPool, table *executor.Table) ([]storage.RowLocator, [][]parser.Value, error) {
@@ -3562,17 +3566,45 @@ func loadCommittedTableRowsAndLocators(pool *bufferpool.BufferPool, table *execu
 		if err := storage.ValidateOwnedDataPage(pageData, table.TableID); err != nil {
 			return nil, nil, wrapStorageError(err)
 		}
-		pageLocators, pageRows, err := storage.ReadSlottedRowsWithLocators(pageData, uint32(pageID), storageColumnTypes(table.Columns))
+		pageLocators, err := storage.TablePageLocators(pageData, uint32(pageID))
 		if err != nil {
 			return nil, nil, wrapStorageError(err)
 		}
+		pageRows := make([][]parser.Value, 0, len(pageLocators))
+		for _, locator := range pageLocators {
+			payload, err := storage.ExtractSlottedRowPayload(pageData, int(locator.SlotID))
+			if err != nil {
+				return nil, nil, wrapStorageError(err)
+			}
+			row, err := decodeStoredRowPayload(payload, table.Columns)
+			if err != nil {
+				return nil, nil, wrapStorageError(err)
+			}
+			pageRows = append(pageRows, row)
+		}
 		locators = append(locators, pageLocators...)
-		rows = append(rows, parserRowsFromStorage(pageRows)...)
+		rows = append(rows, pageRows...)
 	}
 	if uint32(len(rows)) != table.PersistedRowCount() {
 		return nil, nil, newStorageError("row count mismatch")
 	}
 	return locators, rows, nil
+}
+
+func decodeStoredRowPayload(payload []byte, columns []parser.ColumnDef) ([]parser.Value, error) {
+	if len(payload) < 2 {
+		return nil, newStorageError("invalid row data")
+	}
+	encodedColumnCount := int(binary.LittleEndian.Uint16(payload[:2]))
+	if encodedColumnCount > len(columns) {
+		return nil, newStorageError("invalid row data")
+	}
+	columnTypes := storageColumnTypes(columns)
+	row, err := storage.DecodeSlottedRow(payload, columnTypes[:encodedColumnCount])
+	if err != nil {
+		return nil, err
+	}
+	return executor.ExpandRowToSchema(parserValuesFromStorage(row), columns), nil
 }
 
 func committedTableDataPageIDs(pool *bufferpool.BufferPool, table *executor.Table) ([]storage.PageID, error) {

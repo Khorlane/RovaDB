@@ -12,3 +12,22 @@ func cloneRows(rows [][]parser.Value) [][]parser.Value {
 	}
 	return cloned
 }
+
+// ExpandRowToSchema materializes trailing columns that are absent from an older
+// row image using the current schema metadata. Existing stored values remain
+// untouched; only missing trailing columns are filled.
+func ExpandRowToSchema(row []parser.Value, columns []parser.ColumnDef) []parser.Value {
+	if len(row) >= len(columns) {
+		return row
+	}
+
+	expanded := append([]parser.Value(nil), row...)
+	for _, column := range columns[len(row):] {
+		if column.HasDefault {
+			expanded = append(expanded, column.DefaultValue)
+			continue
+		}
+		expanded = append(expanded, parser.NullValue())
+	}
+	return expanded
+}

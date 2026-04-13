@@ -1788,6 +1788,63 @@ func TestRealRollbackCloseReopenKeepsCommittedState(t *testing.T) {
 	})
 }
 
+func TestAlterTableAddColumnCloseReopenPreservesExpandedExistingRows(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT)",
+		"INSERT INTO users VALUES (1)",
+		"INSERT INTO users VALUES (2)",
+		"ALTER TABLE users ADD COLUMN nickname TEXT DEFAULT 'guest'",
+		"ALTER TABLE users ADD COLUMN active BOOL",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	rows, err := db.Query("SELECT id, nickname, active FROM users ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query(before reopen) error = %v", err)
+	}
+	if got := rows.data; len(got) != 2 || got[0][0] != 1 || got[0][1] != "guest" || got[0][2] != nil || got[1][0] != 2 || got[1][1] != "guest" || got[1][2] != nil {
+		t.Fatalf("before reopen rows = %#v, want existing rows expanded with default/null", got)
+	}
+	rows.Close()
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	rows, err = db.Query("SELECT id, nickname, active FROM users ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query(after reopen) error = %v", err)
+	}
+	if got := rows.data; len(got) != 2 || got[0][0] != 1 || got[0][1] != "guest" || got[0][2] != nil || got[1][0] != 2 || got[1][1] != "guest" || got[1][2] != nil {
+		t.Fatalf("after reopen rows = %#v, want existing rows expanded with default/null", got)
+	}
+	rows.Close()
+
+	if _, err := db.Exec("INSERT INTO users (id) VALUES (3)"); err != nil {
+		t.Fatalf("Exec(insert after reopen) error = %v", err)
+	}
+	rows, err = db.Query("SELECT id, nickname, active FROM users ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query(after reopen insert) error = %v", err)
+	}
+	if got := rows.data; len(got) != 3 || got[2][0] != 3 || got[2][1] != "guest" || got[2][2] != nil {
+		t.Fatalf("after reopen insert rows = %#v, want new row to follow updated schema defaults", got)
+	}
+	rows.Close()
+}
+
 func TestCreateTablePersistsAcrossReopen(t *testing.T) {
 	path := testDBPath(t)
 

@@ -39,6 +39,120 @@ func TestExecuteAlterTableAddColumn(t *testing.T) {
 	}
 }
 
+func TestExecuteAlterTableAddColumnAppliesNullabilityAndDefaults(t *testing.T) {
+	tests := []struct {
+		name         string
+		table        *Table
+		column       parser.ColumnDef
+		wantErr      string
+		wantRows     [][]parser.Value
+		wantRowWidth int
+	}{
+		{
+			name: "nullable without default on populated table",
+			table: &Table{
+				Name:    "users",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+				Rows:    [][]parser.Value{{parser.Int64Value(1)}, {parser.Int64Value(2)}},
+			},
+			column:       parser.ColumnDef{Name: "name", Type: parser.ColumnTypeText},
+			wantRows:     [][]parser.Value{{parser.Int64Value(1), parser.NullValue()}, {parser.Int64Value(2), parser.NullValue()}},
+			wantRowWidth: 2,
+		},
+		{
+			name: "nullable with default on populated table",
+			table: &Table{
+				Name:    "users",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+				Rows:    [][]parser.Value{{parser.Int64Value(1)}, {parser.Int64Value(2)}},
+			},
+			column:       parser.ColumnDef{Name: "name", Type: parser.ColumnTypeText, HasDefault: true, DefaultValue: parser.StringValue("ready")},
+			wantRows:     [][]parser.Value{{parser.Int64Value(1), parser.StringValue("ready")}, {parser.Int64Value(2), parser.StringValue("ready")}},
+			wantRowWidth: 2,
+		},
+		{
+			name: "not null without default on empty table",
+			table: &Table{
+				Name:    "users",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+			},
+			column:       parser.ColumnDef{Name: "active", Type: parser.ColumnTypeBool, NotNull: true},
+			wantRowWidth: 2,
+		},
+		{
+			name: "not null without default on populated table fails",
+			table: &Table{
+				Name:    "users",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+				Rows:    [][]parser.Value{{parser.Int64Value(1)}},
+			},
+			column:  parser.ColumnDef{Name: "active", Type: parser.ColumnTypeBool, NotNull: true},
+			wantErr: "execution: cannot add NOT NULL column without DEFAULT to non-empty table",
+		},
+		{
+			name: "not null without default uses persisted row count fallback",
+			table: func() *Table {
+				table := &Table{
+					Name:    "users",
+					Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+				}
+				table.SetStorageMeta(0, 1)
+				return table
+			}(),
+			column:  parser.ColumnDef{Name: "active", Type: parser.ColumnTypeBool, NotNull: true},
+			wantErr: "execution: cannot add NOT NULL column without DEFAULT to non-empty table",
+		},
+		{
+			name: "not null with default on populated table",
+			table: &Table{
+				Name:    "users",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+				Rows:    [][]parser.Value{{parser.Int64Value(1)}, {parser.Int64Value(2)}},
+			},
+			column:       parser.ColumnDef{Name: "active", Type: parser.ColumnTypeBool, NotNull: true, HasDefault: true, DefaultValue: parser.BoolValue(true)},
+			wantRows:     [][]parser.Value{{parser.Int64Value(1), parser.BoolValue(true)}, {parser.Int64Value(2), parser.BoolValue(true)}},
+			wantRowWidth: 2,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tables := map[string]*Table{"users": tc.table}
+			_, err := Execute(&parser.AlterTableAddColumnStmt{
+				TableName: "users",
+				Column:    tc.column,
+			}, tables)
+			if tc.wantErr != "" {
+				if err == nil || err.Error() != tc.wantErr {
+					t.Fatalf("Execute() error = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if len(tc.table.Columns) != tc.wantRowWidth {
+				t.Fatalf("len(table.Columns) = %d, want %d", len(tc.table.Columns), tc.wantRowWidth)
+			}
+			if len(tc.table.Rows) != len(tc.wantRows) {
+				t.Fatalf("len(table.Rows) = %d, want %d", len(tc.table.Rows), len(tc.wantRows))
+			}
+			for i := range tc.wantRows {
+				got := tc.table.Rows[i]
+				want := tc.wantRows[i]
+				if len(got) != len(want) {
+					t.Fatalf("row %d len = %d, want %d", i, len(got), len(want))
+				}
+				for j := range want {
+					if got[j] != want[j] {
+						t.Fatalf("row %d column %d = %#v, want %#v", i, j, got[j], want[j])
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestExecuteAlterTableAddKeyForms(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {
