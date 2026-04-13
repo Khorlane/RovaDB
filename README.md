@@ -167,7 +167,7 @@ See `docs/dev/ARCHITECTURAL_BOUNDARIES.md` for the authoritative boundary contra
 - explicit public transactions via `Begin`, `Tx.Exec`, `Tx.Query`, `Tx.QueryRow`, `Commit`, and `Rollback`
 - public catalog introspection via `ListTables` and `GetTableSchema`
 - shared product version via `Version()`
-- strict value support for `INT`, `TEXT`, `BOOL`, `REAL`, and `NULL`
+- strict value support for `SMALLINT`, `INT`, `BIGINT`, `TEXT`, `BOOL`, `REAL`, and `NULL`
 - narrow index-only access for eligible plain single-table `COUNT(*)` and single-column indexed projection queries
 
 ### Scope Discipline
@@ -299,7 +299,9 @@ Destructive DDL behavior:
 
 ### Supported data types
 
+- `SMALLINT`
 - `INT`
+- `BIGINT`
 - `TEXT`
 - `BOOL`
 - `REAL`
@@ -370,7 +372,9 @@ This is not a prepared statement system. Each call parses, binds, plans, and exe
 
 Supported Go argument types are:
 
-- `int`
+- `int16`
+- `int32`
+- `int64`
 - `string`
 - `bool`
 - `float64`
@@ -432,7 +436,7 @@ defer rows.Close()
 
 fmt.Println(rows.Columns())
 for rows.Next() {
-	var id int
+	var id int32
 	var name string
 	if err := rows.Scan(&id, &name); err != nil {
 		log.Fatal(err)
@@ -445,6 +449,8 @@ if err := rows.Err(); err != nil {
 ```
 
 This stores `Alice` exactly as provided, while the second row uses the schema defaults because the `INSERT` omits `name`, `active`, and `score`.
+
+For typed integer columns, public writes and `Scan` destinations must match the declared SQL width exactly: `SMALLINT` <-> `int16`, `INT` <-> `int32`, and `BIGINT` <-> `int64`. There is no generic Go `int` interchange for these typed integer columns.
 
 Explicit transactions are opt-in through the Go API. Plain `DB.Exec`, `DB.Query`, and `DB.QueryRow` keep their existing autocommit behavior when you do not call `Begin()`.
 

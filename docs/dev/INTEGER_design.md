@@ -2,9 +2,9 @@
 
 This document defines the intended design for integer semantics in RovaDB.
 
-It currently focuses on correcting the meaning of the public `INT` type and preparing the codebase for possible future support of additional integer widths.
+It originally focused on correcting the meaning of the public `INT` type and preparing the codebase for additional integer widths.
 
-For the dedicated physical-widths milestone scope, see `docs/dev/PHYSICAL_INTEGER_WIDTHS_design.md`. That note now locks the exact `SMALLINT` / `INT` / `BIGINT` mapping, physical widths, and strict write / `Scan` contract for later implementation slices.
+For the dedicated physical-widths milestone scope, see `docs/dev/PHYSICAL_INTEGER_WIDTHS_design.md`. That note now locks the exact `SMALLINT` / `INT` / `BIGINT` mapping, physical widths, and strict write / `Scan` contract for the landed implementation.
 
 It is an implementation-oriented design note. SQL syntax and user-visible statement semantics remain defined in `docs/dev/RovaDB_SQL_Language_Spec.md`.
 
@@ -46,7 +46,7 @@ That meaning should be consistent across:
 
 ## Non-Goals
 
-This document does not itself make `SMALLINT` or `BIGINT` public schema types yet.
+This document is not the controlling design note for the now-landed `SMALLINT` / `INT` / `BIGINT` public type set.
 
 The following are out of scope for the current change unless explicitly added later:
 
@@ -57,18 +57,12 @@ The following are out of scope for the current change unless explicitly added la
 
 ## Public Contract
 
-For the current public surface:
+For the original public surface corrected by this note:
 
-- `INT` is the only public integer schema type
 - `INT` means signed 32-bit integer semantics
 - values outside the supported `INT` range must fail rather than silently truncating
 
-Future direction may add:
-
-- `SMALLINT`
-- `BIGINT`
-
-But the current change should not expose those types yet. If later work proceeds, the exact multi-width contract is governed by `docs/dev/PHYSICAL_INTEGER_WIDTHS_design.md`.
+The exact landed multi-width contract is governed by `docs/dev/PHYSICAL_INTEGER_WIDTHS_design.md`.
 
 ## Affected Layers
 
@@ -157,7 +151,7 @@ This is not just an internal cleanup; it is a semantic correction.
 
 ## Future-Width Groundwork
 
-The current `INT` correction should leave light groundwork for future `SMALLINT` and `BIGINT`.
+The `INT` correction described here was intended to leave light groundwork for later `SMALLINT` and `BIGINT` support.
 
 That means:
 
@@ -165,13 +159,13 @@ That means:
 - centralize integer range validation and conversion
 - avoid hard-coding fresh assumptions that `INT` is the only width the engine will ever know about
 
-That does not mean:
+That did not mean:
 
 - introducing public multi-width SQL syntax now
 - building a large speculative type framework
 - over-designing for features not yet committed
 
-The goal is to make future width expansion feel like a contained extension rather than another semantic rewrite.
+That groundwork is now realized by the dedicated physical-width contract and implementation slices rather than by expanding this note further.
 
 ## Suggested Internal Direction
 
@@ -201,16 +195,16 @@ Implementation should include coverage for at least:
 
 ## Acceptance Criteria
 
-`kg022` is complete when:
+`kg022` was complete when:
 
 - `INT` behaves as signed 32-bit consistently across user-visible engine behavior
 - out-of-range values fail deterministically
 - parser/runtime/storage/API behavior are aligned
 - tests cover the corrected contract
-- the implementation leaves a clean path for future `SMALLINT` and `BIGINT` support without exposing them yet
+- the implementation leaves a clean path for future `SMALLINT` and `BIGINT` support
 
 ## Notes
 
 - This document is intentionally smaller than the schema/index lifecycle docs.
 - It should guide `kg022`, not replace the lightweight backlog entry.
-- If future public multi-width integer types are added, this document should either be expanded or succeeded by a broader numeric-types design note.
+- The authoritative multi-width user contract now lives in `docs/dev/PHYSICAL_INTEGER_WIDTHS_design.md`.

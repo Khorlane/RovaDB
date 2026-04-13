@@ -1,12 +1,12 @@
 # Physical Integer Widths Design
 
-This document defines the design scope for the physical integer widths milestone in RovaDB.
+This document defines the locked contract for the physical integer widths milestone in RovaDB.
 
-It is intentionally design-scope only. It locks the user-visible and storage-facing contract that later implementation slices must preserve, without changing parser behavior, storage encoding, scan behavior, or examples in this slice.
+It remains the authoritative design note for the user-visible and storage-facing contract that the landed implementation preserves.
 
 ## Problem Statement
 
-RovaDB already has an `INT` design note, but future support for multiple integer widths needs a narrower and more explicit contract before implementation begins.
+RovaDB already had an `INT` design note, but supporting multiple integer widths required a narrower and more explicit contract.
 
 Without that lock:
 
@@ -15,13 +15,13 @@ Without that lock:
 - write and `Scan` behavior could silently widen or narrow values
 - catalog metadata could collapse distinct declared integer types into one runtime assumption
 
-This milestone exists to define those boundaries before code changes begin.
+This milestone exists to define and preserve those boundaries explicitly.
 
 ## Milestone Goal
 
-Lock the exact design scope for physical integer widths so later implementation slices can add support intentionally and testably.
+Lock the exact design scope for physical integer widths so implementation can add and preserve support intentionally and testably.
 
-After this design milestone:
+The milestone contract is:
 
 - the supported integer type set is explicit
 - SQL-to-Go type mapping is explicit
@@ -158,7 +158,7 @@ Implications for later slices:
 - validation must fail clearly if durable bytes do not match the declared type expectations
 - durable metadata must remain version-aware and validation-aware
 
-This milestone does not itself change the storage format. It only locks what the later storage work must implement.
+This milestone locks the storage contract the implementation must preserve.
 
 ## Non-Goals
 
