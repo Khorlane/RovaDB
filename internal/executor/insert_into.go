@@ -2,6 +2,7 @@ package executor
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
@@ -43,10 +44,11 @@ func buildInsertRow(table *Table, columnNames []string, values []parser.Value) (
 		}
 		row := make([]parser.Value, len(table.Columns))
 		for i, value := range values {
-			if err := validateColumnValue(table, i, value); err != nil {
+			normalized, err := normalizeColumnValue(table, i, value)
+			if err != nil {
 				return nil, err
 			}
-			row[i] = value
+			row[i] = normalized
 		}
 		return row, nil
 	}
@@ -65,11 +67,12 @@ func buildInsertRow(table *Table, columnNames []string, values []parser.Value) (
 		if _, ok := seen[idx]; ok {
 			return nil, errWrongValueCount
 		}
-		if err := validateColumnValue(table, idx, values[i]); err != nil {
+		normalized, err := normalizeColumnValue(table, idx, values[i])
+		if err != nil {
 			return nil, err
 		}
 		seen[idx] = struct{}{}
-		row[idx] = values[i]
+		row[idx] = normalized
 	}
 
 	for i, column := range table.Columns {
@@ -77,10 +80,11 @@ func buildInsertRow(table *Table, columnNames []string, values []parser.Value) (
 			continue
 		}
 		if column.HasDefault {
-			if err := validateColumnValue(table, i, column.DefaultValue); err != nil {
+			normalized, err := normalizeColumnValue(table, i, column.DefaultValue)
+			if err != nil {
 				return nil, err
 			}
-			row[i] = column.DefaultValue
+			row[i] = normalized
 			continue
 		}
 		if column.NotNull {
@@ -169,7 +173,7 @@ func valueMatchesColumnType(value parser.Value, typeName string) bool {
 		return true
 	}
 	switch typeName {
-	case parser.ColumnTypeInt:
+	case parser.ColumnTypeSmallInt, parser.ColumnTypeInt, parser.ColumnTypeBigInt:
 		return value.Kind == parser.ValueKindInt64
 	case parser.ColumnTypeText:
 		return value.Kind == parser.ValueKindString
@@ -182,18 +186,53 @@ func valueMatchesColumnType(value parser.Value, typeName string) bool {
 	}
 }
 
-func validateColumnValue(table *Table, columnIndex int, value parser.Value) error {
+func normalizeColumnValue(table *Table, columnIndex int, value parser.Value) (parser.Value, error) {
 	if table == nil || columnIndex < 0 || columnIndex >= len(table.Columns) {
-		return errColumnDoesNotExist
+		return parser.Value{}, errColumnDoesNotExist
 	}
 	column := table.Columns[columnIndex]
+	normalized, err := normalizeColumnValueForDef(column, value)
+	if err != nil {
+		return parser.Value{}, err
+	}
+	if column.NotNull && normalized.Kind == parser.ValueKindNull {
+		return parser.Value{}, newNotNullConstraintError(table.Name, column.Name)
+	}
+	return normalized, nil
+}
+
+func normalizeColumnValueForDef(column parser.ColumnDef, value parser.Value) (parser.Value, error) {
 	if !valueMatchesColumnType(value, column.Type) {
-		return errTypeMismatch
+		return parser.Value{}, errTypeMismatch
 	}
-	if column.NotNull && value.Kind == parser.ValueKindNull {
-		return newNotNullConstraintError(table.Name, column.Name)
+	if value.Kind == parser.ValueKindNull {
+		return value, nil
 	}
-	return nil
+	switch column.Type {
+	case parser.ColumnTypeSmallInt:
+		return normalizeIntegerColumnValue(value, parser.BoundIntegerTypeInt16, math.MinInt16, math.MaxInt16)
+	case parser.ColumnTypeInt:
+		return normalizeIntegerColumnValue(value, parser.BoundIntegerTypeInt32, math.MinInt32, math.MaxInt32)
+	case parser.ColumnTypeBigInt:
+		return normalizeIntegerColumnValue(value, parser.BoundIntegerTypeInt64, math.MinInt64, math.MaxInt64)
+	default:
+		return value, nil
+	}
+}
+
+func normalizeIntegerColumnValue(value parser.Value, exactType parser.BoundIntegerType, minValue, maxValue int64) (parser.Value, error) {
+	if value.BoundIntegerType != parser.BoundIntegerTypeNone && value.BoundIntegerType != exactType {
+		return parser.Value{}, errTypeMismatch
+	}
+	if value.I64 < minValue || value.I64 > maxValue {
+		return parser.Value{}, errTypeMismatch
+	}
+	return parser.Int64Value(value.I64), nil
+}
+
+func validateColumnValue(table *Table, columnIndex int, value parser.Value) error {
+	_, err := normalizeColumnValue(table, columnIndex, value)
+	return err
 }
 
 func newNotNullConstraintError(tableName, columnName string) error {

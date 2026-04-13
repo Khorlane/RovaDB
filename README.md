@@ -404,11 +404,11 @@ tx, err := db.Begin()
 if err != nil {
 	log.Fatal(err)
 }
-if _, err := tx.Exec("INSERT INTO users VALUES (?, ?, ?, ?)", 1, "Alice", false, 7.5); err != nil {
+if _, err := tx.Exec("INSERT INTO users VALUES (?, ?, ?, ?)", int32(1), "Alice", false, 7.5); err != nil {
 	_ = tx.Rollback()
 	log.Fatal(err)
 }
-if _, err := tx.Exec("INSERT INTO users (id) VALUES (?)", 2); err != nil {
+if _, err := tx.Exec("INSERT INTO users (id) VALUES (?)", int32(2)); err != nil {
 	_ = tx.Rollback()
 	log.Fatal(err)
 }

@@ -22,8 +22,8 @@ func TestBindPlaceholdersSelectWhere(t *testing.T) {
 	if sel.Where == nil || len(sel.Where.Items) != 1 {
 		t.Fatalf("sel.Where = %#v, want one condition", sel.Where)
 	}
-	if sel.Where.Items[0].Condition.Right != Int64Value(1) {
-		t.Fatalf("sel.Where.Items[0].Condition.Right = %#v, want %#v", sel.Where.Items[0].Condition.Right, Int64Value(1))
+	if got, want := sel.Where.Items[0].Condition.Right, boundIntegerValue(1, BoundIntegerTypeInt); got != want {
+		t.Fatalf("sel.Where.Items[0].Condition.Right = %#v, want %#v", got, want)
 	}
 }
 
@@ -68,8 +68,8 @@ func TestBindPlaceholdersSelectWhereOrdering(t *testing.T) {
 	if sel.Where == nil || len(sel.Where.Items) != 2 {
 		t.Fatalf("sel.Where = %#v, want two conditions", sel.Where)
 	}
-	if sel.Where.Items[0].Condition.Right != Int64Value(1) {
-		t.Fatalf("first bound value = %#v, want %#v", sel.Where.Items[0].Condition.Right, Int64Value(1))
+	if got, want := sel.Where.Items[0].Condition.Right, boundIntegerValue(1, BoundIntegerTypeInt); got != want {
+		t.Fatalf("first bound value = %#v, want %#v", got, want)
 	}
 	if sel.Where.Items[1].Condition.Right != StringValue("steve") {
 		t.Fatalf("second bound value = %#v, want %#v", sel.Where.Items[1].Condition.Right, StringValue("steve"))
@@ -102,8 +102,8 @@ func TestBindPlaceholdersUpdateOrdering(t *testing.T) {
 	if update.Where == nil || len(update.Where.Items) != 1 {
 		t.Fatalf("update.Where = %#v, want one condition", update.Where)
 	}
-	if update.Where.Items[0].Condition.Right != Int64Value(1) {
-		t.Fatalf("where value = %#v, want %#v", update.Where.Items[0].Condition.Right, Int64Value(1))
+	if got, want := update.Where.Items[0].Condition.Right, boundIntegerValue(1, BoundIntegerTypeInt); got != want {
+		t.Fatalf("where value = %#v, want %#v", got, want)
 	}
 }
 
@@ -113,7 +113,10 @@ func TestBindArgumentValueSupportedTypes(t *testing.T) {
 		arg  any
 		want Value
 	}{
-		{name: "int", arg: 1, want: Int64Value(1)},
+		{name: "int", arg: 1, want: boundIntegerValue(1, BoundIntegerTypeInt)},
+		{name: "int16", arg: int16(1), want: boundIntegerValue(1, BoundIntegerTypeInt16)},
+		{name: "int32", arg: int32(1), want: boundIntegerValue(1, BoundIntegerTypeInt32)},
+		{name: "int64", arg: int64(1), want: boundIntegerValue(1, BoundIntegerTypeInt64)},
 		{name: "string", arg: "steve", want: StringValue("steve")},
 		{name: "bool true", arg: true, want: BoolValue(true)},
 		{name: "bool false", arg: false, want: BoolValue(false)},
@@ -139,7 +142,6 @@ func TestBindArgumentValueUnsupportedTypes(t *testing.T) {
 		name string
 		arg  any
 	}{
-		{name: "int64", arg: int64(1)},
 		{name: "float32", arg: float32(3.14)},
 		{name: "struct", arg: struct{}{}},
 		{name: "slice", arg: []string{"x"}},

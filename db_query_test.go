@@ -3706,10 +3706,10 @@ func TestQueryRowPlaceholderArgsReflectsUpdatedRow(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", 1, "steve"); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", int32(1), "steve"); err != nil {
 		t.Fatalf("Exec(insert with placeholders) error = %v", err)
 	}
-	if _, err := db.Exec("UPDATE users SET name = ? WHERE id = ?", "sam", 1); err != nil {
+	if _, err := db.Exec("UPDATE users SET name = ? WHERE id = ?", "sam", int32(1)); err != nil {
 		t.Fatalf("Exec(update with placeholders) error = %v", err)
 	}
 

@@ -616,7 +616,7 @@ func TestTxCommitPersistsMultiPagePhysicalStorageAcrossReopen(t *testing.T) {
 		if id == 7 {
 			name = "alice"
 		}
-		if _, err := tx.Exec("INSERT INTO users VALUES (?, ?, ?)", id, name, strings.Repeat("payload-", 110)); err != nil {
+		if _, err := tx.Exec("INSERT INTO users VALUES (?, ?, ?)", int32(id), name, strings.Repeat("payload-", 110)); err != nil {
 			t.Fatalf("Tx.Exec(insert %d) error = %v", id, err)
 		}
 	}

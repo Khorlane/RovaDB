@@ -51,10 +51,11 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 			if err != nil {
 				return 0, err
 			}
-			if err := validateColumnValue(table, assignment.index, value); err != nil {
+			normalized, err := normalizeColumnValue(table, assignment.index, value)
+			if err != nil {
 				return 0, err
 			}
-			row[assignment.index] = value
+			row[assignment.index] = normalized
 		}
 		affected++
 	}

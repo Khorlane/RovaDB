@@ -488,6 +488,176 @@ func TestExecInsertIntoRealWrongTypeRejected(t *testing.T) {
 	}
 }
 
+func TestExecInsertTypedIntegerColumnsRequireExactGoTypes(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE numbers (small_col SMALLINT, int_col INT, big_col BIGINT, name TEXT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	if _, err := db.Exec("INSERT INTO numbers VALUES (?, ?, ?, ?)", int16(11), int32(22), int64(33), "ok"); err != nil {
+		t.Fatalf("Exec(insert exact placeholder types) error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		args []any
+	}{
+		{name: "smallint rejects int32", args: []any{int32(11), int32(22), int64(33), "bad-small"}},
+		{name: "smallint rejects int64", args: []any{int64(11), int32(22), int64(33), "bad-small"}},
+		{name: "smallint rejects int", args: []any{int(11), int32(22), int64(33), "bad-small"}},
+		{name: "int rejects int16", args: []any{int16(11), int16(22), int64(33), "bad-int"}},
+		{name: "int rejects int64", args: []any{int16(11), int64(22), int64(33), "bad-int"}},
+		{name: "int rejects int", args: []any{int16(11), int(22), int64(33), "bad-int"}},
+		{name: "bigint rejects int16", args: []any{int16(11), int32(22), int16(33), "bad-big"}},
+		{name: "bigint rejects int32", args: []any{int16(11), int32(22), int32(33), "bad-big"}},
+		{name: "bigint rejects int", args: []any{int16(11), int32(22), int(33), "bad-big"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := db.Exec("INSERT INTO numbers VALUES (?, ?, ?, ?)", tc.args...)
+			var dbErr *DBError
+			if !errors.As(err, &dbErr) || dbErr.Kind != ErrExec {
+				t.Fatalf("Exec(insert) error = %v, want exec-type mismatch error", err)
+			}
+		})
+	}
+
+	rows, err := db.Query("SELECT name FROM numbers ORDER BY name")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+	assertRowsStringSequence(t, rows, "ok")
+}
+
+func TestExecUpdateTypedIntegerColumnsRequireExactGoTypes(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE numbers (id INT, small_col SMALLINT, int_col INT, big_col BIGINT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO numbers VALUES (1, 1, 2, 3)"); err != nil {
+		t.Fatalf("Exec(seed) error = %v", err)
+	}
+
+	if _, err := db.Exec(
+		"UPDATE numbers SET small_col = ?, int_col = ?, big_col = ? WHERE id = 1",
+		int16(11), int32(22), int64(33),
+	); err != nil {
+		t.Fatalf("Exec(update exact placeholder types) error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		args []any
+	}{
+		{name: "smallint rejects int32", args: []any{int32(11), int32(22), int64(33), int32(1)}},
+		{name: "smallint rejects int", args: []any{int(11), int32(22), int64(33), int32(1)}},
+		{name: "int rejects int16", args: []any{int16(11), int16(22), int64(33), int32(1)}},
+		{name: "int rejects int64", args: []any{int16(11), int64(22), int64(33), int32(1)}},
+		{name: "bigint rejects int32", args: []any{int16(11), int32(22), int32(33), int32(1)}},
+		{name: "bigint rejects int", args: []any{int16(11), int32(22), int(33), int32(1)}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := db.Exec("UPDATE numbers SET small_col = ?, int_col = ?, big_col = ? WHERE id = ?", tc.args...)
+			var dbErr *DBError
+			if !errors.As(err, &dbErr) || dbErr.Kind != ErrExec {
+				t.Fatalf("Exec(update) error = %v, want exec-type mismatch error", err)
+			}
+		})
+	}
+
+	rows, err := db.Query("SELECT small_col, int_col, big_col FROM numbers WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+	var small int
+	var regular int
+	var big int
+	if err := rows.Scan(&small, &regular, &big); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if small != 11 || regular != 22 || big != 33 {
+		t.Fatalf("row = (%d, %d, %d), want (11, 22, 33)", small, regular, big)
+	}
+}
+
+func TestExecEngineOwnedIntegerLiteralsAndDefaultsRemainValidForTypedIntegerWrites(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE numbers (id INT, small_col SMALLINT DEFAULT 7, int_col INT DEFAULT 8, big_col BIGINT DEFAULT 9)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO numbers (id) VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert defaults) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO numbers VALUES (2, 12, 34, 56)"); err != nil {
+		t.Fatalf("Exec(insert SQL literals) error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create users) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1)"); err != nil {
+		t.Fatalf("Exec(seed users) error = %v", err)
+	}
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN age SMALLINT NOT NULL DEFAULT 5"); err != nil {
+		t.Fatalf("Exec(alter add column) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT small_col, int_col, big_col FROM numbers ORDER BY id")
+	if err != nil {
+		t.Fatalf("Query(numbers) error = %v", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("numbers first Next() = false, want true")
+	}
+	var small1, int1, big1 int
+	if err := rows.Scan(&small1, &int1, &big1); err != nil {
+		t.Fatalf("Scan(default row) error = %v", err)
+	}
+	if small1 != 7 || int1 != 8 || big1 != 9 {
+		t.Fatalf("default row = (%d, %d, %d), want (7, 8, 9)", small1, int1, big1)
+	}
+	if !rows.Next() {
+		t.Fatal("numbers second Next() = false, want true")
+	}
+	var small2, int2, big2 int
+	if err := rows.Scan(&small2, &int2, &big2); err != nil {
+		t.Fatalf("Scan(literal row) error = %v", err)
+	}
+	if small2 != 12 || int2 != 34 || big2 != 56 {
+		t.Fatalf("literal row = (%d, %d, %d), want (12, 34, 56)", small2, int2, big2)
+	}
+
+	userRows, err := db.Query("SELECT age FROM users")
+	if err != nil {
+		t.Fatalf("Query(users) error = %v", err)
+	}
+	defer userRows.Close()
+	assertRowsIntSequence(t, userRows, 5)
+}
+
 func TestExecMutationPathsPreserveIndexedVisibilityAcrossReopen(t *testing.T) {
 	path := testDBPath(t)
 
@@ -511,7 +681,7 @@ func TestExecMutationPathsPreserveIndexedVisibilityAcrossReopen(t *testing.T) {
 		if id == 1 {
 			name = "alice"
 		}
-		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", id, name, strings.Repeat("seed-", 90)); err != nil {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", int32(id), name, strings.Repeat("seed-", 90)); err != nil {
 			t.Fatalf("Exec(insert %d) error = %v", id, err)
 		}
 	}
@@ -829,7 +999,7 @@ func TestExecAPIPlaceholderArgsInsert(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec("INSERT INTO users VALUES (?, 'alice')", 1); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (?, 'alice')", int32(1)); err != nil {
 		t.Fatalf("Exec(insert with placeholder) error = %v", err)
 	}
 
@@ -855,7 +1025,7 @@ func TestExecAPIPlaceholderArgsInsertReal(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE metrics (id INT, score REAL)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec("INSERT INTO metrics VALUES (?, ?)", 1, 3.14); err != nil {
+	if _, err := db.Exec("INSERT INTO metrics VALUES (?, ?)", int32(1), 3.14); err != nil {
 		t.Fatalf("Exec(insert with placeholders) error = %v", err)
 	}
 
@@ -885,7 +1055,7 @@ func TestExecAPIPlaceholderArgsUpdate(t *testing.T) {
 		t.Fatalf("Exec(insert) error = %v", err)
 	}
 
-	result, err := db.Exec("UPDATE users SET name = ? WHERE id = ?", "sam", 1)
+	result, err := db.Exec("UPDATE users SET name = ? WHERE id = ?", "sam", int32(1))
 	if err != nil {
 		t.Fatalf("Exec(update with placeholders) error = %v", err)
 	}

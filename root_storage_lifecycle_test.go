@@ -1166,7 +1166,7 @@ func TestCheckpointFailureAfterRelocationReopensWithCurrentIndexLocator(t *testi
 		if id == 1 {
 			name = "alice"
 		}
-		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", id, name, strings.Repeat("seed-", 100)); err != nil {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", int32(id), name, strings.Repeat("seed-", 100)); err != nil {
 			t.Fatalf("Exec(insert %d) error = %v", id, err)
 		}
 	}
@@ -1245,7 +1245,7 @@ func TestCheckpointFailureAfterDropTableReopensWithFreedPhysicalPages(t *testing
 		if id == 7 {
 			name = "alice"
 		}
-		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", id, name, strings.Repeat("payload-", 110)); err != nil {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", int32(id), name, strings.Repeat("payload-", 110)); err != nil {
 			t.Fatalf("Exec(insert %d) error = %v", id, err)
 		}
 	}
@@ -5223,13 +5223,13 @@ func TestLifecycleBoundWritesCloseReopenRemainCorrect(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, active BOOL)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
-	if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", 1, "alice", true); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", int32(1), "alice", true); err != nil {
 		t.Fatalf("Exec(insert 1) error = %v", err)
 	}
-	if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", 2, "bob", false); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", int32(2), "bob", false); err != nil {
 		t.Fatalf("Exec(insert 2) error = %v", err)
 	}
-	if _, err := db.Exec("UPDATE users SET name = ?, active = ? WHERE id = ?", "bobby", true, 2); err != nil {
+	if _, err := db.Exec("UPDATE users SET name = ?, active = ? WHERE id = ?", "bobby", true, int32(2)); err != nil {
 		t.Fatalf("Exec(update) error = %v", err)
 	}
 	if err := db.Close(); err != nil {
@@ -7581,7 +7581,7 @@ func TestPhysicalStorageLayerMilestoneLifecycle(t *testing.T) {
 			name = "target"
 		}
 		note := strings.Repeat("seed-", 35)
-		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", id, name, note); err != nil {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", int32(id), name, note); err != nil {
 			t.Fatalf("Exec(insert %d) error = %v", id, err)
 		}
 	}
@@ -7674,7 +7674,7 @@ func TestPhysicalStoragePolishMilestoneLifecycleAndDiagnostics(t *testing.T) {
 		case 2:
 			name = "red"
 		}
-		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", id, name, strings.Repeat("payload-", 110)); err != nil {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", int32(id), name, strings.Repeat("payload-", 110)); err != nil {
 			t.Fatalf("Exec(insert %d) error = %v", id, err)
 		}
 	}
@@ -8772,7 +8772,7 @@ func TestUpdateGrowthRelocatesRowAndPreservesIndexReadsAcrossReopen(t *testing.T
 			name = "alice"
 		}
 		note := strings.Repeat("x", 120)
-		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", id, name, note); err != nil {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", int32(id), name, note); err != nil {
 			t.Fatalf("Exec(insert %d) error = %v", id, err)
 		}
 	}
@@ -8846,7 +8846,7 @@ func TestDeleteRewriteReclaimsSupersededPhysicalPages(t *testing.T) {
 		t.Fatalf("Exec(create table) error = %v", err)
 	}
 	for id := 1; id <= 30; id++ {
-		if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", id, strings.Repeat("payload-", 120)); err != nil {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", int32(id), strings.Repeat("payload-", 120)); err != nil {
 			t.Fatalf("Exec(insert %d) error = %v", id, err)
 		}
 	}
@@ -8914,7 +8914,7 @@ func TestDeleteAfterRelocationAndKeyReuseLeavesNoStaleIndexVisibility(t *testing
 		if id == 1 {
 			name = "alice"
 		}
-		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", id, name, strings.Repeat("seed-", 90)); err != nil {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", int32(id), name, strings.Repeat("seed-", 90)); err != nil {
 			t.Fatalf("Exec(insert %d) error = %v", id, err)
 		}
 	}
@@ -8986,7 +8986,7 @@ func TestMultiPageMutationIndexChurnAcrossReopenKeepsOnlyCurrentRowsVisible(t *t
 		case 2:
 			name = "red"
 		}
-		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", id, name, strings.Repeat("payload-", 110)); err != nil {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", int32(id), name, strings.Repeat("payload-", 110)); err != nil {
 			t.Fatalf("Exec(insert %d) error = %v", id, err)
 		}
 	}

@@ -12,17 +12,25 @@ func executeAlterTableAddColumn(stmt *parser.AlterTableAddColumnStmt, tables map
 	if !ok {
 		return 0, newTableNotFoundError(stmt.TableName)
 	}
+	column := stmt.Column
 
 	for _, column := range table.Columns {
 		if column.Name == stmt.Column.Name {
 			return 0, errColumnDoesNotExist
 		}
 	}
-	if stmt.Column.NotNull && !stmt.Column.HasDefault && tableHasRows(table) {
+	if column.NotNull && !column.HasDefault && tableHasRows(table) {
 		return 0, newExecError("cannot add NOT NULL column without DEFAULT to non-empty table")
 	}
+	if column.HasDefault {
+		normalized, err := normalizeColumnValueForDef(column, column.DefaultValue)
+		if err != nil {
+			return 0, err
+		}
+		column.DefaultValue = normalized
+	}
 
-	table.Columns = append(table.Columns, stmt.Column)
+	table.Columns = append(table.Columns, column)
 	for i := range table.Rows {
 		table.Rows[i] = ExpandRowToSchema(table.Rows[i], table.Columns)
 	}

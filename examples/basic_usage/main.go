@@ -25,7 +25,7 @@ func main() {
 		log.Fatal(err)
 	}
 	for _, user := range []struct {
-		id     int
+		id     int32
 		name   string
 		active bool
 		score  float64
@@ -37,7 +37,7 @@ func main() {
 			log.Fatal(err)
 		}
 	}
-	if _, err := tx.Exec("INSERT INTO users (id) VALUES (?)", 2); err != nil {
+	if _, err := tx.Exec("INSERT INTO users (id) VALUES (?)", int32(2)); err != nil {
 		_ = tx.Rollback()
 		log.Fatal(err)
 	}

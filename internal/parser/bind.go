@@ -216,6 +216,12 @@ func bindArgumentValue(arg any) (Value, error) {
 			return Value{}, newBindError(err.Error())
 		}
 		return value, nil
+	case int16:
+		return boundIntegerValue(int64(v), BoundIntegerTypeInt16), nil
+	case int32:
+		return boundIntegerValue(int64(v), BoundIntegerTypeInt32), nil
+	case int64:
+		return boundIntegerValue(v, BoundIntegerTypeInt64), nil
 	case string:
 		return StringValue(v), nil
 	case bool:

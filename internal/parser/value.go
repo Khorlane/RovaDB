@@ -19,6 +19,19 @@ const (
 	ValueKindPlaceholder
 )
 
+// BoundIntegerType records the original Go integer type for placeholder-bound
+// public arguments so write-path validation can require exact integer widths
+// without changing engine-owned SQL literal behavior.
+type BoundIntegerType int
+
+const (
+	BoundIntegerTypeNone BoundIntegerType = iota
+	BoundIntegerTypeInt
+	BoundIntegerTypeInt16
+	BoundIntegerTypeInt32
+	BoundIntegerTypeInt64
+)
+
 /*
 --- BOOL DESIGN (LOCKED) ---
 
@@ -60,6 +73,7 @@ type Value struct {
 	Str              string
 	Bool             bool
 	F64              float64
+	BoundIntegerType BoundIntegerType
 	PlaceholderIndex int
 }
 
@@ -71,6 +85,10 @@ func NullValue() Value {
 // Int64Value builds an int64 Value.
 func Int64Value(v int64) Value {
 	return Value{Kind: ValueKindInt64, I64: v}
+}
+
+func boundIntegerValue(v int64, boundType BoundIntegerType) Value {
+	return Value{Kind: ValueKindInt64, I64: v, BoundIntegerType: boundType}
 }
 
 // PublicIntValue builds a public INT value and enforces the signed 32-bit INT
@@ -174,5 +192,6 @@ func bindPublicIntValue(v int) (Value, error) {
 	if err != nil {
 		return Value{}, errors.New("integer argument out of range for INT")
 	}
+	value.BoundIntegerType = BoundIntegerTypeInt
 	return value, nil
 }

@@ -252,7 +252,7 @@ func TestStage9APIPositionalArgsExampleFlow(t *testing.T) {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
 	for _, user := range []struct {
-		id     int
+		id     int32
 		name   string
 		active bool
 	}{

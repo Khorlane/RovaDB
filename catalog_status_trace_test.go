@@ -538,7 +538,7 @@ func TestExecAPICreateIndexRejectsExistingOversizedIndexedText(t *testing.T) {
 			t.Fatalf("Exec(%q) error = %v", sql, err)
 		}
 	}
-	if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", 1, tooLarge); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", int32(1), tooLarge); err != nil {
 		t.Fatalf("Exec(insert oversized plain text before indexing) error = %v", err)
 	}
 
@@ -558,7 +558,7 @@ func TestExecAPICreateUniqueIndexRejectsExistingOversizedIndexedText(t *testing.
 	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create table) error = %v", err)
 	}
-	if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", 1, tooLarge); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", int32(1), tooLarge); err != nil {
 		t.Fatalf("Exec(insert oversized plain text before indexing) error = %v", err)
 	}
 
@@ -578,7 +578,7 @@ func TestExecAPICreateIndexRejectsExistingOversizedMultiColumnIndexedText(t *tes
 	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, bio TEXT)"); err != nil {
 		t.Fatalf("Exec(create table) error = %v", err)
 	}
-	if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", 1, "alice", tooLarge); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?, ?)", int32(1), "alice", tooLarge); err != nil {
 		t.Fatalf("Exec(insert oversized plain text before indexing) error = %v", err)
 	}
 
@@ -598,7 +598,7 @@ func TestExecAPICreateIndexAllowsIndexedTextAt512Bytes(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT)"); err != nil {
 		t.Fatalf("Exec(create table) error = %v", err)
 	}
-	if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", 1, atLimit); err != nil {
+	if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", int32(1), atLimit); err != nil {
 		t.Fatalf("Exec(insert at limit) error = %v", err)
 	}
 	if _, err := db.Exec("CREATE INDEX idx_users_name ON users (name)"); err != nil {
@@ -2005,7 +2005,7 @@ func TestCheckEngineConsistencyTracksOwnedPhysicalPages(t *testing.T) {
 		t.Fatalf("Exec(create table) error = %v", err)
 	}
 	for id := 1; id <= 24; id++ {
-		if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", id, strings.Repeat("payload-", 110)); err != nil {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", int32(id), strings.Repeat("payload-", 110)); err != nil {
 			t.Fatalf("Exec(insert %d) error = %v", id, err)
 		}
 	}
@@ -2393,7 +2393,7 @@ func TestSchemaInventoryIncludesPhysicalStorageCountsForOwnedPages(t *testing.T)
 		t.Fatalf("Exec(create table) error = %v", err)
 	}
 	for id := 1; id <= 24; id++ {
-		if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", id, strings.Repeat("payload-", 110)); err != nil {
+		if _, err := db.Exec("INSERT INTO users VALUES (?, ?)", int32(id), strings.Repeat("payload-", 110)); err != nil {
 			t.Fatalf("Exec(insert %d) error = %v", id, err)
 		}
 	}
