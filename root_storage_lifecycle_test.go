@@ -36,8 +36,8 @@ func TestQueryReloadsRowsFromStorageInsteadOfStaleTableCache(t *testing.T) {
 	}
 
 	db.tables["users"].Rows = [][]parser.Value{
-		{parser.Int64Value(99), parser.StringValue("stale-a")},
-		{parser.Int64Value(100), parser.StringValue("stale-b")},
+		{parser.IntValue(99), parser.StringValue("stale-a")},
+		{parser.IntValue(100), parser.StringValue("stale-b")},
 	}
 
 	rows, err := db.Query("SELECT id, name FROM users ORDER BY id")
@@ -532,7 +532,7 @@ func TestStageDirtyStateUsesPrivateFramesAndLeavesCommittedReadUnchanged(t *test
 	if err := db.loadRowsIntoTables(stagedTables, "t"); err != nil {
 		t.Fatalf("loadRowsIntoTables() error = %v", err)
 	}
-	stagedTables["t"].Rows[0][0] = parser.Int64Value(2)
+	stagedTables["t"].Rows[0][0] = parser.IntValue(2)
 
 	if err := db.applyStagedTableRewrite(stagedTables, "t"); err != nil {
 		t.Fatalf("applyStagedTableRewrite() error = %v", err)
@@ -676,7 +676,7 @@ func TestRollbackDiscardsPrivatePagesAndFreshWriteRecreatesFromCommitted(t *test
 	if err := db.loadRowsIntoTables(stagedTables, "t"); err != nil {
 		t.Fatalf("loadRowsIntoTables() error = %v", err)
 	}
-	stagedTables["t"].Rows[0][0] = parser.Int64Value(2)
+	stagedTables["t"].Rows[0][0] = parser.IntValue(2)
 	if err := db.applyStagedTableRewrite(stagedTables, "t"); err != nil {
 		t.Fatalf("applyStagedTableRewrite() error = %v", err)
 	}
@@ -1382,7 +1382,7 @@ func TestApplyErrorTriggersRollback(t *testing.T) {
 			return err
 		}
 		table := stagedTables["t"]
-		table.Rows = append(table.Rows, []parser.Value{parser.Int64Value(2)})
+		table.Rows = append(table.Rows, []parser.Value{parser.IntValue(2)})
 		table.SetStorageMeta(table.RootPageID(), uint32(len(table.Rows)))
 
 		tablePageData, err := storage.BuildSlottedTablePageData(uint32(table.RootPageID()), storageColumnTypes(table.Columns), parserRowsToStorage(table.Rows))
@@ -1493,7 +1493,7 @@ func TestRollbackAfterFailedCommitRestoresState(t *testing.T) {
 			return err
 		}
 		table := stagedTables["t"]
-		table.Rows[0][0] = parser.Int64Value(99)
+		table.Rows[0][0] = parser.IntValue(99)
 		if err := db.applyStagedTableRewrite(stagedTables, "t"); err != nil {
 			return err
 		}
@@ -1613,7 +1613,7 @@ func TestSuccessfulRollbackLeavesNoTxnAndNoTracking(t *testing.T) {
 			return err
 		}
 		table := stagedTables["t"]
-		table.Rows[0][0] = parser.Int64Value(2)
+		table.Rows[0][0] = parser.IntValue(2)
 		if err := db.applyStagedTableRewrite(stagedTables, "t"); err != nil {
 			return err
 		}
@@ -4906,7 +4906,7 @@ func TestOpenRejectsExactStorageRowCountMismatch(t *testing.T) {
 
 	rootPage := pager.NewPage()
 	storage.InitTableRootPage(rootPage)
-	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.Int64Value(1)}), []uint8{storage.CatalogColumnTypeInt})
+	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.IntValue(1)}), []uint8{storage.CatalogColumnTypeInt})
 	if err != nil {
 		t.Fatalf("EncodeRow() error = %v", err)
 	}
@@ -6842,7 +6842,7 @@ func TestOpenIgnoresTrailingUncommittedWALFrames(t *testing.T) {
 		t.Fatalf("pager.Get(data) error = %v", err)
 	}
 	uncommitted := append([]byte(nil), rootPage.Data()...)
-	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.Int64Value(2)}), []uint8{storage.CatalogColumnTypeInt})
+	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.IntValue(2)}), []uint8{storage.CatalogColumnTypeInt})
 	if err != nil {
 		t.Fatalf("EncodeSlottedRow() error = %v", err)
 	}
@@ -6972,7 +6972,7 @@ func TestOpenReplaysMultipleCommittedWALTransactions(t *testing.T) {
 		t.Fatalf("pager.Get(root) error = %v", err)
 	}
 	older := storage.InitializeTablePage(uint32(rootPageID))
-	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.Int64Value(1)}), []uint8{storage.CatalogColumnTypeInt})
+	row, err := storage.EncodeSlottedRow(storageValuesFromParser([]parser.Value{parser.IntValue(1)}), []uint8{storage.CatalogColumnTypeInt})
 	if err != nil {
 		t.Fatalf("EncodeSlottedRow() error = %v", err)
 	}

@@ -1,6 +1,7 @@
 package rovadb
 
 import (
+	"math"
 	"sort"
 
 	"github.com/Khorlane/RovaDB/internal/executor"
@@ -258,16 +259,24 @@ func buildSystemCatalogRows(tables map[string]*executor.Table) ([][]parser.Value
 	sysIndexColumns := make([][]parser.Value, 0)
 
 	for _, table := range userTables {
+		tableIDValue, err := systemCatalogIntValue(int64(table.TableID))
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
 		sysTables = append(sysTables, []parser.Value{
-			parser.Int64Value(int64(table.TableID)),
+			tableIDValue,
 			parser.StringValue(table.Name),
 		})
 		for i, column := range table.Columns {
+			ordinalValue, err := systemCatalogIntValue(int64(i + 1))
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
 			sysColumns = append(sysColumns, []parser.Value{
-				parser.Int64Value(int64(table.TableID)),
+				tableIDValue,
 				parser.StringValue(column.Name),
 				parser.StringValue(column.Type),
-				parser.Int64Value(int64(i + 1)),
+				ordinalValue,
 			})
 		}
 
@@ -279,21 +288,36 @@ func buildSystemCatalogRows(tables map[string]*executor.Table) ([][]parser.Value
 			if indexDef.IndexID == 0 {
 				return nil, nil, nil, nil, newStorageError("corrupted catalog page")
 			}
+			indexIDValue, err := systemCatalogIntValue(int64(indexDef.IndexID))
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
 			sysIndexes = append(sysIndexes, []parser.Value{
-				parser.Int64Value(int64(indexDef.IndexID)),
+				indexIDValue,
 				parser.StringValue(indexDef.Name),
-				parser.Int64Value(int64(table.TableID)),
+				tableIDValue,
 				parser.BoolValue(indexDef.Unique),
 			})
 			for i, indexColumn := range indexDef.Columns {
+				ordinalValue, err := systemCatalogIntValue(int64(i + 1))
+				if err != nil {
+					return nil, nil, nil, nil, err
+				}
 				sysIndexColumns = append(sysIndexColumns, []parser.Value{
-					parser.Int64Value(int64(indexDef.IndexID)),
+					indexIDValue,
 					parser.StringValue(indexColumn.Name),
-					parser.Int64Value(int64(i + 1)),
+					ordinalValue,
 				})
 			}
 		}
 	}
 
 	return sysTables, sysColumns, sysIndexes, sysIndexColumns, nil
+}
+
+func systemCatalogIntValue(v int64) (parser.Value, error) {
+	if v < math.MinInt32 || v > math.MaxInt32 {
+		return parser.Value{}, newStorageError("corrupted catalog page")
+	}
+	return parser.IntValue(int32(v)), nil
 }

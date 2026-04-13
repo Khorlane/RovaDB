@@ -659,7 +659,7 @@ func TestEncodeSlottedRowRejectsTextLengthOverflow(t *testing.T) {
 }
 
 func TestEncodeSlottedRowRejectsOutOfRangeInt(t *testing.T) {
-	_, err := EncodeSlottedRow([]Value{Int64Value(math.MaxInt32 + 1)}, []uint8{CatalogColumnTypeInt})
+	_, err := EncodeSlottedRow([]Value{BigIntValue(math.MaxInt32 + 1)}, []uint8{CatalogColumnTypeInt})
 	if !errors.Is(err, errInvalidRowData) {
 		t.Fatalf("EncodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
 	}
@@ -757,9 +757,65 @@ func TestEncodeSlottedRowUsesDeclaredIntegerWidths(t *testing.T) {
 }
 
 func TestEncodeSlottedRowRejectsOutOfRangeSmallInt(t *testing.T) {
-	_, err := EncodeSlottedRow([]Value{Int64Value(math.MaxInt16 + 1)}, []uint8{CatalogColumnTypeSmallInt})
+	_, err := EncodeSlottedRow([]Value{IntValue(math.MaxInt16 + 1)}, []uint8{CatalogColumnTypeSmallInt})
 	if !errors.Is(err, errInvalidRowData) {
 		t.Fatalf("EncodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestEncodeSlottedRowRejectsIntegerLiteralForTypedIntegerColumn(t *testing.T) {
+	_, err := EncodeSlottedRow([]Value{IntegerLiteralValue(7)}, []uint8{CatalogColumnTypeInt})
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("EncodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestEncodeDecodeSlottedRowMixedPreservesTypedIntegersAndNulls(t *testing.T) {
+	values := []Value{
+		SmallIntValue(7),
+		NullValue(),
+		IntValue(8),
+		StringValue("alice"),
+		BigIntValue(9),
+		BoolValue(true),
+		RealValue(1.5),
+	}
+	columnTypes := []uint8{
+		CatalogColumnTypeSmallInt,
+		CatalogColumnTypeText,
+		CatalogColumnTypeInt,
+		CatalogColumnTypeText,
+		CatalogColumnTypeBigInt,
+		CatalogColumnTypeBool,
+		CatalogColumnTypeReal,
+	}
+
+	encoded, err := EncodeSlottedRow(values, columnTypes)
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+
+	decoded, err := DecodeSlottedRow(encoded, columnTypes)
+	if err != nil {
+		t.Fatalf("DecodeSlottedRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+	for i, kind := range []ValueKind{
+		ValueKindSmallInt,
+		ValueKindNull,
+		ValueKindInt,
+		ValueKindString,
+		ValueKindBigInt,
+		ValueKindBool,
+		ValueKindReal,
+	} {
+		if decoded[i].Kind != kind {
+			t.Fatalf("decoded[%d].Kind = %v, want %v", i, decoded[i].Kind, kind)
+		}
+		if decoded[i].Kind == ValueKindIntegerLiteral {
+			t.Fatalf("decoded[%d] = %#v, want typed schema-aware value", i, decoded[i])
+		}
 	}
 }
 

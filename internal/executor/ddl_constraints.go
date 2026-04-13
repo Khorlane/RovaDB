@@ -20,6 +20,17 @@ func buildCreateTableDefinition(stmt *parser.CreateTableStmt, tables map[string]
 		TableID: nextCreateTableID(tables),
 		Columns: append([]parser.ColumnDef(nil), stmt.Columns...),
 	}
+	for i, column := range table.Columns {
+		if !column.HasDefault {
+			continue
+		}
+		normalized, err := normalizeColumnValueForDef(column, column.DefaultValue)
+		if err != nil {
+			return nil, err
+		}
+		column.DefaultValue = normalized
+		table.Columns[i] = column
+	}
 
 	nextIndexID := nextCreateIndexID(tables)
 	if stmt.PrimaryKey != nil {

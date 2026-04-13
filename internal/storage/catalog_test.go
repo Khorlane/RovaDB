@@ -263,6 +263,60 @@ func TestCatalogRoundTripPreservesColumnNullabilityAndDefaults(t *testing.T) {
 	}
 }
 
+func TestCatalogRoundTripPreservesTypedIntegerDefaults(t *testing.T) {
+	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_integer_defaults.db"))
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+
+	want := &CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "numbers",
+				TableID:    1,
+				RootPageID: 1,
+				Columns: []CatalogColumn{
+					{Name: "small_col", Type: CatalogColumnTypeSmallInt, HasDefault: true, DefaultValue: SmallIntValue(7)},
+					{Name: "int_col", Type: CatalogColumnTypeInt, HasDefault: true, DefaultValue: IntValue(8)},
+					{Name: "big_col", Type: CatalogColumnTypeBigInt, HasDefault: true, DefaultValue: BigIntValue(9)},
+				},
+			},
+		},
+	}
+	if err := SaveCatalog(pager, want); err != nil {
+		t.Fatalf("SaveCatalog() error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	reopenPager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() reload error = %v", err)
+	}
+	got, err := LoadCatalog(reopenPager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+
+	columns := got.Tables[0].Columns
+	wantDefaults := []Value{SmallIntValue(7), IntValue(8), BigIntValue(9)}
+	for i := range wantDefaults {
+		if !columns[i].HasDefault || columns[i].DefaultValue != wantDefaults[i] {
+			t.Fatalf("columns[%d] = %#v, want default %#v", i, columns[i], wantDefaults[i])
+		}
+		if columns[i].DefaultValue.Kind == ValueKindIntegerLiteral {
+			t.Fatalf("columns[%d].DefaultValue = %#v, want exact typed integer default", i, columns[i].DefaultValue)
+		}
+	}
+}
+
 func TestSaveCatalogRejectsInconsistentColumnDefaultMetadata(t *testing.T) {
 	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_invalid_defaults.db"))
 	if err != nil {
@@ -290,6 +344,14 @@ func TestSaveCatalogRejectsInconsistentColumnDefaultMetadata(t *testing.T) {
 		{
 			name:   "type mismatch",
 			column: CatalogColumn{Name: "active", Type: CatalogColumnTypeBool, HasDefault: true, DefaultValue: Int64Value(1)},
+		},
+		{
+			name:   "integer literal default is not exact typed int",
+			column: CatalogColumn{Name: "id", Type: CatalogColumnTypeInt, HasDefault: true, DefaultValue: Int64Value(1)},
+		},
+		{
+			name:   "wrong typed integer width",
+			column: CatalogColumn{Name: "id", Type: CatalogColumnTypeInt, HasDefault: true, DefaultValue: BigIntValue(1)},
 		},
 	}
 

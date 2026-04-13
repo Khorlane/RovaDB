@@ -563,8 +563,14 @@ func catalogDefaultValueMatchesColumnType(columnType uint8, value Value) bool {
 	switch value.Kind {
 	case ValueKindNull:
 		return true
-	case ValueKindIntegerLiteral, ValueKindSmallInt, ValueKindInt, ValueKindBigInt:
-		return catalogColumnTypeIsInteger(columnType)
+	case ValueKindSmallInt:
+		return columnType == CatalogColumnTypeSmallInt
+	case ValueKindInt:
+		return columnType == CatalogColumnTypeInt
+	case ValueKindBigInt:
+		return columnType == CatalogColumnTypeBigInt
+	case ValueKindIntegerLiteral:
+		return false
 	case ValueKindString:
 		return columnType == CatalogColumnTypeText
 	case ValueKindBool:

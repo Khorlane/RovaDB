@@ -151,24 +151,48 @@ func EncodeSlottedRow(values []Value, columnTypes []uint8) ([]byte, error) {
 			continue
 		}
 
-		switch value.Kind {
-		case ValueKindIntegerLiteral, ValueKindSmallInt, ValueKindInt, ValueKindBigInt:
-			var err error
-			buf, err = appendSlottedIntegerValue(buf, columnTypes[i], value.IntegerValue())
-			if err != nil {
+		switch columnTypes[i] {
+		case CatalogColumnTypeSmallInt:
+			if value.Kind != ValueKindSmallInt {
 				return nil, errInvalidRowData
 			}
-		case ValueKindBool:
+			var raw [2]byte
+			binary.LittleEndian.PutUint16(raw[:], uint16(value.I16))
+			buf = append(buf, raw[:]...)
+		case CatalogColumnTypeInt:
+			if value.Kind != ValueKindInt {
+				return nil, errInvalidRowData
+			}
+			var raw [4]byte
+			binary.LittleEndian.PutUint32(raw[:], uint32(value.I32))
+			buf = append(buf, raw[:]...)
+		case CatalogColumnTypeBigInt:
+			if value.Kind != ValueKindBigInt {
+				return nil, errInvalidRowData
+			}
+			var raw [8]byte
+			binary.LittleEndian.PutUint64(raw[:], uint64(value.I64))
+			buf = append(buf, raw[:]...)
+		case CatalogColumnTypeBool:
+			if value.Kind != ValueKindBool {
+				return nil, errInvalidRowData
+			}
 			if value.Bool {
 				buf = append(buf, 1)
 			} else {
 				buf = append(buf, 0)
 			}
-		case ValueKindReal:
+		case CatalogColumnTypeReal:
+			if value.Kind != ValueKindReal {
+				return nil, errInvalidRowData
+			}
 			var raw [8]byte
 			binary.LittleEndian.PutUint64(raw[:], math.Float64bits(value.F64))
 			buf = append(buf, raw[:]...)
-		case ValueKindString:
+		case CatalogColumnTypeText:
+			if value.Kind != ValueKindString {
+				return nil, errInvalidRowData
+			}
 			text := []byte(value.Str)
 			if len(text) > math.MaxUint16 {
 				return nil, errInvalidRowData
@@ -278,31 +302,6 @@ func DecodeSlottedRow(data []byte, columnTypes []uint8) ([]Value, error) {
 		return nil, errInvalidRowData
 	}
 	return values, nil
-}
-
-func appendSlottedIntegerValue(buf []byte, columnType uint8, value int64) ([]byte, error) {
-	switch columnType {
-	case CatalogColumnTypeSmallInt:
-		if value < math.MinInt16 || value > math.MaxInt16 {
-			return nil, errInvalidRowData
-		}
-		var raw [2]byte
-		binary.LittleEndian.PutUint16(raw[:], uint16(int16(value)))
-		return append(buf, raw[:]...), nil
-	case CatalogColumnTypeInt:
-		if value < math.MinInt32 || value > math.MaxInt32 {
-			return nil, errInvalidRowData
-		}
-		var raw [4]byte
-		binary.LittleEndian.PutUint32(raw[:], uint32(int32(value)))
-		return append(buf, raw[:]...), nil
-	case CatalogColumnTypeBigInt:
-		var raw [8]byte
-		binary.LittleEndian.PutUint64(raw[:], uint64(value))
-		return append(buf, raw[:]...), nil
-	default:
-		return nil, errInvalidRowData
-	}
 }
 
 func publicIntInRange(v int64) bool {

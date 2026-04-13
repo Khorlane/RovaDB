@@ -424,8 +424,8 @@ func TestSlotLocatorRejectsInvalidSlotIndex(t *testing.T) {
 
 func TestTablePageLocators(t *testing.T) {
 	page, err := BuildSlottedTablePageData(8, []uint8{CatalogColumnTypeInt}, [][]Value{
-		{Int64Value(1)},
-		{Int64Value(2)},
+		{IntValue(1)},
+		{IntValue(2)},
 	})
 	if err != nil {
 		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
@@ -553,7 +553,7 @@ func TestBuildSlottedTablePageDataOverflow(t *testing.T) {
 
 func TestReadSlottedRowsFromTablePageDataPadsTrailingNulls(t *testing.T) {
 	page, err := BuildSlottedTablePageData(11, []uint8{CatalogColumnTypeInt, CatalogColumnTypeText}, [][]Value{
-		{Int64Value(1), StringValue("alice")},
+		{IntValue(1), StringValue("alice")},
 	})
 	if err != nil {
 		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
@@ -580,7 +580,7 @@ func TestReadSlottedRowsFromTablePageDataPadsTrailingNulls(t *testing.T) {
 
 func TestReadSlottedRowsFromTablePageDataRejectsTruncatedPayload(t *testing.T) {
 	page, err := BuildSlottedTablePageData(12, []uint8{CatalogColumnTypeInt}, [][]Value{
-		{Int64Value(1)},
+		{IntValue(1)},
 	})
 	if err != nil {
 		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
@@ -654,8 +654,8 @@ func TestReadSlottedRowsWithLocatorsRejectsInvalidMetadata(t *testing.T) {
 
 func TestReadRowByLocatorFromTablePageData(t *testing.T) {
 	page, err := BuildSlottedTablePageData(16, []uint8{CatalogColumnTypeInt, CatalogColumnTypeText}, [][]Value{
-		{Int64Value(1), StringValue("alice")},
-		{Int64Value(2), StringValue("bob")},
+		{IntValue(1), StringValue("alice")},
+		{IntValue(2), StringValue("bob")},
 	})
 	if err != nil {
 		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
@@ -678,7 +678,7 @@ func TestReadRowByLocatorFromTablePageData(t *testing.T) {
 
 func TestReadRowByLocatorFromTablePageDataPadsTrailingNulls(t *testing.T) {
 	page, err := BuildSlottedTablePageData(17, []uint8{CatalogColumnTypeInt, CatalogColumnTypeText}, [][]Value{
-		{Int64Value(1), StringValue("alice")},
+		{IntValue(1), StringValue("alice")},
 	})
 	if err != nil {
 		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
@@ -702,7 +702,7 @@ func TestReadRowByLocatorFromTablePageDataPadsTrailingNulls(t *testing.T) {
 
 func TestReadRowByLocatorFromTablePageDataRejectsInvalidSlot(t *testing.T) {
 	page, err := BuildSlottedTablePageData(18, []uint8{CatalogColumnTypeInt}, [][]Value{
-		{Int64Value(1)},
+		{IntValue(1)},
 	})
 	if err != nil {
 		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
@@ -726,7 +726,7 @@ func TestReadRowByLocatorFromTablePageDataRejectsWrongPageType(t *testing.T) {
 
 func TestReadRowByLocatorFromTablePageDataRejectsMalformedPayload(t *testing.T) {
 	page, err := BuildSlottedTablePageData(20, []uint8{CatalogColumnTypeInt}, [][]Value{
-		{Int64Value(1)},
+		{IntValue(1)},
 	})
 	if err != nil {
 		t.Fatalf("BuildSlottedTablePageData() error = %v", err)
