@@ -1150,8 +1150,8 @@ func TestSelectQualifiedProjectionAndPredicate(t *testing.T) {
 func TestSelectProjectionAndPredicateArithmetic(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {Name: "users", Columns: typedCols(), Rows: [][]parser.Value{
-			{parser.Int64Value(1), parser.StringValue("alice")},
-			{parser.Int64Value(2), parser.StringValue("bob")},
+			{parser.IntValue(1), parser.StringValue("alice")},
+			{parser.IntValue(2), parser.StringValue("bob")},
 		}},
 	}
 
@@ -1183,7 +1183,7 @@ func TestSelectProjectionAndPredicateArithmetic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
-	if len(rows) != 1 || rows[0][0] != parser.Int64Value(3) {
+	if len(rows) != 1 || rows[0][0] != parser.IntValue(3) {
 		t.Fatalf("rows = %#v, want [[3]]", rows)
 	}
 }
@@ -1485,9 +1485,9 @@ func TestSelectIndexScanBridgeAdaptsPlannerProjectionExpressions(t *testing.T) {
 		Name:    "users",
 		Columns: typedCols(),
 		Rows: [][]parser.Value{
-			{parser.Int64Value(1), parser.StringValue("alice")},
-			{parser.Int64Value(2), parser.StringValue("bob")},
-			{parser.Int64Value(3), parser.StringValue("alice")},
+			{parser.IntValue(1), parser.StringValue("alice")},
+			{parser.IntValue(2), parser.StringValue("bob")},
+			{parser.IntValue(3), parser.StringValue("alice")},
 		},
 	}
 
@@ -1524,7 +1524,7 @@ func TestSelectIndexScanBridgeAdaptsPlannerProjectionExpressions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
-	if len(rows) != 2 || rows[0][0] != parser.Int64Value(11) || rows[1][0] != parser.Int64Value(13) {
+	if len(rows) != 2 || rows[0][0] != parser.IntValue(11) || rows[1][0] != parser.IntValue(13) {
 		t.Fatalf("Select() rows = %#v, want [[11] [13]]", rows)
 	}
 }

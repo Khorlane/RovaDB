@@ -39,15 +39,7 @@ func Eval(expr *parser.Expr) (parser.Value, error) {
 		if !left.IsInteger() || !right.IsInteger() {
 			return parser.Value{}, errInvalidExpression
 		}
-
-		switch expr.Op {
-		case parser.BinaryOpAdd:
-			return publicIntResult(left.IntegerValue() + right.IntegerValue())
-		case parser.BinaryOpSub:
-			return publicIntResult(left.IntegerValue() - right.IntegerValue())
-		default:
-			return parser.Value{}, errInvalidExpression
-		}
+		return evalIntegerArithmeticResult(int(expr.Op), left, right)
 	default:
 		return parser.Value{}, errInvalidExpression
 	}
@@ -188,10 +180,7 @@ func evalScalarFunction(name string, arg parser.Value) (parser.Value, error) {
 	case "ABS":
 		switch arg.Kind {
 		case parser.ValueKindIntegerLiteral, parser.ValueKindSmallInt, parser.ValueKindInt, parser.ValueKindBigInt:
-			if arg.IntegerValue() < 0 {
-				return publicIntResult(-arg.IntegerValue())
-			}
-			return publicIntResult(arg.IntegerValue())
+			return evalIntegerAbsResult(arg)
 		case parser.ValueKindReal:
 			if arg.F64 < 0 {
 				return parser.RealValue(-arg.F64), nil
@@ -207,14 +196,7 @@ func evalScalarFunction(name string, arg parser.Value) (parser.Value, error) {
 
 func evalBinaryValueExpr(op int, left, right parser.Value) (parser.Value, error) {
 	if left.IsInteger() && right.IsInteger() {
-		switch op {
-		case int(runtimeValueExprBinaryOpAdd):
-			return publicIntResult(left.IntegerValue() + right.IntegerValue())
-		case int(runtimeValueExprBinaryOpSub):
-			return publicIntResult(left.IntegerValue() - right.IntegerValue())
-		default:
-			return parser.Value{}, errInvalidExpression
-		}
+		return evalIntegerArithmeticResult(op, left, right)
 	}
 	if left.Kind != right.Kind {
 		return parser.Value{}, errTypeMismatch
