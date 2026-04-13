@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -13,11 +14,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
-	outputDir         = `C:\Projects\RovaDB Research`
-	snapshotToolToken = "snapshot-main-v11"
+	outputDir             = `C:\Projects\RovaDB Research`
+	snapshotToolToken     = "snapshot-main-v12"
+	writeSectionsFlagName = "write-sections"
 )
 
 type treeNode struct {
@@ -42,6 +45,9 @@ type funcEntry struct {
 }
 
 func main() {
+	writeSections := flag.Bool(writeSectionsFlagName, false, "write snapshot.1.txt through snapshot.12.txt section files")
+	flag.Parse()
+
 	wd, err := os.Getwd()
 	if err != nil {
 		fail("unable to determine working directory: %v", err)
@@ -60,14 +66,7 @@ func main() {
 		fail("output directory unavailable: %v", err)
 	}
 
-	generatedDate, err := runGit(wd, "log", "-1", "--date=format:%Y-%m-%d", "--pretty=format:%ad")
-	if err != nil {
-		fail("git history unavailable: %v", err)
-	}
-	generatedDate = strings.TrimSpace(generatedDate)
-	if generatedDate == "" {
-		fail("git history unavailable: empty generated date")
-	}
+	generatedDate := time.Now().Format("2006-01-02")
 
 	generatedCommit, err := runGit(wd, "rev-parse", "--short", "HEAD")
 	if err != nil {
@@ -178,44 +177,48 @@ func main() {
 		{12, "TEST CLASSIFICATION", testClassification},
 	}
 
-	indexLines := []string{
-		"RovaDB Snapshot Section Index",
-		fmt.Sprintf("Snapshot Tool Version: %s", snapshotToolToken),
-		fmt.Sprintf("Generated: %s", generatedDate),
-		fmt.Sprintf("Generated Commit: %s", generatedCommit),
-		fmt.Sprintf("Repository: %s", repoName),
-		"",
+	var indexLines []string
+	if *writeSections {
+		indexLines = buildIndexHeader("RovaDB Snapshot Section Index", generatedDate, generatedCommit, repoName)
 	}
 
 	var combined strings.Builder
+	writeFileHeader(&combined, generatedDate, generatedCommit, repoName)
 
 	for _, section := range sections {
 		filename := fmt.Sprintf("snapshot.%d.txt", section.Number)
 
-		var out strings.Builder
-		writeFileHeader(&out, generatedDate, generatedCommit, repoName)
-		writeSection(&out, section.Number, section.Title, section.Lines)
+		if *writeSections {
+			var out strings.Builder
+			writeFileHeader(&out, generatedDate, generatedCommit, repoName)
+			writeSection(&out, section.Number, section.Title, section.Lines)
 
-		if err := writeAtomically(filepath.Join(outputDir, filename), []byte(out.String())); err != nil {
-			fail("unable to write %s: %v", filename, err)
+			if err := writeAtomically(filepath.Join(outputDir, filename), []byte(out.String())); err != nil {
+				fail("unable to write %s: %v", filename, err)
+			}
+
+			indexLines = append(indexLines, fmt.Sprintf("%d -> %s -> %s", section.Number, filename, section.Title))
 		}
 
-		indexLines = append(indexLines, fmt.Sprintf("%d -> %s -> %s", section.Number, filename, section.Title))
-	}
-
-	if err := writeAtomically(filepath.Join(outputDir, "snapshot.index.txt"), []byte(strings.Join(indexLines, "\n")+"\n")); err != nil {
-		fail("unable to write snapshot.index.txt: %v", err)
-	}
-
-	for _, section := range sections {
 		writeSection(&combined, section.Number, section.Title, section.Lines)
+	}
+
+	if *writeSections {
+		if err := writeAtomically(filepath.Join(outputDir, "snapshot.index.txt"), []byte(strings.Join(indexLines, "\n")+"\n")); err != nil {
+			fail("unable to write snapshot.index.txt: %v", err)
+		}
 	}
 
 	if err := writeAtomically(filepath.Join(outputDir, "snapshot.txt"), []byte(combined.String())); err != nil {
 		fail("unable to write snapshot.txt: %v", err)
 	}
 
-	fmt.Printf("OK\nWrote section files to %s\n", outputDir)
+	if *writeSections {
+		fmt.Printf("OK\nWrote snapshot.txt, snapshot.index.txt, and snapshot.1.txt through snapshot.12.txt to %s\n", outputDir)
+		return
+	}
+
+	fmt.Printf("OK\nWrote snapshot.txt to %s\n", outputDir)
 }
 
 func validateRepoRoot(root string) error {
@@ -1423,12 +1426,23 @@ func renderExpr(fset *token.FileSet, expr ast.Expr) string {
 	return normalizeWhitespace(b.String())
 }
 
+func buildIndexHeader(title, generatedDate, generatedCommit, repoName string) []string {
+	return []string{
+		title,
+		fmt.Sprintf("Version:     %s", snapshotToolToken),
+		fmt.Sprintf("Generated:   %s", generatedDate),
+		fmt.Sprintf("Last Commit: %s", generatedCommit),
+		fmt.Sprintf("Repository:  %s", repoName),
+		"",
+	}
+}
+
 func writeFileHeader(out *strings.Builder, generatedDate, generatedCommit, repoName string) {
 	out.WriteString("RovaDB Snapshot\n")
-	out.WriteString(fmt.Sprintf("Snapshot Tool Version: %s\n", snapshotToolToken))
-	out.WriteString(fmt.Sprintf("Generated: %s\n", generatedDate))
-	out.WriteString(fmt.Sprintf("Generated Commit: %s\n", generatedCommit))
-	out.WriteString(fmt.Sprintf("Repository: %s\n\n", repoName))
+	out.WriteString(fmt.Sprintf("Version:     %s\n", snapshotToolToken))
+	out.WriteString(fmt.Sprintf("Generated:   %s\n", generatedDate))
+	out.WriteString(fmt.Sprintf("Last Commit: %s\n", generatedCommit))
+	out.WriteString(fmt.Sprintf("Repository:  %s\n\n", repoName))
 }
 
 func writeSection(out *strings.Builder, number int, title string, lines []string) {
