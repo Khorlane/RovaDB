@@ -344,6 +344,78 @@ func TestExecInsertIntoWithColumnListReordered(t *testing.T) {
 	}
 }
 
+func TestExecInsertColumnOmissionUsesDefaultsAndNullability(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT NOT NULL, name TEXT DEFAULT 'ready', active BOOL NOT NULL DEFAULT TRUE, score REAL)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users (id) VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT id, name, active, score FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+	var id int
+	var name string
+	var active bool
+	var score any
+	if err := rows.Scan(&id, &name, &active, &score); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if id != 1 || name != "ready" || active != true || score != nil {
+		t.Fatalf("row = (%d, %q, %v, %#v), want (1, %q, true, nil)", id, name, active, score, "ready")
+	}
+}
+
+func TestExecInsertRejectsNotNullViolations(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT NOT NULL, active BOOL NOT NULL DEFAULT TRUE)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	tests := []struct {
+		sql  string
+		want string
+	}{
+		{sql: "INSERT INTO users VALUES (NULL, TRUE)", want: "execution: NOT NULL constraint failed: users.id"},
+		{sql: "INSERT INTO users (id) VALUES (1)", want: ""},
+		{sql: "INSERT INTO users VALUES (2, NULL)", want: "execution: NOT NULL constraint failed: users.active"},
+		{sql: "INSERT INTO users (active) VALUES (TRUE)", want: "execution: NOT NULL constraint failed: users.id"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.sql, func(t *testing.T) {
+			_, err := db.Exec(tc.sql)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Exec(%q) error = %v", tc.sql, err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("Exec(%q) error = %v, want %q", tc.sql, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestExecInsertIntoWrongType(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
@@ -1008,6 +1080,45 @@ func TestExecUpdateWrongType(t *testing.T) {
 	}
 	if _, err := db.Exec("UPDATE users SET id = 'oops' WHERE name = 'alice'"); err == nil {
 		t.Fatal("Exec(update) error = nil, want type error")
+	}
+}
+
+func TestExecUpdateNotNullEnforcementAndUntouchedDefaults(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	for _, sql := range []string{
+		"CREATE TABLE users (id INT NOT NULL, name TEXT, active BOOL NOT NULL DEFAULT TRUE)",
+		"INSERT INTO users (id, name) VALUES (1, 'alice')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	if _, err := db.Exec("UPDATE users SET name = 'bob' WHERE id = 1"); err != nil {
+		t.Fatalf("Exec(update other column) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT name, active FROM users WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if rows == nil || len(rows.data) != 1 || len(rows.data[0]) != 2 {
+		t.Fatalf("rows = %#v, want one row", rows)
+	}
+	if rows.data[0][0] != "bob" || rows.data[0][1] != true {
+		t.Fatalf("rows.data = %#v, want [[\"bob\" true]]", rows.data)
+	}
+
+	if _, err := db.Exec("UPDATE users SET active = FALSE WHERE id = 1"); err != nil {
+		t.Fatalf("Exec(valid not-null update) error = %v", err)
+	}
+	if _, err := db.Exec("UPDATE users SET active = NULL WHERE id = 1"); err == nil || err.Error() != "execution: NOT NULL constraint failed: users.active" {
+		t.Fatalf("Exec(NULL update) error = %v, want NOT NULL constraint failure", err)
 	}
 }
 

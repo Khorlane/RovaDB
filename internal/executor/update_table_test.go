@@ -194,6 +194,66 @@ func TestExecuteUpdateWrongType(t *testing.T) {
 	}
 }
 
+func TestExecuteUpdateExplicitNullIntoNotNullFails(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {
+			Name: "users",
+			Columns: []parser.ColumnDef{
+				{Name: "id", Type: parser.ColumnTypeInt},
+				{Name: "name", Type: parser.ColumnTypeText, NotNull: true, HasDefault: true, DefaultValue: parser.StringValue("ready")},
+			},
+			Rows: [][]parser.Value{
+				{parser.Int64Value(1), parser.StringValue("alice")},
+			},
+		},
+	}
+
+	_, err := executeUpdate(&parser.UpdateStmt{
+		TableName: "users",
+		Assignments: []parser.UpdateAssignment{
+			{Column: "name", Value: parser.NullValue()},
+		},
+	}, tables)
+	if err == nil || err.Error() != "execution: NOT NULL constraint failed: users.name" {
+		t.Fatalf("executeUpdate() error = %v, want NOT NULL constraint failure", err)
+	}
+	if got := tables["users"].Rows[0][1]; got != parser.StringValue("alice") {
+		t.Fatalf("rows[0][1] = %#v, want %#v", got, parser.StringValue("alice"))
+	}
+}
+
+func TestExecuteUpdateLeavesUntouchedDefaultedNotNullColumnUnchanged(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {
+			Name: "users",
+			Columns: []parser.ColumnDef{
+				{Name: "id", Type: parser.ColumnTypeInt},
+				{Name: "name", Type: parser.ColumnTypeText},
+				{Name: "active", Type: parser.ColumnTypeBool, NotNull: true, HasDefault: true, DefaultValue: parser.BoolValue(true)},
+			},
+			Rows: [][]parser.Value{
+				{parser.Int64Value(1), parser.StringValue("alice"), parser.BoolValue(true)},
+			},
+		},
+	}
+
+	affected, err := executeUpdate(&parser.UpdateStmt{
+		TableName: "users",
+		Assignments: []parser.UpdateAssignment{
+			{Column: "name", Value: parser.StringValue("bob")},
+		},
+	}, tables)
+	if err != nil {
+		t.Fatalf("executeUpdate() error = %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("executeUpdate() affected = %d, want 1", affected)
+	}
+	if got := tables["users"].Rows[0]; got[1] != parser.StringValue("bob") || got[2] != parser.BoolValue(true) {
+		t.Fatalf("rows[0] = %#v, want name updated and active unchanged", got)
+	}
+}
+
 func TestExecuteUpdateWithAndWhere(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {

@@ -111,13 +111,104 @@ func TestExecuteInsertNotAllColumnsSpecified(t *testing.T) {
 		"users": {Name: "users", Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "name", Type: parser.ColumnTypeText}}},
 	}
 
+	affected, err := Execute(&parser.InsertStmt{
+		TableName: "users",
+		Columns:   []string{"id"},
+		Values:    []parser.Value{parser.Int64Value(1)},
+	}, tables)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("Execute() affected = %d, want 1", affected)
+	}
+	if got := tables["users"].Rows[0]; len(got) != 2 || got[0] != parser.Int64Value(1) || got[1] != parser.NullValue() {
+		t.Fatalf("Execute() row = %#v, want [1 NULL]", got)
+	}
+}
+
+func TestExecuteInsertOmittedColumnsUseDefaultsAndNullability(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "name", Type: parser.ColumnTypeText, HasDefault: true, DefaultValue: parser.StringValue("ready")},
+			{Name: "active", Type: parser.ColumnTypeBool, NotNull: true, HasDefault: true, DefaultValue: parser.BoolValue(true)},
+			{Name: "score", Type: parser.ColumnTypeReal},
+		}},
+	}
+
+	affected, err := Execute(&parser.InsertStmt{
+		TableName: "users",
+		Columns:   []string{"id"},
+		Values:    []parser.Value{parser.Int64Value(1)},
+	}, tables)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("Execute() affected = %d, want 1", affected)
+	}
+	want := []parser.Value{
+		parser.Int64Value(1),
+		parser.StringValue("ready"),
+		parser.BoolValue(true),
+		parser.NullValue(),
+	}
+	if got := tables["users"].Rows[0]; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] || got[3] != want[3] {
+		t.Fatalf("Execute() row = %#v, want %#v", got, want)
+	}
+}
+
+func TestExecuteInsertOmittedNotNullWithoutDefaultFails(t *testing.T) {
+	tables := map[string]*Table{
+		"users": {Name: "users", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "active", Type: parser.ColumnTypeBool, NotNull: true},
+		}},
+	}
+
 	_, err := Execute(&parser.InsertStmt{
 		TableName: "users",
 		Columns:   []string{"id"},
 		Values:    []parser.Value{parser.Int64Value(1)},
 	}, tables)
-	if err != errWrongValueCount {
-		t.Fatalf("Execute() error = %v, want %v", err, errWrongValueCount)
+	if err == nil || err.Error() != "execution: NOT NULL constraint failed: users.active" {
+		t.Fatalf("Execute() error = %v, want NOT NULL constraint failure", err)
+	}
+}
+
+func TestExecuteInsertExplicitNullIntoNotNullFails(t *testing.T) {
+	tests := []struct {
+		name   string
+		column parser.ColumnDef
+	}{
+		{
+			name:   "not null without default",
+			column: parser.ColumnDef{Name: "active", Type: parser.ColumnTypeBool, NotNull: true},
+		},
+		{
+			name:   "not null with default",
+			column: parser.ColumnDef{Name: "active", Type: parser.ColumnTypeBool, NotNull: true, HasDefault: true, DefaultValue: parser.BoolValue(true)},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tables := map[string]*Table{
+				"users": {Name: "users", Columns: []parser.ColumnDef{
+					{Name: "id", Type: parser.ColumnTypeInt},
+					tc.column,
+				}},
+			}
+
+			_, err := Execute(&parser.InsertStmt{
+				TableName: "users",
+				Values:    []parser.Value{parser.Int64Value(1), parser.NullValue()},
+			}, tables)
+			if err == nil || err.Error() != "execution: NOT NULL constraint failed: users.active" {
+				t.Fatalf("Execute() error = %v, want NOT NULL constraint failure", err)
+			}
+		})
 	}
 }
 

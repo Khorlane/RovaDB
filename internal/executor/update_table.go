@@ -51,8 +51,8 @@ func executeUpdate(stmt *parser.UpdateStmt, tables map[string]*Table) (int64, er
 			if err != nil {
 				return 0, err
 			}
-			if !valueMatchesColumnType(value, table.Columns[assignment.index].Type) {
-				return 0, errTypeMismatch
+			if err := validateColumnValue(table, assignment.index, value); err != nil {
+				return 0, err
 			}
 			row[assignment.index] = value
 		}

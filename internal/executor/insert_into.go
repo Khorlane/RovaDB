@@ -1,6 +1,8 @@
 package executor
 
 import (
+	"fmt"
+
 	"github.com/Khorlane/RovaDB/internal/parser"
 )
 
@@ -15,59 +17,9 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 		return 0, err
 	}
 
-	if len(stmt.Columns) == 0 {
-		if len(values) != len(table.Columns) {
-			return 0, errWrongValueCount
-		}
-		for i, value := range values {
-			if !valueMatchesColumnType(value, table.Columns[i].Type) {
-				return 0, errTypeMismatch
-			}
-		}
-
-		row := append([]parser.Value(nil), values...)
-		candidateRows := append(cloneRows(table.Rows), row)
-		if err := validateIndexedTextLimits(table, candidateRows); err != nil {
-			return 0, err
-		}
-		if err := validateUniqueIndexes(table, candidateRows); err != nil {
-			return 0, err
-		}
-		table.Rows = append(table.Rows, row)
-		if err := rebuildIndexesForTable(table); err != nil {
-			return 0, err
-		}
-		return 1, nil
-	}
-
-	if len(stmt.Columns) != len(table.Columns) || len(values) != len(table.Columns) {
-		return 0, errWrongValueCount
-	}
-
-	row := make([]parser.Value, len(table.Columns))
-	seen := make(map[int]struct{}, len(stmt.Columns))
-	for i, name := range stmt.Columns {
-		idx := -1
-		for j, column := range table.Columns {
-			if column.Name == name {
-				idx = j
-				break
-			}
-		}
-		if idx < 0 {
-			return 0, errColumnDoesNotExist
-		}
-		if _, ok := seen[idx]; ok {
-			return 0, errWrongValueCount
-		}
-		if !valueMatchesColumnType(values[i], table.Columns[idx].Type) {
-			return 0, errTypeMismatch
-		}
-		seen[idx] = struct{}{}
-		row[idx] = values[i]
-	}
-	if len(seen) != len(table.Columns) {
-		return 0, errWrongValueCount
+	row, err := buildInsertRow(table, stmt.Columns, values)
+	if err != nil {
+		return 0, err
 	}
 
 	candidateRows := append(cloneRows(table.Rows), row)
@@ -82,6 +34,62 @@ func executeInsert(stmt *parser.InsertStmt, tables map[string]*Table) (int64, er
 		return 0, err
 	}
 	return 1, nil
+}
+
+func buildInsertRow(table *Table, columnNames []string, values []parser.Value) ([]parser.Value, error) {
+	if len(columnNames) == 0 {
+		if len(values) != len(table.Columns) {
+			return nil, errWrongValueCount
+		}
+		row := make([]parser.Value, len(table.Columns))
+		for i, value := range values {
+			if err := validateColumnValue(table, i, value); err != nil {
+				return nil, err
+			}
+			row[i] = value
+		}
+		return row, nil
+	}
+
+	if len(values) != len(columnNames) {
+		return nil, errWrongValueCount
+	}
+
+	row := make([]parser.Value, len(table.Columns))
+	seen := make(map[int]struct{}, len(columnNames))
+	for i, name := range columnNames {
+		idx, err := resolveColumnIndex(name, table)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seen[idx]; ok {
+			return nil, errWrongValueCount
+		}
+		if err := validateColumnValue(table, idx, values[i]); err != nil {
+			return nil, err
+		}
+		seen[idx] = struct{}{}
+		row[idx] = values[i]
+	}
+
+	for i, column := range table.Columns {
+		if _, ok := seen[i]; ok {
+			continue
+		}
+		if column.HasDefault {
+			if err := validateColumnValue(table, i, column.DefaultValue); err != nil {
+				return nil, err
+			}
+			row[i] = column.DefaultValue
+			continue
+		}
+		if column.NotNull {
+			return nil, newNotNullConstraintError(table.Name, column.Name)
+		}
+		row[i] = parser.NullValue()
+	}
+
+	return row, nil
 }
 
 func evalInsertValues(stmt *parser.InsertStmt) ([]parser.Value, error) {
@@ -172,4 +180,28 @@ func valueMatchesColumnType(value parser.Value, typeName string) bool {
 	default:
 		return false
 	}
+}
+
+func validateColumnValue(table *Table, columnIndex int, value parser.Value) error {
+	if table == nil || columnIndex < 0 || columnIndex >= len(table.Columns) {
+		return errColumnDoesNotExist
+	}
+	column := table.Columns[columnIndex]
+	if !valueMatchesColumnType(value, column.Type) {
+		return errTypeMismatch
+	}
+	if column.NotNull && value.Kind == parser.ValueKindNull {
+		return newNotNullConstraintError(table.Name, column.Name)
+	}
+	return nil
+}
+
+func newNotNullConstraintError(tableName, columnName string) error {
+	if tableName == "" && columnName == "" {
+		return newExecError("NOT NULL constraint failed")
+	}
+	if tableName == "" {
+		return newExecError(fmt.Sprintf("NOT NULL constraint failed: %s", columnName))
+	}
+	return newExecError(fmt.Sprintf("NOT NULL constraint failed: %s.%s", tableName, columnName))
 }

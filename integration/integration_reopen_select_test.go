@@ -433,6 +433,57 @@ func TestRealRowsUpdateDeleteRoundTripAfterReopen(t *testing.T) {
 	})
 }
 
+func TestInsertDefaultsAndNotNullStillApplyAfterReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id INT NOT NULL, name TEXT DEFAULT 'ready', active BOOL NOT NULL DEFAULT TRUE, score REAL)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("INSERT INTO users (id) VALUES (1)"); err != nil {
+		t.Fatalf("Exec(insert after reopen) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users (active) VALUES (TRUE)"); err == nil || err.Error() != "execution: NOT NULL constraint failed: users.id" {
+		t.Fatalf("Exec(not-null violation after reopen) error = %v, want NOT NULL constraint failure", err)
+	}
+
+	rows, err := db.Query("SELECT id, name, active, score FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+	var id int
+	var name string
+	var active bool
+	var score any
+	if err := rows.Scan(&id, &name, &active, &score); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if id != 1 || name != "ready" || active != true || score != nil {
+		t.Fatalf("row = (%d, %q, %v, %#v), want (1, %q, true, nil)", id, name, active, score, "ready")
+	}
+	if rows.Next() {
+		t.Fatal("Next() second = true, want false")
+	}
+}
+
 func assertSelectRealRows(t *testing.T, db *DB, sql string, want [][3]any) {
 	t.Helper()
 
