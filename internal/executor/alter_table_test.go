@@ -124,6 +124,59 @@ func TestExecuteAlterTableAddColumnAppliesNullabilityAndDefaults(t *testing.T) {
 			wantRows:     [][]parser.Value{{parser.Int64Value(1), parser.SmallIntValue(5)}},
 			wantRowWidth: 2,
 		},
+		{
+			name: "matching typed smallint default is preserved during add column expansion",
+			table: &Table{
+				Name:    "users",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+				Rows:    [][]parser.Value{{parser.Int64Value(1)}},
+			},
+			column:       parser.ColumnDef{Name: "age", Type: parser.ColumnTypeSmallInt, HasDefault: true, DefaultValue: parser.SmallIntValue(6)},
+			wantRows:     [][]parser.Value{{parser.Int64Value(1), parser.SmallIntValue(6)}},
+			wantRowWidth: 2,
+		},
+		{
+			name: "wrong width typed integer default is rejected during add column expansion",
+			table: &Table{
+				Name:    "users",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+				Rows:    [][]parser.Value{{parser.Int64Value(1)}},
+			},
+			column:  parser.ColumnDef{Name: "age", Type: parser.ColumnTypeSmallInt, HasDefault: true, DefaultValue: parser.IntValue(6)},
+			wantErr: "execution: type mismatch",
+		},
+		{
+			name: "typed int default is preserved during add column expansion",
+			table: &Table{
+				Name:    "users",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+				Rows:    [][]parser.Value{{parser.Int64Value(1)}},
+			},
+			column:       parser.ColumnDef{Name: "age", Type: parser.ColumnTypeInt, HasDefault: true, DefaultValue: parser.IntValue(8)},
+			wantRows:     [][]parser.Value{{parser.Int64Value(1), parser.IntValue(8)}},
+			wantRowWidth: 2,
+		},
+		{
+			name: "typed bigint default is preserved during add column expansion",
+			table: &Table{
+				Name:    "users",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+				Rows:    [][]parser.Value{{parser.Int64Value(1)}},
+			},
+			column:       parser.ColumnDef{Name: "age", Type: parser.ColumnTypeBigInt, HasDefault: true, DefaultValue: parser.BigIntValue(9)},
+			wantRows:     [][]parser.Value{{parser.Int64Value(1), parser.BigIntValue(9)}},
+			wantRowWidth: 2,
+		},
+		{
+			name: "out of range integer literal default is rejected during add column expansion",
+			table: &Table{
+				Name:    "users",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+				Rows:    [][]parser.Value{{parser.Int64Value(1)}},
+			},
+			column:  parser.ColumnDef{Name: "age", Type: parser.ColumnTypeSmallInt, HasDefault: true, DefaultValue: parser.Int64Value(40000)},
+			wantErr: "execution: type mismatch",
+		},
 	}
 
 	for _, tc := range tests {

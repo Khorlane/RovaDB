@@ -628,6 +628,9 @@ func TestExecEngineOwnedIntegerLiteralsAndDefaultsRemainValidForTypedIntegerWrit
 	if _, err := db.Exec("INSERT INTO numbers VALUES (2, 12, 34, 56)"); err != nil {
 		t.Fatalf("Exec(insert SQL literals) error = %v", err)
 	}
+	if _, err := db.Exec("UPDATE numbers SET small_col = 13, int_col = 35, big_col = 57 WHERE id = 2"); err != nil {
+		t.Fatalf("Exec(update SQL literals) error = %v", err)
+	}
 	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
 		t.Fatalf("Exec(create users) error = %v", err)
 	}
@@ -664,8 +667,8 @@ func TestExecEngineOwnedIntegerLiteralsAndDefaultsRemainValidForTypedIntegerWrit
 	if err := rows.Scan(&small2, &int2, &big2); err != nil {
 		t.Fatalf("Scan(literal row) error = %v", err)
 	}
-	if small2 != 12 || int2 != 34 || big2 != 56 {
-		t.Fatalf("literal row = (%d, %d, %d), want (12, 34, 56)", small2, int2, big2)
+	if small2 != 13 || int2 != 35 || big2 != 57 {
+		t.Fatalf("literal row = (%d, %d, %d), want (13, 35, 57)", small2, int2, big2)
 	}
 
 	userRows, err := db.Query("SELECT age FROM users")
@@ -686,9 +689,13 @@ func TestExecTypedIntegerWritesRejectOutOfRangeSQLLiteralsByTargetWidth(t *testi
 	if _, err := db.Exec("CREATE TABLE numbers (small_col SMALLINT, int_col INT, big_col BIGINT)"); err != nil {
 		t.Fatalf("Exec(create) error = %v", err)
 	}
+	if _, err := db.Exec("INSERT INTO numbers VALUES (1, 2, 3)"); err != nil {
+		t.Fatalf("Exec(seed) error = %v", err)
+	}
 
 	tests := []string{
 		"INSERT INTO numbers (small_col) VALUES (40000)",
+		"UPDATE numbers SET small_col = 40000 WHERE big_col = 3",
 	}
 
 	for _, sql := range tests {
@@ -703,6 +710,43 @@ func TestExecTypedIntegerWritesRejectOutOfRangeSQLLiteralsByTargetWidth(t *testi
 
 	if _, err := db.Exec("INSERT INTO numbers (big_col) VALUES (2147483647)"); err != nil {
 		t.Fatalf("Exec(bigint fitting literal) error = %v", err)
+	}
+}
+
+func TestExecAlterTableTypedIntegerDefaultsResolveByTargetWidth(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create users) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1)"); err != nil {
+		t.Fatalf("Exec(seed users) error = %v", err)
+	}
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN age SMALLINT NOT NULL DEFAULT 5"); err != nil {
+		t.Fatalf("Exec(add smallint default) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT age FROM users")
+	if err != nil {
+		t.Fatalf("Query(users) error = %v", err)
+	}
+	defer rows.Close()
+	assertRowsIntSequence(t, rows, 5)
+
+	if _, err := db.Exec("CREATE TABLE users_bad (id INT)"); err != nil {
+		t.Fatalf("Exec(create users_bad) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users_bad VALUES (1)"); err != nil {
+		t.Fatalf("Exec(seed users_bad) error = %v", err)
+	}
+	_, err = db.Exec("ALTER TABLE users_bad ADD COLUMN age SMALLINT NOT NULL DEFAULT 40000")
+	var dbErr *DBError
+	if !errors.As(err, &dbErr) || dbErr.Kind != ErrExec {
+		t.Fatalf("Exec(add overflowing smallint default) error = %v, want exec type mismatch", err)
 	}
 }
 

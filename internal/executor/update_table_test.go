@@ -535,3 +535,133 @@ func TestExecuteUpdateTypedIntegerTargetRejectsUntypedLiteralOverflow(t *testing
 		t.Fatalf("executeUpdate() error = %v, want %v", err, errTypeMismatch)
 	}
 }
+
+func TestExecuteUpdateTypedIntegerTargetsRequireExactWidthValues(t *testing.T) {
+	tests := []struct {
+		name       string
+		columnType string
+		initial    parser.Value
+		value      parser.Value
+		want       parser.Value
+		wantErr    error
+	}{
+		{
+			name:       "smallint accepts exact typed value",
+			columnType: parser.ColumnTypeSmallInt,
+			initial:    parser.SmallIntValue(1),
+			value:      parser.SmallIntValue(11),
+			want:       parser.SmallIntValue(11),
+		},
+		{
+			name:       "smallint accepts fitting literal",
+			columnType: parser.ColumnTypeSmallInt,
+			initial:    parser.SmallIntValue(1),
+			value:      parser.Int64Value(12),
+			want:       parser.SmallIntValue(12),
+		},
+		{
+			name:       "smallint rejects typed int",
+			columnType: parser.ColumnTypeSmallInt,
+			initial:    parser.SmallIntValue(1),
+			value:      parser.IntValue(13),
+			wantErr:    errTypeMismatch,
+		},
+		{
+			name:       "smallint rejects typed bigint",
+			columnType: parser.ColumnTypeSmallInt,
+			initial:    parser.SmallIntValue(1),
+			value:      parser.BigIntValue(14),
+			wantErr:    errTypeMismatch,
+		},
+		{
+			name:       "int accepts exact typed value",
+			columnType: parser.ColumnTypeInt,
+			initial:    parser.IntValue(2),
+			value:      parser.IntValue(21),
+			want:       parser.IntValue(21),
+		},
+		{
+			name:       "int accepts fitting literal",
+			columnType: parser.ColumnTypeInt,
+			initial:    parser.IntValue(2),
+			value:      parser.Int64Value(22),
+			want:       parser.IntValue(22),
+		},
+		{
+			name:       "int rejects typed smallint",
+			columnType: parser.ColumnTypeInt,
+			initial:    parser.IntValue(2),
+			value:      parser.SmallIntValue(23),
+			wantErr:    errTypeMismatch,
+		},
+		{
+			name:       "int rejects typed bigint",
+			columnType: parser.ColumnTypeInt,
+			initial:    parser.IntValue(2),
+			value:      parser.BigIntValue(24),
+			wantErr:    errTypeMismatch,
+		},
+		{
+			name:       "bigint accepts exact typed value",
+			columnType: parser.ColumnTypeBigInt,
+			initial:    parser.BigIntValue(3),
+			value:      parser.BigIntValue(31),
+			want:       parser.BigIntValue(31),
+		},
+		{
+			name:       "bigint accepts fitting literal",
+			columnType: parser.ColumnTypeBigInt,
+			initial:    parser.BigIntValue(3),
+			value:      parser.Int64Value(32),
+			want:       parser.BigIntValue(32),
+		},
+		{
+			name:       "bigint rejects typed smallint",
+			columnType: parser.ColumnTypeBigInt,
+			initial:    parser.BigIntValue(3),
+			value:      parser.SmallIntValue(33),
+			wantErr:    errTypeMismatch,
+		},
+		{
+			name:       "bigint rejects typed int",
+			columnType: parser.ColumnTypeBigInt,
+			initial:    parser.BigIntValue(3),
+			value:      parser.IntValue(34),
+			wantErr:    errTypeMismatch,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			table := &Table{
+				Name:    "numbers",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "target", Type: tc.columnType}},
+				Rows:    [][]parser.Value{{parser.IntValue(1), tc.initial}},
+			}
+			tables := map[string]*Table{"numbers": table}
+
+			_, err := executeUpdate(&parser.UpdateStmt{
+				TableName: "numbers",
+				Assignments: []parser.UpdateAssignment{
+					{Column: "target", Value: tc.value},
+				},
+				Where: where(parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(1)}),
+			}, tables)
+			if tc.wantErr != nil {
+				if err != tc.wantErr {
+					t.Fatalf("executeUpdate() error = %v, want %v", err, tc.wantErr)
+				}
+				if got := table.Rows[0][1]; got != tc.initial {
+					t.Fatalf("row changed on failure = %#v, want %#v", got, tc.initial)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("executeUpdate() error = %v", err)
+			}
+			if got := table.Rows[0][1]; got != tc.want {
+				t.Fatalf("row target = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}

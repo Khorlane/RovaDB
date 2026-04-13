@@ -173,8 +173,12 @@ func valueMatchesColumnType(value parser.Value, typeName string) bool {
 		return true
 	}
 	switch typeName {
-	case parser.ColumnTypeSmallInt, parser.ColumnTypeInt, parser.ColumnTypeBigInt:
-		return value.IsInteger()
+	case parser.ColumnTypeSmallInt:
+		return integerValueMatchesExactColumnType(value, parser.BoundIntegerTypeInt16)
+	case parser.ColumnTypeInt:
+		return integerValueMatchesExactColumnType(value, parser.BoundIntegerTypeInt32)
+	case parser.ColumnTypeBigInt:
+		return integerValueMatchesExactColumnType(value, parser.BoundIntegerTypeInt64)
 	case parser.ColumnTypeText:
 		return value.Kind == parser.ValueKindString
 	case parser.ColumnTypeBool:
@@ -184,6 +188,19 @@ func valueMatchesColumnType(value parser.Value, typeName string) bool {
 	default:
 		return false
 	}
+}
+
+func integerValueMatchesExactColumnType(value parser.Value, exactType parser.BoundIntegerType) bool {
+	if !value.IsInteger() {
+		return false
+	}
+	if value.IsIntegerLiteral() {
+		return true
+	}
+	if value.BoundIntegerType != parser.BoundIntegerTypeNone {
+		return value.BoundIntegerType == exactType
+	}
+	return integerBoundTypeForValue(value) == exactType
 }
 
 func normalizeColumnValue(table *Table, columnIndex int, value parser.Value) (parser.Value, error) {

@@ -423,7 +423,7 @@ func TestExecuteInsertValueExprArithmetic(t *testing.T) {
 	}
 }
 
-func TestNormalizeIntegerColumnValueResolvesUntypedLiteralsToTargetWidth(t *testing.T) {
+func TestNormalizeColumnValueForDefRequiresExactIntegerWidths(t *testing.T) {
 	tests := []struct {
 		name      string
 		column    parser.ColumnDef
@@ -432,10 +432,28 @@ func TestNormalizeIntegerColumnValueResolvesUntypedLiteralsToTargetWidth(t *test
 		wantError error
 	}{
 		{
+			name:   "smallint accepts exact typed value",
+			column: parser.ColumnDef{Name: "small_col", Type: parser.ColumnTypeSmallInt},
+			value:  parser.SmallIntValue(7),
+			want:   parser.SmallIntValue(7),
+		},
+		{
 			name:   "smallint fits",
 			column: parser.ColumnDef{Name: "small_col", Type: parser.ColumnTypeSmallInt},
 			value:  parser.Int64Value(7),
 			want:   parser.SmallIntValue(7),
+		},
+		{
+			name:      "smallint rejects typed int",
+			column:    parser.ColumnDef{Name: "small_col", Type: parser.ColumnTypeSmallInt},
+			value:     parser.IntValue(7),
+			wantError: errTypeMismatch,
+		},
+		{
+			name:      "smallint rejects typed bigint",
+			column:    parser.ColumnDef{Name: "small_col", Type: parser.ColumnTypeSmallInt},
+			value:     parser.BigIntValue(7),
+			wantError: errTypeMismatch,
 		},
 		{
 			name:      "smallint rejects overflow",
@@ -444,10 +462,28 @@ func TestNormalizeIntegerColumnValueResolvesUntypedLiteralsToTargetWidth(t *test
 			wantError: errTypeMismatch,
 		},
 		{
+			name:   "int accepts exact typed value",
+			column: parser.ColumnDef{Name: "int_col", Type: parser.ColumnTypeInt},
+			value:  parser.IntValue(42),
+			want:   parser.IntValue(42),
+		},
+		{
 			name:   "int fits",
 			column: parser.ColumnDef{Name: "int_col", Type: parser.ColumnTypeInt},
 			value:  parser.Int64Value(42),
 			want:   parser.IntValue(42),
+		},
+		{
+			name:      "int rejects typed smallint",
+			column:    parser.ColumnDef{Name: "int_col", Type: parser.ColumnTypeInt},
+			value:     parser.SmallIntValue(42),
+			wantError: errTypeMismatch,
+		},
+		{
+			name:      "int rejects typed bigint",
+			column:    parser.ColumnDef{Name: "int_col", Type: parser.ColumnTypeInt},
+			value:     parser.BigIntValue(42),
+			wantError: errTypeMismatch,
 		},
 		{
 			name:      "int rejects overflow",
@@ -456,10 +492,34 @@ func TestNormalizeIntegerColumnValueResolvesUntypedLiteralsToTargetWidth(t *test
 			wantError: errTypeMismatch,
 		},
 		{
+			name:   "bigint accepts exact typed value",
+			column: parser.ColumnDef{Name: "big_col", Type: parser.ColumnTypeBigInt},
+			value:  parser.BigIntValue(1 << 40),
+			want:   parser.BigIntValue(1 << 40),
+		},
+		{
 			name:   "bigint fits",
 			column: parser.ColumnDef{Name: "big_col", Type: parser.ColumnTypeBigInt},
 			value:  parser.Int64Value(1 << 40),
 			want:   parser.BigIntValue(1 << 40),
+		},
+		{
+			name:      "bigint rejects typed smallint",
+			column:    parser.ColumnDef{Name: "big_col", Type: parser.ColumnTypeBigInt},
+			value:     parser.SmallIntValue(5),
+			wantError: errTypeMismatch,
+		},
+		{
+			name:      "bigint rejects typed int",
+			column:    parser.ColumnDef{Name: "big_col", Type: parser.ColumnTypeBigInt},
+			value:     parser.IntValue(5),
+			wantError: errTypeMismatch,
+		},
+		{
+			name:   "null remains unchanged",
+			column: parser.ColumnDef{Name: "big_col", Type: parser.ColumnTypeBigInt},
+			value:  parser.NullValue(),
+			want:   parser.NullValue(),
 		},
 	}
 
