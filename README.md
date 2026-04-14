@@ -562,11 +562,8 @@ RovaDB is intended to remain a real embedded relational engine with a deliberate
 Current documentation in the repository includes:
 
 - `README.md`
-- `docs/dev/BOOL_design.md`
 - `docs/dev/CREATE_INDEX_design.md`
-- `docs/dev/INTEGER_design.md`
 - `docs/dev/known_gaps.md`
-- `docs/dev/REAL_design.md`
 - `docs/dev/RovaDB_SQL_Language_Spec.md`
 - `docs/dev/SCHEMA_LIFECYCLE_design.md`
 - `docs/dev/road_to_v1.md`
