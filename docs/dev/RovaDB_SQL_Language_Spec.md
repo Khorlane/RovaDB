@@ -1,23 +1,32 @@
 # RovaDB SQL Language Spec
 
-This document defines the SQL subset RovaDB supports and the syntax and behavior boundaries for that subset.
+This document defines the supported SQL subset, type system, literal rules, and user-visible semantic boundaries for RovaDB.
 
-It is intended to guide parser, planner, and executor work by making the supported language explicit before implementation.
+It is the authoritative language and value-semantics reference for parser, planner, executor, public API behavior where SQL-visible types cross into Go, and future SQL-surface work. It defines what RovaDB accepts, what it rejects, and the deterministic behavior expected within the committed product boundary.
 
 ## Purpose
 
-- define exactly what SQL RovaDB will support
-- define what SQL RovaDB will reject
-- keep parser growth deliberate and testable
-- provide a durable reference for future implementation work
+- define exactly what SQL RovaDB supports
+- define exactly what SQL RovaDB rejects
+- lock datatype, literal, nullability, default, and comparison semantics
+- keep parser and executor growth deliberate and testable
+- provide a durable reference that prevents semantic drift
 
 ## Scope
 
-This document is for the supported SQL language surface of RovaDB. It is not an implementation design for the parser internals.
+This document defines the supported SQL language surface and its user-visible semantics.
 
-## Sections
+It does not define:
+- parser implementation internals
+- planner internals
+- storage-page layouts
+- package ownership boundaries
 
-### 1. Statement Inventory
+Those topics belong in architecture and storage-engine documents.
+
+## 1. Statement Inventory
+
+Supported SQL statements:
 
 - `CREATE TABLE`
 - `CREATE INDEX`
@@ -32,13 +41,18 @@ This document is for the supported SQL language surface of RovaDB. It is not an 
 - `SELECT`
 - `UPDATE`
 - `DELETE`
+
+Parser-recognized but not executable as part of the SQL product surface:
+
 - `COMMIT`
 - `ROLLBACK`
 
-### 2. Statement Syntax
+Explicit transactions are supported through the Go API only. SQL `BEGIN`, `COMMIT`, and `ROLLBACK` are not part of the current executable SQL surface.
+
+## 2. Statement Syntax
 
 **CREATE TABLE**
-```
+```text
 >>-CREATE TABLE--table-name--(table-element--+-------------------+--)--><
                                              '-,--table-element--'
 table-element:
@@ -47,6 +61,7 @@ table-element:
 column-definition:
 >>-column-name--type-name--><
 ```
+
 Column definitions also support:
 
 - no trailing clause
@@ -54,13 +69,16 @@ Column definitions also support:
 - `NOT NULL`
 - `NOT NULL DEFAULT <literal>`
 
-constraint-definition:
+Constraint definition:
+```text
 >>-CONSTRAINT--constraint-name--+---------------------------------------------------------------+--><
                                 '-PRIMARY KEY--(--column-list--)--USING INDEX--index-name-------'
                                 '-FOREIGN KEY--(--column-list--)--REFERENCES--table-name--(--column-list--)--USING INDEX--index-name--ON DELETE--+-RESTRICT-+'
                                                                                                                                                    '-CASCADE--'
-**CREATE INDEX**
 ```
+
+**CREATE INDEX**
+```text
 >>-CREATE--+--------+--INDEX--index-name--ON--table-name--(--index-column--+------------------+--)--><
            '-UNIQUE-'                                                      '-,--index-column--'
 index-column:
@@ -69,36 +87,43 @@ index-column:
 ```
 
 **DROP TABLE**
-```
+```text
 >>-DROP TABLE--table-name--><
 ```
+
 **DROP INDEX**
-```
+```text
 >>-DROP INDEX--index-name--><
 ```
+
 **ALTER TABLE ... ADD COLUMN**
-```
+```text
 >>-ALTER TABLE--table-name--ADD COLUMN--column-definition--><
 ```
+
 **ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY**
-```
+```text
 >>-ALTER TABLE--table-name--ADD CONSTRAINT--constraint-name--PRIMARY KEY--(--column-list--)--USING INDEX--index-name--><
 ```
+
 **ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY**
-```
+```text
 >>-ALTER TABLE--table-name--ADD CONSTRAINT--constraint-name--FOREIGN KEY--(--column-list--)--REFERENCES--table-name--(--column-list--)--USING INDEX--index-name--ON DELETE--+-RESTRICT-+--><
                                                                                                                                                                               '-CASCADE--'
 ```
+
 **ALTER TABLE ... DROP PRIMARY KEY**
-```
+```text
 >>-ALTER TABLE--table-name--DROP PRIMARY KEY--><
 ```
+
 **ALTER TABLE ... DROP FOREIGN KEY**
-```
+```text
 >>-ALTER TABLE--table-name--DROP FOREIGN KEY--constraint-name--><
 ```
+
 **INSERT INTO ... VALUES**
-```
+```text
 >>-INSERT INTO--table-name--+------------------+--VALUES--(--value-expr--+---------------+--)--><
                             '-(--column-list-)-'                         '-,--value-expr-'
 column-list:
@@ -107,30 +132,35 @@ column-list:
   '-column-name--+-------+-'             '------------------'
                  '-,--column-name-'
 ```
-If no column-list is provided, value-expr items map positionally to the table's column definitions in schema order. Value count and type/constraint compatibility must match the target columns.
+
+If no column list is provided, value-expr items map positionally to the table's column definitions in schema order. Value count and type and constraint compatibility must match the target columns.
 
 **UPDATE**
-```
+```text
 >>-UPDATE--table-name--SET--assignment--+---------------+--+-------------+--><
                                         '-,--assignment-'  '-WHERE--expr-'
 assignment:
 >>-column-name--=--value-expr--><
 ```
+
 **DELETE**
-```
+```text
 >>-DELETE FROM--table-name--+-------------+--><
                             '-WHERE--expr-'
 ```
+
 **COMMIT**
-```
+```text
 >>-COMMIT--><
 ```
+
 **ROLLBACK**
-```
+```text
 >>-ROLLBACK--><
 ```
+
 **SELECT**
-```
+```text
 >>-SELECT--select-list--FROM--from-clause--+-------------------+--+----------------------+--><
                                            '-WHERE--expr-------'  '-ORDER BY--order-list-'
 select-list:
@@ -163,51 +193,50 @@ boolean-operator:
   '-OR-'
 ```
 
-### 3. Statement Semantic Notes
+## 3. Statement Semantics
 
-**CREATE INDEX semantics**
+### CREATE INDEX
 
-- index names must be unique across the database
+- index names are unique across the database
 - `CREATE INDEX` fails if an equivalent index definition already exists on the same table
 - equivalent index definitions are compared by:
   - target table
   - `UNIQUE` setting
   - ordered indexed column list
-  - per-column `ASC` / `DESC` modifiers
+  - per-column `ASC` or `DESC`
 - the same column must not appear more than once in a single index definition
-- if omitted, `ASC` is assumed for an indexed column
-- `ASC` / `DESC` are part of the index definition and are semantically significant
+- omitted sort direction means `ASC`
+- `ASC` and `DESC` are semantically significant
 - column order is significant for multi-column indexes
-- an index on `(a, b)` is different from an index on `(b, a)`
 - `CREATE UNIQUE INDEX` enforces uniqueness across the full indexed key
-- `CREATE UNIQUE INDEX` fails if duplicate indexed key values already exist in the target table
-- for V1, `CREATE UNIQUE INDEX` also fails if any existing row has `NULL` in any indexed column
+- `CREATE UNIQUE INDEX` fails if duplicate indexed key values already exist
+- for the current product boundary, `CREATE UNIQUE INDEX` also fails if any existing row has `NULL` in any indexed column
 
-**DROP INDEX semantics**
+### DROP INDEX
 
 - `DROP INDEX` identifies the target index by database-wide index name
 - `DROP INDEX` fails if the named index does not exist
 - `DROP INDEX` removes only the named index and does not remove table data
 - `DROP INDEX` fails while the index is still required by a primary key or foreign key
 
-**DROP TABLE semantics**
+### DROP TABLE
 
 - `DROP TABLE` fails if the named table does not exist
 - `DROP TABLE` removes the named table and all indexes defined on that table
 - `DROP TABLE` removes both table schema metadata and table row data
 - `DROP TABLE` tears down dependent foreign keys in surviving child tables rather than blocking
 
-**ALTER TABLE ... ADD COLUMN semantics**
+### ALTER TABLE ... ADD COLUMN
 
 - `ALTER TABLE ... ADD COLUMN` appends the new column to the end of the table schema
-- column definitions may use the same supported `NOT NULL` and literal `DEFAULT` forms as `CREATE TABLE`
+- column definitions use the same supported `NOT NULL` and literal `DEFAULT` forms as `CREATE TABLE`
 - adding a nullable column without a default exposes `NULL` for pre-existing rows
 - adding a nullable column with a literal default exposes that default for pre-existing rows
 - adding a `NOT NULL` column without a default is allowed only when the target table is empty
 - adding a `NOT NULL` column with a literal default is allowed and exposes that default for pre-existing rows
 - future inserts use the updated column metadata, including default-on-omission behavior
 
-**PRIMARY KEY semantics**
+### PRIMARY KEY
 
 - primary keys are named only
 - at most one primary key may exist per table
@@ -215,10 +244,10 @@ boolean-operator:
 - primary-key columns are implicitly `NOT NULL`
 - `USING INDEX <name>` is required
 - the supporting index must be `UNIQUE` and match the primary-key column list exactly
-- primary-key values cannot be modified
-- `ALTER TABLE ... DROP PRIMARY KEY` removes dependent foreign keys and keeps indexes
+- primary-key values cannot be modified with `UPDATE`
+- `ALTER TABLE ... DROP PRIMARY KEY` removes dependent foreign keys and keeps the supporting indexes
 
-**FOREIGN KEY semantics**
+### FOREIGN KEY
 
 - foreign keys are named only
 - foreign keys may be single-column or composite
@@ -230,7 +259,7 @@ boolean-operator:
 - the child supporting index must use the foreign-key columns as a contiguous leftmost prefix
 - `ALTER TABLE ... DROP FOREIGN KEY <name>` removes the constraint and keeps the supporting index
 
-**Referential-integrity semantics**
+### Referential Integrity
 
 - enforcement is immediate
 - statement execution is atomic
@@ -240,11 +269,289 @@ boolean-operator:
 - all-`CASCADE` cycles are rejected at DDL time
 - multiple cascade paths are rejected at DDL time
 
-### 4. Expression Inventory
+## 4. Column Definition Semantics
+
+Supported column forms:
+
+- `<name> <type>`
+- `<name> <type> DEFAULT <literal>`
+- `<name> <type> NOT NULL`
+- `<name> <type> NOT NULL DEFAULT <literal>`
+
+No broader default syntax is supported.
+
+### Literal DEFAULT Rules
+
+Defaults are literal-only.
+
+Allowed literal categories:
+
+- integer literal
+- string literal
+- boolean literal
+- real literal
+- `NULL`, but only where the column remains nullable
+
+Datatype compatibility is checked against the target column's normal assignment rules.
+
+Examples:
+
+- `INT DEFAULT 1` is valid
+- `REAL DEFAULT 1.25` is valid
+- `TEXT DEFAULT 'ready'` is valid
+- `BOOL DEFAULT TRUE` is valid
+- `TEXT DEFAULT NULL` is valid if the column is nullable
+- `INT DEFAULT 'abc'` is invalid
+- `BOOL DEFAULT 1` is invalid
+- `NOT NULL DEFAULT NULL` is invalid
+
+### INSERT Default Semantics
+
+`DEFAULT` applies only when an `INSERT` omits a value for the column.
+
+Rules:
+
+- omitted value uses the column default if one is defined
+- omitted value without a default yields `NULL` only for nullable columns
+- omitted value for a `NOT NULL` column without a default is an error
+- explicit `NULL` for a `NOT NULL` column is an error
+- explicit `NULL` for a nullable column remains allowed even if the column has a non-`NULL` default
+
+### UPDATE Default Semantics
+
+`UPDATE` does not inject defaults automatically.
+
+Rules:
+
+- explicit `NULL` assigned to a `NOT NULL` column is an error
+- explicit `NULL` assigned to a nullable column is allowed
+- no assignment leaves the existing stored value unchanged
+- `DEFAULT` is not re-applied during `UPDATE` just because the column is omitted
+
+## 5. Datatype Inventory
+
+Supported schema datatypes:
+
+- `SMALLINT`
+- `INT`
+- `BIGINT`
+- `TEXT`
+- `BOOL`
+- `REAL`
+
+`NULL` is a value state, not a standalone schema type.
+
+## 6. Integer Semantics
+
+RovaDB supports three distinct SQL integer types:
+
+- `SMALLINT`
+- `INT`
+- `BIGINT`
+
+These are distinct user-visible types. They are not aliases for one generic integer family.
+
+### SQL-to-Go Mapping
+
+The locked Go mappings are:
+
+- `SMALLINT` <-> `int16`
+- `INT` <-> `int32`
+- `BIGINT` <-> `int64`
+
+These mappings apply across binding, writes, typed result materialization, and `Scan`.
+
+### Binding Contract
+
+Placeholder binding for SQL integer values is exact-width:
+
+- SQL integer binding accepts only Go `int16`, `int32`, and `int64`
+- Go `int` is rejected
+- other integer-like Go types are rejected
+
+### Write Contract
+
+Writes are exact by declared column type:
+
+- `SMALLINT` columns accept only `int16`
+- `INT` columns accept only `int32`
+- `BIGINT` columns accept only `int64`
+
+Allowed narrow exception:
+
+- an untyped SQL integer literal may resolve to the target width if it fits
+- if it does not fit, the write fails
+
+Typed wrong-width integers are rejected even when the numeric magnitude would fit.
+
+### Arithmetic Contract
+
+Typed integer arithmetic preserves exact width:
+
+- `SMALLINT +/- SMALLINT -> SMALLINT`
+- `INT +/- INT -> INT`
+- `BIGINT +/- BIGINT -> BIGINT`
+
+Rules:
+
+- overflow fails immediately
+- mixed-width typed arithmetic is rejected
+- typed integer plus untyped integer literal resolves to the typed width if it fits
+- typed integer plus untyped integer literal fails if it does not fit
+
+### Typed Result Materialization and Scan
+
+Typed SQL integer results materialize to their exact Go widths:
+
+- typed `SMALLINT` -> `int16`
+- typed `INT` -> `int32`
+- typed `BIGINT` -> `int64`
+
+`Scan` is exact-width for typed integer results:
+
+- `SMALLINT` scans only into `*int16`
+- `INT` scans only into `*int32`
+- `BIGINT` scans only into `*int64`
+
+Go `int` is not part of the typed SQL integer contract.
+
+### Untyped Integer Result Seams
+
+RovaDB retains a narrow untyped integer-result path for expression-only or schema-less cases that do not resolve against a typed integer column.
+
+Current examples include:
+
+- `SELECT 1`
+- `SELECT 1 + 2`
+- `COUNT(*)`
+- `COUNT(expr)`
+- `LENGTH(text)`
+
+These results materialize as `int64` and scan only into `*int64`.
+
+## 7. TEXT Semantics
+
+### Type Contract
+
+- `TEXT` is the canonical string schema type
+- string literals are written using single quotes
+- quoted numeric-looking values remain `TEXT`, not numeric types
+- `TEXT` columns accept `TEXT` or `NULL`
+- there is no implicit coercion between `TEXT` and `INT`, `REAL`, or `BOOL`
+
+### Comparison and Ordering Contract
+
+- `TEXT` comparisons are case-insensitive
+- comparisons use lowercase normalization
+- no locale-aware collation is applied
+- no accent-aware collation is applied
+- behavior is deterministic across `WHERE` and `ORDER BY`
+
+### Function Contract
+
+Supported scalar text functions:
+
+- `LOWER(text) -> text`
+- `UPPER(text) -> text`
+- `LENGTH(text) -> untyped integer result`
+
+### Indexed TEXT Limit
+
+For indexed `TEXT` values:
+
+- indexed `TEXT` values are limited to `<= 512` bytes
+- the limit is measured in bytes, not characters
+- the limit is enforced on `INSERT`, `UPDATE`, `CREATE INDEX`, and `CREATE UNIQUE INDEX`
+
+## 8. BOOL Semantics
+
+### Type Contract
+
+- `BOOL` is the canonical boolean schema type
+- runtime Go representation is `bool`
+- `BOOL` columns accept only `TRUE`, `FALSE`, or `NULL`
+
+### Literal Classification
+
+- unquoted `TRUE` and `FALSE` are `BOOL`
+- quoted `'true'` and `'false'` are `TEXT`
+- `1` and `0` are `INT`, not `BOOL`
+
+### Enforcement Rules
+
+- reject `INT` values such as `0` and `1` for `BOOL` columns
+- reject `TEXT` values such as `'true'` and `'false'` for `BOOL` columns
+- BOOL comparisons are BOOL-to-BOOL only
+- there is no implicit coercion between `BOOL` and `INT` or `TEXT`
+
+## 9. REAL Semantics
+
+### Type Contract
+
+- `REAL` is the canonical fractional numeric schema type
+- runtime Go representation is `float64`
+- `REAL` columns accept only `REAL` or `NULL`
+
+### Literal Classification
+
+- unquoted decimal literals are `REAL`
+- unquoted whole numbers remain integer literals
+- quoted numeric-looking values remain `TEXT`
+
+### Enforcement Rules
+
+- there is no implicit coercion from `INT`, `TEXT`, or `BOOL` into `REAL`
+- `REAL` does not auto-convert to `INT`
+- `INT` does not auto-convert to `REAL`
+
+### Comparison Rules
+
+- `REAL`-to-`REAL` comparisons support equality and ordering operators
+- mixed `INT` versus `REAL` comparisons are strict mismatches and are rejected consistently with RovaDB's strict model
+
+## 10. Literal Inventory
+
+Supported literal forms:
+
+- integer literal
+- string literal
+- boolean literal
+- real literal
+- `NULL`
+
+Classification rules:
+
+- unquoted whole numbers are integer literals
+- unquoted decimals are real literals
+- quoted text remains string literal `TEXT`
+- unquoted `TRUE` and `FALSE` are boolean literals
+- `NULL` is the null literal
+
+## 11. Placeholder Semantics
+
+- placeholders use `?`
+- placeholders bind positionally from left to right
+- placeholders are allowed only in value and expression positions
+- placeholder count must match argument count exactly
+- each call is one-shot; this is not a prepared statement system
+
+Supported Go argument types:
+
+- `int16`
+- `int32`
+- `int64`
+- `string`
+- `bool`
+- `float64`
+- `nil`
+
+Unsupported argument types are rejected.
+
+## 12. Expression Inventory
 
 Expressions are shared across projection, predicates, assignments, and value lists, but each context may apply additional restrictions.
 
-**Core Expression Forms**
+### Core Expression Forms
 
 - literal value
 - placeholder value
@@ -257,82 +564,38 @@ Expressions are shared across projection, predicates, assignments, and value lis
 - comparison expression
 - boolean expression
 
-Aggregate function calls are context-restricted and are not valid in every expression position.
-
-**Literal Values**
-
-- integer literal
-- string literal
-- boolean literal
-- real literal
-- `NULL`
-
-**Placeholder Values**
-
-- `?`
-- placeholders bind positionally from left to right
-- placeholders are allowed only in value/expression positions
-
-**Column References**
+### Column References
 
 - unqualified column reference
 - qualified column reference using `table-name.column-name`
 - qualified column reference using `alias-name.column-name`
 
-**Arithmetic Expressions**
+### Arithmetic Expressions
 
 - arithmetic expressions produce a value
 - arithmetic expressions may appear in projection, predicates, assignments, and value lists where type-compatible
-- exact supported operators will be defined explicitly
+- currently supported arithmetic operators are `+` and `-`
 
-**Comparison Expressions**
+### Comparison Expressions
 
-- comparison expressions compare two value expressions
-- comparison operators will be defined explicitly
-- comparison expressions produce a boolean result
+Supported comparison operators:
 
-**Boolean Expressions**
+- `=`
+- `!=`
+- `<>`
+- `<`
+- `<=`
+- `>`
+- `>=`
+
+### Boolean Expressions
 
 - boolean expressions are built from comparison expressions and other boolean expressions
 - `NOT`, `AND`, and `OR` are boolean operators
 - precedence is `NOT`, then `AND`, then `OR`
+- parenthesized grouping is supported
 
-**Function Calls**
-
-- scalar function calls produce a value
-- aggregate function calls produce an aggregate result
-- supported function names are defined in `Function Inventory` and `Aggregate Inventory`
-
-**Projection Context**
-
-- `SELECT` items may be:
-  - `*`
-  - column references
-  - expressions
-  - scalar function calls
-  - aggregate function calls
-
-**Predicate Context**
-
-- `WHERE` uses boolean expressions
-- boolean expressions may contain:
-  - comparison expressions
-  - parenthesized boolean expressions
-  - scalar function calls inside value expressions
-- aggregate function calls are not allowed in `WHERE`
-
-**Assignment Context**
-
-- `UPDATE ... SET column = value-expr`
-- assignment expressions must produce a value compatible with the target column
-
-**Value List Context**
-
-- `INSERT ... VALUES (...)`
-- each item in a `VALUES` list must be a value expression
-- aggregate function calls are not allowed in `VALUES` lists
-
-### 5. Function Inventory
+## 13. Function Inventory
 
 Supported scalar functions:
 
@@ -350,24 +613,17 @@ Supported aggregate functions:
 - `COUNT(*) -> untyped integer result`
 - `COUNT(expr) -> untyped integer result`
 
-Function calls may appear only in expression contexts that allow them.
-
-### 6. Join Inventory
+## 14. Join Inventory
 
 Supported join shape:
 
 - inner joins
 - equality join predicates
-- join predicates compare value expressions, but current intended support is table/alias-qualified column reference to table/alias-qualified column reference
+- join predicates compare value expressions, but current intended support is table- or alias-qualified column reference to table- or alias-qualified column reference
 - table aliases are supported
-- the initial supported query scope is up to two joined tables
+- current supported query scope is up to two joined tables
 
-Design intent:
-
-- the language shape should not box future growth into two-table-only syntax
-- execution strategy is not part of the language spec
-
-Rejected join forms for now:
+Rejected join forms:
 
 - outer joins
 - non-equality join predicates
@@ -376,7 +632,7 @@ Rejected join forms for now:
 - subquery joins
 - joins over more than two tables
 
-### 7. Aggregate Inventory
+## 15. Aggregate Inventory
 
 Supported aggregate functions:
 
@@ -392,19 +648,62 @@ Aggregate usage rules:
 - aggregate functions are not allowed in `WHERE`
 - aggregate functions are not allowed in `INSERT ... VALUES (...)`
 - aggregate functions are not allowed in `UPDATE ... SET ...` assignments
+- mixed aggregate and non-aggregate projection is not supported
 
-Initial aggregate query scope:
+## 16. SELECT Semantics
 
-- aggregate support is intended for single-result aggregate queries
-- `COUNT(*)` is supported explicitly
-- `COUNT(expr)` is supported explicitly
-- mixed aggregate and non-aggregate projection rules should be defined explicitly before implementation expands
+Supported SELECT features:
 
-### 8. Accepted Examples
+- literal selects such as `SELECT 1`, `SELECT 'hello'`, `SELECT TRUE`, and arithmetic expressions with `+` and `-`
+- projection expressions, column projection, qualified column references, and `AS` aliases
+- `ORDER BY` resolution against select-item aliases at the same `SELECT` level
+- single-table `FROM`
+- two-table inner equi-joins via explicit `INNER JOIN ... ON ...` and comma join plus `WHERE`
+- `WHERE` with `NOT`, precedence, and parenthesized grouping
+- scalar functions: `LOWER`, `UPPER`, `LENGTH`, and `ABS`
+- aggregates: `COUNT(*)`, `COUNT(expr)`, `MIN`, `MAX`, `AVG`, and `SUM`
+
+### Narrow Index-Only Surface
+
+True index-only means the correct result is produced entirely from:
+
+- index contents
+- index-structure metadata
+
+without fetching base table rows.
+
+Supported today only for:
+
+- eligible plain single-table `COUNT(*)`
+- eligible plain single-table single-column direct indexed projection such as `SELECT id FROM users`
+- eligible qualified single-table single-column direct indexed projection such as `SELECT users.id FROM users`
+
+Unsupported or uncertain shapes fall back to existing table, index, or join paths.
+
+## 17. Not Supported
+
+Not supported today:
+
+- `GROUP BY`
+- `HAVING`
+- subqueries
+- joins over more than two tables
+- non-`INNER` joins
+- non-equality join predicates
+- qualified star projection such as `a.*` or `b.*`
+- mixed aggregate and non-aggregate projections
+- alias resolution in `WHERE`
+- SQL `BEGIN`
+- executable SQL `COMMIT`
+- executable SQL `ROLLBACK`
+- schema changes other than `ALTER TABLE ... ADD COLUMN`, `ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY`, `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY`, `ALTER TABLE ... DROP PRIMARY KEY`, and `ALTER TABLE ... DROP FOREIGN KEY`
+
+## 18. Accepted Examples
 
 Representative accepted examples:
 
 - `CREATE TABLE users (id INT NOT NULL, name TEXT DEFAULT 'ready', active BOOL NOT NULL DEFAULT TRUE, score REAL DEFAULT 0.0)`
+- `CREATE TABLE metrics (small SMALLINT, normal INT, big BIGINT)`
 - `CREATE UNIQUE INDEX idx_users_name ON users (name ASC)`
 - `CREATE INDEX idx_users_name_score ON users (name ASC, score DESC)`
 - `DROP TABLE users`
@@ -420,8 +719,6 @@ Representative accepted examples:
 - `UPDATE users SET name = 'Bob' WHERE id = 1`
 - `UPDATE users SET score = ABS(score) WHERE id = ?`
 - `DELETE FROM users WHERE id = ?`
-- `COMMIT`
-- `ROLLBACK`
 - `SELECT * FROM users`
 - `SELECT id, name FROM users WHERE active = TRUE ORDER BY name ASC`
 - `SELECT LOWER(name), LENGTH(name) FROM users WHERE id = 1`
@@ -430,7 +727,7 @@ Representative accepted examples:
 - `SELECT AVG(score), SUM(score), MIN(score), MAX(score) FROM users`
 - `SELECT u.name, d.name FROM users u JOIN departments d ON u.department_id = d.id`
 
-### 9. Rejected Examples
+## 19. Rejected Examples
 
 Representative rejected examples:
 
@@ -459,7 +756,15 @@ Representative rejected examples:
 - `SELECT * FROM users WHERE id IN (SELECT id FROM archived_users)`
 - `SELECT * FROM users NATURAL JOIN departments`
 - `SELECT * FROM users JOIN departments USING (department_id)`
+- binding Go `int` into a typed SQL integer placeholder
+- scanning typed `INT` into `*int64`
+- inserting `1` into a `BOOL` column
+- comparing `REAL` to `INT` as if implicit coercion existed
 
-### 10. Notes
+## 20. Notes
 
-Boolean expression precedence is `NOT`, then `AND`, then `OR`. Parenthesized boolean grouping is supported.
+- boolean expression precedence is `NOT`, then `AND`, then `OR`
+- parenthesized boolean grouping is supported
+- typed integer semantics are exact-width
+- text comparison semantics are case-insensitive and normalization-based, not locale-aware
+- defaults are literal-only and apply on `INSERT` omission only
