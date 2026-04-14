@@ -36,7 +36,7 @@ Compared with SQLite, RovaDB is not trying to match the full breadth, ecosystem 
 
 Compared with key-value stores and simple embedded persistence libraries, RovaDB gives you a relational model, SQL queries, joins, ordering, aggregates, catalog visibility, and a more familiar mental model for structured application data.
 
-> **Status:** Pre-release. RovaDB already provides a practical baseline with a small public API, focused SQL support, explicit transaction control through the Go API, and completed physical storage foundation/polish milestones.
+> **Status:** Pre-release. RovaDB already provides a practical embedded SQL baseline with a small public API, focused SQL support, explicit Go-API transaction control, a hardened physical storage model, enforced architectural boundaries, and strict typed semantics including exact-width integer behavior.
 
 ## Quick Start
 
@@ -92,30 +92,33 @@ If you want to embed RovaDB in a Go program instead, see `examples/basic_usage/m
 
 ## Current State
 
-Current engineering focus is the post-physical-storage-polish path beyond the current storage baseline.
+RovaDB is in active pre-release development with a practical embedded-engine baseline already in place.
 
-The direction under active exploration is:
+Recent completed milestones include:
 
-- strengthening durability and recovery beyond the current rollback-journal model
-- expanding on-disk indexing and transaction foundations to support a more capable long-term engine
-- continuing to harden and extend the new `TableHeader` / `SpaceMap` / owned-`Data` page storage model
+- physical storage layer and physical storage polish
+- architectural boundary hardening
+- planner/execution boundary separation and outer-seam tightening
+- public transaction API
+- narrow index-only access
+- primary and foreign key support
+- column nullability and literal defaults
+- physical integer widths
+- strict integer semantics
 
-The completed storage milestones are:
+The current engine baseline includes:
 
-- `v0.37.0-physical-storage-layer`
-- `v0.38.0-physical-storage-polish`
+- authoritative `TableHeader` roots with `SpaceMap`-owned `Data` page storage
+- strict open/reopen validation of physical ownership and storage invariants
+- rollback-journal-based crash-safe writes and explicit corruption detection
+- locked parser -> planner -> execution -> storage layering with one-way dependencies
+- explicit public transactions through the Go API
+- named primary and foreign keys with immediate referential integrity enforcement
+- strict value semantics for `SMALLINT`, `INT`, `BIGINT`, `TEXT`, `BOOL`, `REAL`, and `NULL`
+- exact-width integer binding, write, arithmetic, storage, and scan behavior
+- deterministic query behavior, explicit error surfaces, and growing lifecycle coverage
 
-The current engine storage truth is:
-
-- tables have authoritative `TableHeader` roots
-- `SpaceMap` pages enumerate owned `Data` pages
-- normal writes land on owned `Data` pages
-- normal reads and scans enumerate rows from owned `Data` pages
-- row-growth updates relocate through delete plus reinsert when they no longer fit in place
-- open and reopen strictly validate physical ownership invariants with no backward-compatibility path for pre-physstore table storage
-- diagnostics and consistency reporting expose per-table physical ownership metadata and inventory truth
-
-This work is about deepening storage and transaction internals while preserving RovaDB's existing goals around clarity, determinism, and a small stable public API.
+Current development is focused on extending capability without weakening correctness, determinism, storage integrity, or API discipline.
 
 ## Architectural Boundaries
 
@@ -172,7 +175,7 @@ See `docs/dev/ARCHITECTURAL_BOUNDARIES.md` for the authoritative boundary contra
 
 ### Scope Discipline
 
-The current repo baseline is the practical target for this intended use case. Future changes should prioritize correctness, determinism, durability, and API stability over feature expansion, and any new feature should justify crossing this boundary.
+The current repo baseline is the practical target for this intended use case. Future changes are expected to preserve strict contracts, data integrity, deterministic behavior, architectural boundary discipline, durability, and API stability ahead of feature expansion. New features should earn their place without weakening those constraints.
 
 ## Supported SQL
 
@@ -542,28 +545,17 @@ RovaDB grows around these locked major layers:
 - **execution**
 - **storage**
 
-The intended engine path is:
+The engine path is:
 
 ```text
 SQL -> parser -> planner -> execution -> storage
 ```
 
-`txn` and `bufferpool` support transaction and durable-page orchestration around that path, but they do not redefine layer ownership. The root package stays thin and public-facing, while storage continues to own durable metadata, value encoding, and index/page details behind narrow contracts.
-
-## Storage direction
-
-The storage layer is meant to support long-term growth without turning into a throwaway prototype. That means avoiding shortcuts that would make future evolution painful, including:
-
-- baking SQL behavior directly into storage code
-- tying internal row representation to one fixed on-disk layout
-- skipping transaction boundaries entirely
-- letting one-off statement logic grow without common planning/execution paths
-
-The direction is a page-based storage engine with clear internal abstractions and explicit transaction boundaries.
+`txn` and `bufferpool` support transaction and durable-page orchestration around that path, but they do not redefine layer ownership. The root package stays thin and public-facing, storage owns durable metadata, value encoding, and page/index details behind narrow contracts, and boundary guardrails are part of the maintained engine baseline.
 
 ## Long-Term Direction
 
-RovaDB is intended to be a real embedded relational engine with a deliberately narrow starting point. The long-term ambition is to broaden capability over time while keeping its Go-first identity and readable implementation.
+RovaDB is intended to remain a real embedded relational engine with a deliberately narrow, correctness-first product boundary. The long-term ambition is to broaden capability over time while preserving its Go-first identity, readable implementation, strict semantics, and disciplined architecture.
 
 ## Documentation
 
