@@ -665,3 +665,105 @@ func TestExecuteUpdateTypedIntegerTargetsRequireExactWidthValues(t *testing.T) {
 		})
 	}
 }
+
+func TestExecuteUpdateTemporalTargetsRequireExactFamilies(t *testing.T) {
+	tests := []struct {
+		name       string
+		columnType string
+		initial    parser.Value
+		value      parser.Value
+		want       parser.Value
+		wantErr    error
+	}{
+		{
+			name:       "date accepts date",
+			columnType: parser.ColumnTypeDate,
+			initial:    parser.DateValue(20553),
+			value:      parser.DateValue(20554),
+			want:       parser.DateValue(20554),
+		},
+		{
+			name:       "date rejects time",
+			columnType: parser.ColumnTypeDate,
+			initial:    parser.DateValue(20553),
+			value:      parser.TimeValue(49521),
+			wantErr:    errTypeMismatch,
+		},
+		{
+			name:       "date rejects text",
+			columnType: parser.ColumnTypeDate,
+			initial:    parser.DateValue(20553),
+			value:      parser.StringValue("2026-04-10"),
+			wantErr:    errTypeMismatch,
+		},
+		{
+			name:       "time accepts time",
+			columnType: parser.ColumnTypeTime,
+			initial:    parser.TimeValue(49521),
+			value:      parser.TimeValue(49522),
+			want:       parser.TimeValue(49522),
+		},
+		{
+			name:       "time rejects timestamp",
+			columnType: parser.ColumnTypeTime,
+			initial:    parser.TimeValue(49521),
+			value:      parser.TimestampValue(1775828721000, 0),
+			wantErr:    errTypeMismatch,
+		},
+		{
+			name:       "timestamp accepts timestamp",
+			columnType: parser.ColumnTypeTimestamp,
+			initial:    parser.TimestampValue(1775828721000, 0),
+			value:      parser.TimestampValue(1775828781000, 7),
+			want:       parser.TimestampValue(1775828781000, 7),
+		},
+		{
+			name:       "timestamp rejects date",
+			columnType: parser.ColumnTypeTimestamp,
+			initial:    parser.TimestampValue(1775828721000, 0),
+			value:      parser.DateValue(20553),
+			wantErr:    errTypeMismatch,
+		},
+		{
+			name:       "timestamp rejects bool",
+			columnType: parser.ColumnTypeTimestamp,
+			initial:    parser.TimestampValue(1775828721000, 0),
+			value:      parser.BoolValue(true),
+			wantErr:    errTypeMismatch,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			table := &Table{
+				Name:    "events",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "target", Type: tc.columnType}},
+				Rows:    [][]parser.Value{{parser.IntValue(1), tc.initial}},
+			}
+			tables := map[string]*Table{"events": table}
+
+			_, err := executeUpdate(&parser.UpdateStmt{
+				TableName: "events",
+				Assignments: []parser.UpdateAssignment{
+					{Column: "target", Value: tc.value},
+				},
+				Where: where(parser.Condition{Left: "id", Operator: "=", Right: parser.Int64Value(1)}),
+			}, tables)
+			if tc.wantErr != nil {
+				if err != tc.wantErr {
+					t.Fatalf("executeUpdate() error = %v, want %v", err, tc.wantErr)
+				}
+				if got := table.Rows[0][1]; got != tc.initial {
+					t.Fatalf("row changed on failure = %#v, want %#v", got, tc.initial)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("executeUpdate() error = %v", err)
+			}
+			if got := table.Rows[0][1]; got != tc.want {
+				t.Fatalf("row target = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}

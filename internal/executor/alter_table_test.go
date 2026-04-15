@@ -177,6 +177,27 @@ func TestExecuteAlterTableAddColumnAppliesNullabilityAndDefaults(t *testing.T) {
 			column:  parser.ColumnDef{Name: "age", Type: parser.ColumnTypeSmallInt, HasDefault: true, DefaultValue: parser.Int64Value(40000)},
 			wantErr: "execution: type mismatch",
 		},
+		{
+			name: "typed date default is preserved during add column expansion",
+			table: &Table{
+				Name:    "users",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+				Rows:    [][]parser.Value{{parser.Int64Value(1)}},
+			},
+			column:       parser.ColumnDef{Name: "event_date", Type: parser.ColumnTypeDate, HasDefault: true, DefaultValue: parser.DateValue(20553)},
+			wantRows:     [][]parser.Value{{parser.Int64Value(1), parser.DateValue(20553)}},
+			wantRowWidth: 2,
+		},
+		{
+			name: "mismatched temporal default is rejected during add column expansion",
+			table: &Table{
+				Name:    "users",
+				Columns: []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}},
+				Rows:    [][]parser.Value{{parser.Int64Value(1)}},
+			},
+			column:  parser.ColumnDef{Name: "event_date", Type: parser.ColumnTypeDate, HasDefault: true, DefaultValue: parser.TimeValue(49521)},
+			wantErr: "execution: type mismatch",
+		},
 	}
 
 	for _, tc := range tests {

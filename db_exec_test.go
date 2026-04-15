@@ -679,6 +679,156 @@ func TestExecEngineOwnedIntegerLiteralsAndDefaultsRemainValidForTypedIntegerWrit
 	assertRowsIntSequence(t, userRows, 5)
 }
 
+func TestExecTemporalWritesAcceptMatchingFamiliesAndCanonicalPlaceholderStrings(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE events (id INT, event_date DATE, event_time TIME, recorded_at TIMESTAMP)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(
+		"INSERT INTO events VALUES (?, ?, ?, ?)",
+		int32(1),
+		"2026-04-10",
+		"13:45:21",
+		"2026-04-10 13:45:21",
+	); err != nil {
+		t.Fatalf("Exec(insert matching temporal placeholders) error = %v", err)
+	}
+	if err := db.loadRowsIntoTables(db.tables, "events"); err != nil {
+		t.Fatalf("loadRowsIntoTables(after insert) error = %v", err)
+	}
+
+	row := db.tables["events"].Rows[0]
+	wantInsert := []parser.Value{
+		parser.IntValue(1),
+		parser.DateValue(20553),
+		parser.TimeValue(49521),
+		parser.TimestampValue(1775828721000, 0),
+	}
+	if len(row) != len(wantInsert) || row[0] != wantInsert[0] || row[1] != wantInsert[1] || row[2] != wantInsert[2] || row[3] != wantInsert[3] {
+		t.Fatalf("inserted row = %#v, want %#v", row, wantInsert)
+	}
+
+	if _, err := db.Exec(
+		"UPDATE events SET event_date = ?, event_time = ?, recorded_at = ? WHERE id = ?",
+		"2026-04-11",
+		"00:00:01",
+		"2026-04-11 00:00:01",
+		int32(1),
+	); err != nil {
+		t.Fatalf("Exec(update matching temporal placeholders) error = %v", err)
+	}
+	if err := db.loadRowsIntoTables(db.tables, "events"); err != nil {
+		t.Fatalf("loadRowsIntoTables(after update) error = %v", err)
+	}
+
+	updated := db.tables["events"].Rows[0]
+	wantUpdate := []parser.Value{
+		parser.IntValue(1),
+		parser.DateValue(20554),
+		parser.TimeValue(1),
+		parser.TimestampValue(1775865601000, 0),
+	}
+	if len(updated) != len(wantUpdate) || updated[0] != wantUpdate[0] || updated[1] != wantUpdate[1] || updated[2] != wantUpdate[2] || updated[3] != wantUpdate[3] {
+		t.Fatalf("updated row = %#v, want %#v", updated, wantUpdate)
+	}
+}
+
+func TestExecTemporalWritesRejectMismatchedAndMalformedPlaceholderValues(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE events (id INT, event_date DATE, event_time TIME, recorded_at TIMESTAMP)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec(
+		"INSERT INTO events VALUES (?, ?, ?, ?)",
+		int32(1),
+		"2026-04-10",
+		"13:45:21",
+		"2026-04-10 13:45:21",
+	); err != nil {
+		t.Fatalf("Exec(seed) error = %v", err)
+	}
+	if err := db.loadRowsIntoTables(db.tables, "events"); err != nil {
+		t.Fatalf("loadRowsIntoTables(seed) error = %v", err)
+	}
+
+	initialRows := cloneRows(db.tables["events"].Rows)
+
+	tests := []struct {
+		name     string
+		query    string
+		args     []any
+		wantBind bool
+	}{
+		{
+			name:  "insert date placeholder into time column",
+			query: "INSERT INTO events VALUES (?, ?, ?, ?)",
+			args:  []any{int32(2), "2026-04-10", "2026-04-10", "2026-04-10 13:45:21"},
+		},
+		{
+			name:  "insert time placeholder into timestamp column",
+			query: "INSERT INTO events VALUES (?, ?, ?, ?)",
+			args:  []any{int32(2), "2026-04-10", "13:45:21", "13:45:21"},
+		},
+		{
+			name:  "insert ordinary text into date column",
+			query: "INSERT INTO events VALUES (?, ?, ?, ?)",
+			args:  []any{int32(2), "not-a-date", "13:45:21", "2026-04-10 13:45:21"},
+		},
+		{
+			name:  "insert int into date column",
+			query: "INSERT INTO events VALUES (?, ?, ?, ?)",
+			args:  []any{int32(2), int32(7), "13:45:21", "2026-04-10 13:45:21"},
+		},
+		{
+			name:  "update timestamp column with date placeholder",
+			query: "UPDATE events SET recorded_at = ? WHERE id = ?",
+			args:  []any{"2026-04-10", int32(1)},
+		},
+		{
+			name:  "update time column with bool placeholder",
+			query: "UPDATE events SET event_time = ? WHERE id = ?",
+			args:  []any{true, int32(1)},
+		},
+		{
+			name:     "insert malformed temporal placeholder string",
+			query:    "INSERT INTO events VALUES (?, ?, ?, ?)",
+			args:     []any{int32(2), "2026/04/10", "13:45:21", "2026-04-10 13:45:21"},
+			wantBind: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := db.Exec(tc.query, tc.args...)
+			if tc.wantBind {
+				if err == nil || !strings.Contains(err.Error(), "invalid temporal literal") {
+					t.Fatalf("Exec() error = %v, want bind-time invalid temporal literal", err)
+				}
+			} else {
+				var dbErr *DBError
+				if !errors.As(err, &dbErr) || dbErr.Kind != ErrExec {
+					t.Fatalf("Exec() error = %v, want exec-type mismatch error", err)
+				}
+			}
+			if got := db.tables["events"].Rows; len(got) != len(initialRows) {
+				t.Fatalf("rows len = %d, want %d after rejected write", len(got), len(initialRows))
+			} else if len(got) > 0 && (len(got[0]) != len(initialRows[0]) || got[0][0] != initialRows[0][0] || got[0][1] != initialRows[0][1] || got[0][2] != initialRows[0][2] || got[0][3] != initialRows[0][3]) {
+				t.Fatalf("rows[0] = %#v, want %#v after rejected write", got[0], initialRows[0])
+			}
+		})
+	}
+}
+
 func TestExecTypedIntegerWritesRejectOutOfRangeSQLLiteralsByTargetWidth(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

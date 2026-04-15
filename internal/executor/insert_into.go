@@ -213,9 +213,22 @@ func normalizeColumnScalarValue(typeName string, value parser.Value) (parser.Val
 			return parser.Value{}, errTypeMismatch
 		}
 		return value, nil
+	case parser.ColumnTypeDate:
+		return normalizeExactTemporalColumnValue(value, parser.ValueKindDate)
+	case parser.ColumnTypeTime:
+		return normalizeExactTemporalColumnValue(value, parser.ValueKindTime)
+	case parser.ColumnTypeTimestamp:
+		return normalizeExactTemporalColumnValue(value, parser.ValueKindTimestamp)
 	default:
 		return parser.Value{}, errTypeMismatch
 	}
+}
+
+func normalizeExactTemporalColumnValue(value parser.Value, exactKind parser.ValueKind) (parser.Value, error) {
+	if value.Kind != exactKind {
+		return parser.Value{}, errTypeMismatch
+	}
+	return value, nil
 }
 
 func normalizeExactWidthIntegerColumnValue(value parser.Value, exactType parser.BoundIntegerType) (parser.Value, error) {

@@ -423,6 +423,77 @@ func TestExecuteInsertValueExprArithmetic(t *testing.T) {
 	}
 }
 
+func TestExecuteInsertTemporalValues(t *testing.T) {
+	tables := map[string]*Table{
+		"events": {
+			Name: "events",
+			Columns: []parser.ColumnDef{
+				{Name: "event_date", Type: parser.ColumnTypeDate},
+				{Name: "event_time", Type: parser.ColumnTypeTime},
+				{Name: "recorded_at", Type: parser.ColumnTypeTimestamp},
+			},
+		},
+	}
+
+	affected, err := Execute(&parser.InsertStmt{
+		TableName: "events",
+		Values: []parser.Value{
+			parser.DateValue(20553),
+			parser.TimeValue(49521),
+			parser.TimestampValue(1775828721000, 0),
+		},
+	}, tables)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("Execute() affected = %d, want 1", affected)
+	}
+	want := []parser.Value{
+		parser.DateValue(20553),
+		parser.TimeValue(49521),
+		parser.TimestampValue(1775828721000, 0),
+	}
+	if got := tables["events"].Rows[0]; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("Execute() row = %#v, want %#v", got, want)
+	}
+}
+
+func TestExecuteInsertTemporalRejectsMismatchedAndNonTemporalValues(t *testing.T) {
+	tests := []struct {
+		name   string
+		column parser.ColumnDef
+		value  parser.Value
+	}{
+		{name: "date rejects time", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeDate}, value: parser.TimeValue(49521)},
+		{name: "date rejects timestamp", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeDate}, value: parser.TimestampValue(1775828721000, 0)},
+		{name: "date rejects text", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeDate}, value: parser.StringValue("2026-04-10")},
+		{name: "date rejects int", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeDate}, value: parser.Int64Value(1)},
+		{name: "time rejects date", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeTime}, value: parser.DateValue(20553)},
+		{name: "time rejects timestamp", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeTime}, value: parser.TimestampValue(1775828721000, 0)},
+		{name: "time rejects real", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeTime}, value: parser.RealValue(1.25)},
+		{name: "timestamp rejects date", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeTimestamp}, value: parser.DateValue(20553)},
+		{name: "timestamp rejects time", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeTimestamp}, value: parser.TimeValue(49521)},
+		{name: "timestamp rejects bool", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeTimestamp}, value: parser.BoolValue(true)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tables := map[string]*Table{
+				"events": {Name: "events", Columns: []parser.ColumnDef{tc.column}},
+			}
+
+			_, err := Execute(&parser.InsertStmt{
+				TableName: "events",
+				Values:    []parser.Value{tc.value},
+			}, tables)
+			if err != errTypeMismatch {
+				t.Fatalf("Execute() error = %v, want %v", err, errTypeMismatch)
+			}
+		})
+	}
+}
+
 func TestNormalizeColumnValueForDefRequiresExactIntegerWidths(t *testing.T) {
 	boundInt32Value := func(v int32) parser.Value {
 		value := parser.IntValue(v)
@@ -536,6 +607,83 @@ func TestNormalizeColumnValueForDefRequiresExactIntegerWidths(t *testing.T) {
 		{
 			name:   "null remains unchanged",
 			column: parser.ColumnDef{Name: "big_col", Type: parser.ColumnTypeBigInt},
+			value:  parser.NullValue(),
+			want:   parser.NullValue(),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeColumnValueForDef(tc.column, tc.value)
+			if tc.wantError != nil {
+				if err != tc.wantError {
+					t.Fatalf("normalizeColumnValueForDef() error = %v, want %v", err, tc.wantError)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeColumnValueForDef() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("normalizeColumnValueForDef() = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeColumnValueForDefRequiresExactTemporalFamilies(t *testing.T) {
+	tests := []struct {
+		name      string
+		column    parser.ColumnDef
+		value     parser.Value
+		want      parser.Value
+		wantError error
+	}{
+		{
+			name:   "date accepts exact typed value",
+			column: parser.ColumnDef{Name: "event_date", Type: parser.ColumnTypeDate},
+			value:  parser.DateValue(20553),
+			want:   parser.DateValue(20553),
+		},
+		{
+			name:      "date rejects time",
+			column:    parser.ColumnDef{Name: "event_date", Type: parser.ColumnTypeDate},
+			value:     parser.TimeValue(49521),
+			wantError: errTypeMismatch,
+		},
+		{
+			name:      "date rejects text",
+			column:    parser.ColumnDef{Name: "event_date", Type: parser.ColumnTypeDate},
+			value:     parser.StringValue("2026-04-10"),
+			wantError: errTypeMismatch,
+		},
+		{
+			name:   "time accepts exact typed value",
+			column: parser.ColumnDef{Name: "event_time", Type: parser.ColumnTypeTime},
+			value:  parser.TimeValue(49521),
+			want:   parser.TimeValue(49521),
+		},
+		{
+			name:      "time rejects timestamp",
+			column:    parser.ColumnDef{Name: "event_time", Type: parser.ColumnTypeTime},
+			value:     parser.TimestampValue(1775828721000, 0),
+			wantError: errTypeMismatch,
+		},
+		{
+			name:   "timestamp accepts exact typed value",
+			column: parser.ColumnDef{Name: "recorded_at", Type: parser.ColumnTypeTimestamp},
+			value:  parser.TimestampValue(1775828721000, 7),
+			want:   parser.TimestampValue(1775828721000, 7),
+		},
+		{
+			name:      "timestamp rejects date",
+			column:    parser.ColumnDef{Name: "recorded_at", Type: parser.ColumnTypeTimestamp},
+			value:     parser.DateValue(20553),
+			wantError: errTypeMismatch,
+		},
+		{
+			name:   "null remains unchanged",
+			column: parser.ColumnDef{Name: "recorded_at", Type: parser.ColumnTypeTimestamp},
 			value:  parser.NullValue(),
 			want:   parser.NullValue(),
 		},
