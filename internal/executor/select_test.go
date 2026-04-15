@@ -35,6 +35,15 @@ func realCols() []parser.ColumnDef {
 	return []parser.ColumnDef{{Name: "id", Type: parser.ColumnTypeInt}, {Name: "x", Type: parser.ColumnTypeReal}, {Name: "name", Type: parser.ColumnTypeText}}
 }
 
+func temporalCols() []parser.ColumnDef {
+	return []parser.ColumnDef{
+		{Name: "id", Type: parser.ColumnTypeInt},
+		{Name: "event_date", Type: parser.ColumnTypeDate},
+		{Name: "event_time", Type: parser.ColumnTypeTime},
+		{Name: "recorded_at", Type: parser.ColumnTypeTimestamp},
+	}
+}
+
 func TestSelectAllColumns(t *testing.T) {
 	tables := map[string]*Table{
 		"users": {
@@ -429,6 +438,97 @@ func TestSelectWhereRealTypeMismatch(t *testing.T) {
 
 	for _, clause := range tests {
 		_, err := Select(planSelect(t, &parser.SelectExpr{TableName: "measurements", Where: clause}), tables)
+		if err != errTypeMismatch {
+			t.Fatalf("Select() error = %v, want %v", err, errTypeMismatch)
+		}
+	}
+}
+
+func TestSelectWithTemporalWhereComparisons(t *testing.T) {
+	tests := []struct {
+		name     string
+		where    *parser.WhereClause
+		wantRows []int64
+	}{
+		{
+			name:     "date equality",
+			where:    where(parser.Condition{Left: "event_date", Operator: "=", Right: parser.DateValue(20553)}),
+			wantRows: []int64{1},
+		},
+		{
+			name:     "date range",
+			where:    where(parser.Condition{Left: "event_date", Operator: ">=", Right: parser.DateValue(20554)}),
+			wantRows: []int64{2, 3},
+		},
+		{
+			name:     "time equality",
+			where:    where(parser.Condition{Left: "event_time", Operator: "=", Right: parser.TimeValue(49521)}),
+			wantRows: []int64{1},
+		},
+		{
+			name:     "time range",
+			where:    where(parser.Condition{Left: "event_time", Operator: "<", Right: parser.TimeValue(49522)}),
+			wantRows: []int64{1, 2},
+		},
+		{
+			name:     "timestamp equality ignores zone id",
+			where:    where(parser.Condition{Left: "recorded_at", Operator: "=", Right: parser.TimestampValue(1775828721000, 0)}),
+			wantRows: []int64{1, 2},
+		},
+		{
+			name:     "timestamp range uses millis only",
+			where:    where(parser.Condition{Left: "recorded_at", Operator: ">", Right: parser.TimestampValue(1775828721000, 99)}),
+			wantRows: []int64{3},
+		},
+	}
+
+	tables := map[string]*Table{
+		"events": {Name: "events", Columns: temporalCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.DateValue(20553), parser.TimeValue(49521), parser.TimestampValue(1775828721000, 7)},
+			{parser.Int64Value(2), parser.DateValue(20554), parser.TimeValue(49520), parser.TimestampValue(1775828721000, 0)},
+			{parser.Int64Value(3), parser.DateValue(20555), parser.TimeValue(49522), parser.TimestampValue(1775828781000, 3)},
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := Select(planSelect(t, &parser.SelectExpr{TableName: "events", Columns: []string{"id"}, Where: tc.where, OrderBy: &parser.OrderByClause{Column: "id"}}), tables)
+			if err != nil {
+				t.Fatalf("Select() error = %v", err)
+			}
+			if len(rows) != len(tc.wantRows) {
+				t.Fatalf("len(rows) = %d, want %d", len(rows), len(tc.wantRows))
+			}
+			for i, want := range tc.wantRows {
+				if rows[i][0] != parser.Int64Value(want) {
+					t.Fatalf("rows[%d][0] = %#v, want %#v", i, rows[i][0], parser.Int64Value(want))
+				}
+			}
+		})
+	}
+}
+
+func TestSelectWhereTemporalTypeMismatch(t *testing.T) {
+	tables := map[string]*Table{
+		"events": {Name: "events", Columns: temporalCols(), Rows: [][]parser.Value{{
+			parser.Int64Value(1),
+			parser.DateValue(20553),
+			parser.TimeValue(49521),
+			parser.TimestampValue(1775828721000, 7),
+		}}},
+	}
+
+	tests := []*parser.WhereClause{
+		where(parser.Condition{Left: "event_date", Operator: "=", Right: parser.TimeValue(49521)}),
+		where(parser.Condition{Left: "event_date", Operator: "=", Right: parser.TimestampValue(1775828721000, 0)}),
+		where(parser.Condition{Left: "event_time", Operator: "=", Right: parser.TimestampValue(1775828721000, 0)}),
+		where(parser.Condition{Left: "event_date", Operator: "=", Right: parser.StringValue("2026-04-10")}),
+		where(parser.Condition{Left: "event_time", Operator: "=", Right: parser.Int64Value(49521)}),
+		where(parser.Condition{Left: "recorded_at", Operator: "=", Right: parser.BoolValue(true)}),
+	}
+
+	for _, clause := range tests {
+		_, err := Select(planSelect(t, &parser.SelectExpr{TableName: "events", Where: clause}), tables)
 		if err != errTypeMismatch {
 			t.Fatalf("Select() error = %v, want %v", err, errTypeMismatch)
 		}
@@ -857,6 +957,48 @@ func TestSelectOrderByMultipleColumns(t *testing.T) {
 		rows[1][0] != parser.StringValue("alice") || rows[1][1] != parser.Int64Value(1) ||
 		rows[2][0] != parser.StringValue("bob") || rows[2][1] != parser.Int64Value(3) {
 		t.Fatalf("Select() rows = %#v, want alice/2 alice/1 bob/3", rows)
+	}
+}
+
+func TestSelectOrderByTemporalFamilies(t *testing.T) {
+	tests := []struct {
+		name    string
+		column  string
+		desc    bool
+		wantIDs []int64
+	}{
+		{name: "date asc", column: "event_date", wantIDs: []int64{2, 1, 3}},
+		{name: "date desc", column: "event_date", desc: true, wantIDs: []int64{3, 1, 2}},
+		{name: "time asc", column: "event_time", wantIDs: []int64{2, 1, 3}},
+		{name: "time desc", column: "event_time", desc: true, wantIDs: []int64{3, 1, 2}},
+		{name: "timestamp asc", column: "recorded_at", wantIDs: []int64{1, 2, 3}},
+		{name: "timestamp desc", column: "recorded_at", desc: true, wantIDs: []int64{3, 1, 2}},
+	}
+
+	tables := map[string]*Table{
+		"events": {Name: "events", Columns: temporalCols(), Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.DateValue(20554), parser.TimeValue(49521), parser.TimestampValue(1775828721000, 8)},
+			{parser.Int64Value(2), parser.DateValue(20553), parser.TimeValue(49520), parser.TimestampValue(1775828721000, 1)},
+			{parser.Int64Value(3), parser.DateValue(20555), parser.TimeValue(49522), parser.TimestampValue(1775828781000, 3)},
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := Select(planSelect(t, &parser.SelectExpr{
+				TableName: "events",
+				Columns:   []string{"id"},
+				OrderBy:   &parser.OrderByClause{Column: tc.column, Desc: tc.desc},
+			}), tables)
+			if err != nil {
+				t.Fatalf("Select() error = %v", err)
+			}
+			for i, want := range tc.wantIDs {
+				if rows[i][0] != parser.Int64Value(want) {
+					t.Fatalf("rows[%d][0] = %#v, want %#v", i, rows[i][0], parser.Int64Value(want))
+				}
+			}
+		})
 	}
 }
 

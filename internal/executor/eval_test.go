@@ -297,3 +297,161 @@ func TestEvalScalarFunctionAbsPreservesTypedIntegerWidthAndOverflow(t *testing.T
 		t.Fatalf("evalScalarFunction() overflow error = %v, want %v", err, errIntOutOfRange)
 	}
 }
+
+func TestCompareValuesTemporalFamiliesUseTypedPayloads(t *testing.T) {
+	tests := []struct {
+		name  string
+		op    string
+		left  parser.Value
+		right parser.Value
+		want  bool
+	}{
+		{
+			name:  "date equality",
+			op:    "=",
+			left:  parser.DateValue(20553),
+			right: parser.DateValue(20553),
+			want:  true,
+		},
+		{
+			name:  "date range comparison",
+			op:    "<",
+			left:  parser.DateValue(20553),
+			right: parser.DateValue(20554),
+			want:  true,
+		},
+		{
+			name:  "time equality",
+			op:    "=",
+			left:  parser.TimeValue(49521),
+			right: parser.TimeValue(49521),
+			want:  true,
+		},
+		{
+			name:  "time range comparison",
+			op:    ">=",
+			left:  parser.TimeValue(49522),
+			right: parser.TimeValue(49521),
+			want:  true,
+		},
+		{
+			name:  "timestamp equality ignores zone id",
+			op:    "=",
+			left:  parser.TimestampValue(1775828721000, 0),
+			right: parser.TimestampValue(1775828721000, 7),
+			want:  true,
+		},
+		{
+			name:  "timestamp range comparison uses millis",
+			op:    ">",
+			left:  parser.TimestampValue(1775828781000, 9),
+			right: parser.TimestampValue(1775828721000, 1),
+			want:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := compareValues(tc.op, tc.left, tc.right)
+			if err != nil {
+				t.Fatalf("compareValues() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("compareValues() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCompareValuesTemporalFamiliesRejectCrossFamilyAndNonTemporalComparisons(t *testing.T) {
+	tests := []struct {
+		name  string
+		left  parser.Value
+		right parser.Value
+	}{
+		{
+			name:  "date vs time",
+			left:  parser.DateValue(20553),
+			right: parser.TimeValue(49521),
+		},
+		{
+			name:  "date vs timestamp",
+			left:  parser.DateValue(20553),
+			right: parser.TimestampValue(1775828721000, 0),
+		},
+		{
+			name:  "time vs timestamp",
+			left:  parser.TimeValue(49521),
+			right: parser.TimestampValue(1775828721000, 0),
+		},
+		{
+			name:  "date vs text",
+			left:  parser.DateValue(20553),
+			right: parser.StringValue("2026-04-10"),
+		},
+		{
+			name:  "time vs int",
+			left:  parser.TimeValue(49521),
+			right: parser.Int64Value(49521),
+		},
+		{
+			name:  "timestamp vs real",
+			left:  parser.TimestampValue(1775828721000, 0),
+			right: parser.RealValue(1775828721000),
+		},
+		{
+			name:  "timestamp vs bool",
+			left:  parser.TimestampValue(1775828721000, 0),
+			right: parser.BoolValue(true),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := compareValues("=", tc.left, tc.right)
+			if err != errTypeMismatch {
+				t.Fatalf("compareValues() error = %v, want %v", err, errTypeMismatch)
+			}
+		})
+	}
+}
+
+func TestCompareSortableValuesTemporalFamiliesUseTypedPayloads(t *testing.T) {
+	tests := []struct {
+		name  string
+		left  parser.Value
+		right parser.Value
+		want  int
+	}{
+		{
+			name:  "date ordering",
+			left:  parser.DateValue(20553),
+			right: parser.DateValue(20554),
+			want:  -1,
+		},
+		{
+			name:  "time ordering",
+			left:  parser.TimeValue(49522),
+			right: parser.TimeValue(49521),
+			want:  1,
+		},
+		{
+			name:  "timestamp ordering ignores zone id",
+			left:  parser.TimestampValue(1775828721000, 3),
+			right: parser.TimestampValue(1775828721000, 8),
+			want:  0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := compareSortableValues(tc.left, tc.right)
+			if err != nil {
+				t.Fatalf("compareSortableValues() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("compareSortableValues() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

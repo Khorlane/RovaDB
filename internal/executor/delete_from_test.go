@@ -120,3 +120,34 @@ func TestExecuteDeleteWithOrWhere(t *testing.T) {
 		t.Fatalf("executeDelete() affected=%d rows=%#v, want only bob row left", affected, tables["users"].Rows)
 	}
 }
+
+func TestExecuteDeleteTemporalWhereComparison(t *testing.T) {
+	tables := map[string]*Table{
+		"events": {Name: "events", Columns: []parser.ColumnDef{
+			{Name: "id", Type: parser.ColumnTypeInt},
+			{Name: "event_time", Type: parser.ColumnTypeTime},
+			{Name: "recorded_at", Type: parser.ColumnTypeTimestamp},
+		}, Rows: [][]parser.Value{
+			{parser.Int64Value(1), parser.TimeValue(49520), parser.TimestampValue(1775828721000, 7)},
+			{parser.Int64Value(2), parser.TimeValue(49521), parser.TimestampValue(1775828721000, 0)},
+			{parser.Int64Value(3), parser.TimeValue(49522), parser.TimestampValue(1775828781000, 3)},
+		}},
+	}
+
+	affected, err := executeDelete(&parser.DeleteStmt{
+		TableName: "events",
+		Where: where(
+			parser.Condition{Left: "event_time", Operator: ">=", Right: parser.TimeValue(49521)},
+			parser.ConditionChainItem{Op: parser.BooleanOpAnd, Condition: parser.Condition{Left: "recorded_at", Operator: ">=", Right: parser.TimestampValue(1775828721000, 42)}},
+		),
+	}, tables)
+	if err != nil {
+		t.Fatalf("executeDelete() error = %v", err)
+	}
+	if affected != 2 {
+		t.Fatalf("executeDelete() affected=%d, want 2", affected)
+	}
+	if len(tables["events"].Rows) != 1 || tables["events"].Rows[0][0] != parser.Int64Value(1) {
+		t.Fatalf("executeDelete() rows=%#v, want only id 1 left", tables["events"].Rows)
+	}
+}

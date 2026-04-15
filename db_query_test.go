@@ -3004,6 +3004,52 @@ func TestQuerySelectOrderByStringDesc(t *testing.T) {
 	assertRowsStringSequence(t, rows, "cara", "bob", "alice")
 }
 
+func TestQuerySelectOrderByTemporalFamilies(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE events (id INT, event_date DATE, event_time TIME, recorded_at TIMESTAMP)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO events VALUES (1, '2026-04-11', '13:45:21', '2026-04-10 13:45:21')",
+		"INSERT INTO events VALUES (2, '2026-04-10', '13:45:20', '2026-04-10 13:45:20')",
+		"INSERT INTO events VALUES (3, '2026-04-12', '13:45:22', '2026-04-10 13:46:21')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	tests := []struct {
+		name string
+		sql  string
+		want []int
+	}{
+		{name: "date asc", sql: "SELECT id FROM events ORDER BY event_date ASC", want: []int{2, 1, 3}},
+		{name: "date desc", sql: "SELECT id FROM events ORDER BY event_date DESC", want: []int{3, 1, 2}},
+		{name: "time asc", sql: "SELECT id FROM events ORDER BY event_time ASC", want: []int{2, 1, 3}},
+		{name: "time desc", sql: "SELECT id FROM events ORDER BY event_time DESC", want: []int{3, 1, 2}},
+		{name: "timestamp asc", sql: "SELECT id FROM events ORDER BY recorded_at ASC", want: []int{2, 1, 3}},
+		{name: "timestamp desc", sql: "SELECT id FROM events ORDER BY recorded_at DESC", want: []int{3, 1, 2}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := db.Query(tc.sql)
+			if err != nil {
+				t.Fatalf("Query() error = %v", err)
+			}
+			defer rows.Close()
+
+			assertRowsIntSequence(t, rows, tc.want...)
+		})
+	}
+}
+
 func TestQuerySelectOrderByWithWhere(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {
@@ -3311,6 +3357,89 @@ func TestQuerySelectWhereRealTypeMismatch(t *testing.T) {
 		"SELECT id FROM measurements WHERE x = 3",
 		"SELECT id FROM measurements WHERE x = '3.14'",
 		"SELECT id FROM measurements WHERE x = TRUE",
+	}
+
+	for _, sql := range tests {
+		t.Run(sql, func(t *testing.T) {
+			rows, err := db.Query(sql)
+			if err != nil {
+				t.Fatalf("Query() error = %v", err)
+			}
+			defer rows.Close()
+
+			if rows.Next() {
+				t.Fatal("Next() = true, want false")
+			}
+			if rows.Err() == nil {
+				t.Fatal("Err() = nil, want type mismatch error")
+			}
+		})
+	}
+}
+
+func TestQuerySelectWhereTemporalComparisons(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE events (id INT, event_date DATE, event_time TIME, recorded_at TIMESTAMP)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO events VALUES (1, '2026-04-10', '13:45:21', '2026-04-10 13:45:21')",
+		"INSERT INTO events VALUES (2, '2026-04-11', '13:45:20', '2026-04-10 13:45:21')",
+		"INSERT INTO events VALUES (3, '2026-04-12', '13:45:22', '2026-04-10 13:46:21')",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	tests := []struct {
+		name string
+		sql  string
+		want []int
+	}{
+		{name: "date equality", sql: "SELECT id FROM events WHERE event_date = '2026-04-10' ORDER BY id", want: []int{1}},
+		{name: "time range", sql: "SELECT id FROM events WHERE event_time >= '13:45:21' ORDER BY id", want: []int{1, 3}},
+		{name: "timestamp equality", sql: "SELECT id FROM events WHERE recorded_at = '2026-04-10 13:45:21' ORDER BY id", want: []int{1, 2}},
+		{name: "timestamp range", sql: "SELECT id FROM events WHERE recorded_at > '2026-04-10 13:45:21' ORDER BY id", want: []int{3}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := db.Query(tc.sql)
+			if err != nil {
+				t.Fatalf("Query() error = %v", err)
+			}
+			defer rows.Close()
+
+			assertRowsIntSequence(t, rows, tc.want...)
+		})
+	}
+}
+
+func TestQuerySelectWhereTemporalTypeMismatch(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE events (id INT, event_date DATE, event_time TIME, recorded_at TIMESTAMP)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO events VALUES (1, '2026-04-10', '13:45:21', '2026-04-10 13:45:21')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	tests := []string{
+		"SELECT id FROM events WHERE event_date = '13:45:21'",
+		"SELECT id FROM events WHERE event_time = '2026-04-10 13:45:21'",
+		"SELECT id FROM events WHERE recorded_at = '2026-04-10'",
+		"SELECT id FROM events WHERE event_date = TRUE",
 	}
 
 	for _, sql := range tests {

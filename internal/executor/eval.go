@@ -68,6 +68,12 @@ func compareValues(op string, left, right parser.Value) (bool, error) {
 	}
 
 	switch left.Kind {
+	case parser.ValueKindDate:
+		return compareIntegerValues(op, int64(left.DateDays), int64(right.DateDays))
+	case parser.ValueKindTime:
+		return compareIntegerValues(op, int64(left.TimeSeconds), int64(right.TimeSeconds))
+	case parser.ValueKindTimestamp:
+		return compareIntegerValues(op, left.TimestampMillis, right.TimestampMillis)
 	case parser.ValueKindString:
 		cmp := compareTextValues(left.Str, right.Str)
 		switch op {
@@ -133,6 +139,12 @@ func compareSortableValues(left, right parser.Value) (int, error) {
 	}
 
 	switch left.Kind {
+	case parser.ValueKindDate:
+		return compareSortableIntegerValues(int64(left.DateDays), int64(right.DateDays)), nil
+	case parser.ValueKindTime:
+		return compareSortableIntegerValues(int64(left.TimeSeconds), int64(right.TimeSeconds)), nil
+	case parser.ValueKindTimestamp:
+		return compareSortableIntegerValues(left.TimestampMillis, right.TimestampMillis), nil
 	case parser.ValueKindString:
 		switch cmp := compareTextValues(left.Str, right.Str); {
 		case cmp < 0:

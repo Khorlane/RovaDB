@@ -767,3 +767,48 @@ func TestExecuteUpdateTemporalTargetsRequireExactFamilies(t *testing.T) {
 		})
 	}
 }
+
+func TestExecuteUpdateTemporalWhereComparison(t *testing.T) {
+	tables := map[string]*Table{
+		"events": {
+			Name: "events",
+			Columns: []parser.ColumnDef{
+				{Name: "id", Type: parser.ColumnTypeInt},
+				{Name: "event_date", Type: parser.ColumnTypeDate},
+				{Name: "recorded_at", Type: parser.ColumnTypeTimestamp},
+				{Name: "name", Type: parser.ColumnTypeText},
+			},
+			Rows: [][]parser.Value{
+				{parser.Int64Value(1), parser.DateValue(20553), parser.TimestampValue(1775828721000, 7), parser.StringValue("keep")},
+				{parser.Int64Value(2), parser.DateValue(20554), parser.TimestampValue(1775828721000, 0), parser.StringValue("match")},
+				{parser.Int64Value(3), parser.DateValue(20555), parser.TimestampValue(1775828781000, 3), parser.StringValue("later")},
+			},
+		},
+	}
+
+	affected, err := executeUpdate(&parser.UpdateStmt{
+		TableName: "events",
+		Assignments: []parser.UpdateAssignment{
+			{Column: "name", Value: parser.StringValue("updated")},
+		},
+		Where: where(
+			parser.Condition{Left: "event_date", Operator: ">=", Right: parser.DateValue(20554)},
+			parser.ConditionChainItem{Op: parser.BooleanOpAnd, Condition: parser.Condition{Left: "recorded_at", Operator: "=", Right: parser.TimestampValue(1775828721000, 99)}},
+		),
+	}, tables)
+	if err != nil {
+		t.Fatalf("executeUpdate() error = %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("executeUpdate() affected = %d, want 1", affected)
+	}
+	if got := tables["events"].Rows[0][3]; got != parser.StringValue("keep") {
+		t.Fatalf("rows[0][3] = %#v, want keep", got)
+	}
+	if got := tables["events"].Rows[1][3]; got != parser.StringValue("updated") {
+		t.Fatalf("rows[1][3] = %#v, want updated", got)
+	}
+	if got := tables["events"].Rows[2][3]; got != parser.StringValue("later") {
+		t.Fatalf("rows[2][3] = %#v, want later", got)
+	}
+}
