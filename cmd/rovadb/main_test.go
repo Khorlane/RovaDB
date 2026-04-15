@@ -884,6 +884,41 @@ func TestRunSelectPassthrough(t *testing.T) {
 	}
 }
 
+func TestRunSelectFormatsDateUsingColumnTypes(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	path := filepath.Join(t.TempDir(), "test.db")
+	input := strings.Join([]string{
+		"open " + path,
+		"y",
+		"CREATE TABLE events (id INT, event_date DATE, event_time TIME, recorded_at TIMESTAMP)",
+		"INSERT INTO events VALUES (1, '2026-04-15', '13:14:15', '2026-04-15 13:14:15')",
+		"SELECT id, event_date, event_time, recorded_at FROM events",
+		"quit",
+		"",
+	}, "\n")
+
+	code := runWithArgs(strings.NewReader(input), &out, &errOut, nil)
+	if code != 0 {
+		t.Fatalf("run() code = %d, want 0", code)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "2026-04-15") {
+		t.Fatalf("output missing DATE rendering:\n%s", output)
+	}
+	if !strings.Contains(output, "2026-04-15 13:14:15 +0000 UTC") {
+		t.Fatalf("output missing TIMESTAMP rendering:\n%s", output)
+	}
+	if !strings.Contains(output, "13:14:15") {
+		t.Fatalf("output missing TIME rendering:\n%s", output)
+	}
+	if strings.Contains(output, "2026-04-15 00:00:00 +0000 UTC | 13:14:15") {
+		t.Fatalf("output rendered DATE using full time.Time formatting:\n%s", output)
+	}
+}
+
 func TestRunExecPassthroughWithTrailingSemicolon(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer

@@ -85,6 +85,22 @@ func (r *Rows) Columns() []string {
 	return cols
 }
 
+// ColumnTypes reports the projected result types in query order, when available,
+// using canonical engine type names such as INT, TEXT, DATE, TIME, and
+// TIMESTAMP.
+func (r *Rows) ColumnTypes() []string {
+	if r == nil {
+		return nil
+	}
+	if len(r.scanTypes) == 0 {
+		return nil
+	}
+
+	types := make([]string, len(r.scanTypes))
+	copy(types, r.scanTypes)
+	return types
+}
+
 // Scan copies the current row into destination pointers using strict positional matching.
 func (r *Rows) Scan(dest ...any) error {
 	if r == nil {

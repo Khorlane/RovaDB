@@ -340,6 +340,94 @@ func TestRowsColumnsNilReceiver(t *testing.T) {
 	}
 }
 
+func TestRowsColumnTypesReturnsNilWhenMetadataUnavailable(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT 1")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+
+	if got := rows.ColumnTypes(); got != nil {
+		t.Fatalf("ColumnTypes() = %#v, want nil when metadata is unavailable", got)
+	}
+}
+
+func TestRowsColumnTypesReturnsCopyForTableSelect(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT, name TEXT, event_date DATE)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users VALUES (1, 'alice', '2026-04-15')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT id, name, event_date FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+
+	first := rows.ColumnTypes()
+	if len(first) != 3 || first[0] != "INT" || first[1] != "TEXT" || first[2] != "DATE" {
+		t.Fatalf("ColumnTypes() = %#v, want [INT TEXT DATE]", first)
+	}
+
+	first[0] = "mutated"
+	second := rows.ColumnTypes()
+	if len(second) != 3 || second[0] != "INT" || second[1] != "TEXT" || second[2] != "DATE" {
+		t.Fatalf("ColumnTypes() after mutation = %#v, want [INT TEXT DATE]", second)
+	}
+}
+
+func TestRowsColumnTypesEmptyResultAfterCloseAndExhaustion(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE users (id INT)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT id FROM users WHERE id = 999")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+
+	if got := rows.ColumnTypes(); len(got) != 1 || got[0] != "INT" {
+		t.Fatalf("ColumnTypes() on empty result = %#v, want [INT]", got)
+	}
+	if rows.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if got := rows.ColumnTypes(); len(got) != 1 || got[0] != "INT" {
+		t.Fatalf("ColumnTypes() after exhaustion = %#v, want [INT]", got)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if got := rows.ColumnTypes(); len(got) != 1 || got[0] != "INT" {
+		t.Fatalf("ColumnTypes() after Close = %#v, want [INT]", got)
+	}
+}
+
+func TestRowsColumnTypesNilReceiver(t *testing.T) {
+	var rows *Rows
+	if got := rows.ColumnTypes(); got != nil {
+		t.Fatalf("nil Rows ColumnTypes() = %#v, want nil", got)
+	}
+}
+
 func TestResultRowsAffectedHelpers(t *testing.T) {
 	db, err := Open(testDBPath(t))
 	if err != nil {

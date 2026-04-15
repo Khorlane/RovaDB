@@ -1,6 +1,6 @@
 package rovadb
 
-const version = "v0.47.0-temporal-core-basics"
+const version = "v0.47.0"
 
 // Version reports the current RovaDB product version.
 func Version() string {

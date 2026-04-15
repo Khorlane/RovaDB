@@ -313,7 +313,7 @@ func (p *alterTableTokenParser) parseColumnDef() (ColumnDef, error) {
 func (p *alterTableTokenParser) parseColumnType() (string, error) {
 	typeTok := p.current()
 	switch typeTok.Kind {
-	case tokenKeywordSmallInt, tokenKeywordInt, tokenKeywordBigInt, tokenKeywordText, tokenKeywordBool, tokenKeywordReal:
+	case tokenKeywordSmallInt, tokenKeywordInt, tokenKeywordBigInt, tokenKeywordText, tokenKeywordBool, tokenKeywordReal, tokenKeywordDate, tokenKeywordTime, tokenKeywordTimestamp:
 		p.pos++
 		return normalizeColumnType(typeTok.Kind), nil
 	default:

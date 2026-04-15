@@ -70,6 +70,21 @@ func TestParseAlterTableAddColumnMetadata(t *testing.T) {
 			sql:  "ALTER TABLE users ADD COLUMN score REAL DEFAULT 1.5",
 			want: ColumnDef{Name: "score", Type: ColumnTypeReal, HasDefault: true, DefaultValue: RealValue(1.5)},
 		},
+		{
+			name: "date",
+			sql:  "ALTER TABLE users ADD COLUMN add_date DATE",
+			want: ColumnDef{Name: "add_date", Type: ColumnTypeDate},
+		},
+		{
+			name: "time",
+			sql:  "ALTER TABLE users ADD COLUMN add_time TIME",
+			want: ColumnDef{Name: "add_time", Type: ColumnTypeTime},
+		},
+		{
+			name: "timestamp",
+			sql:  "ALTER TABLE users ADD COLUMN add_timestamp TIMESTAMP",
+			want: ColumnDef{Name: "add_timestamp", Type: ColumnTypeTimestamp},
+		},
 	}
 
 	for _, tc := range tests {

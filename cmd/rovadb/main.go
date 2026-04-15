@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	rovadb "github.com/Khorlane/RovaDB"
 )
@@ -619,6 +620,7 @@ func runSelect(out io.Writer, db *rovadb.DB, query string) error {
 	}()
 
 	columns := rows.Columns()
+	columnTypes := rows.ColumnTypes()
 	renderedRows := make([][]string, 0)
 	for rows.Next() {
 		values := make([]any, len(columns))
@@ -629,7 +631,7 @@ func runSelect(out io.Writer, db *rovadb.DB, query string) error {
 		if err := rows.Scan(dest...); err != nil {
 			return err
 		}
-		renderedRows = append(renderedRows, formatRowValues(values))
+		renderedRows = append(renderedRows, formatRowValues(values, columnTypes))
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -660,10 +662,14 @@ func writeFormattedHeader(out io.Writer, columns []string, widths []int) error {
 	return writeResponse(out, formatTableLine(dashedCells(widths), widths, "-"))
 }
 
-func formatRowValues(values []any) []string {
+func formatRowValues(values []any, columnTypes []string) []string {
 	cells := make([]string, len(values))
 	for i, value := range values {
-		cells[i] = formatValue(value)
+		columnType := ""
+		if i < len(columnTypes) {
+			columnType = columnTypes[i]
+		}
+		cells[i] = formatValue(value, columnType)
 	}
 	return cells
 }
@@ -715,9 +721,14 @@ func formatTableLine(cells []string, widths []int, pad string) string {
 	return strings.Join(parts, separator)
 }
 
-func formatValue(value any) string {
+func formatValue(value any, columnType string) string {
 	if value == nil {
 		return "NULL"
+	}
+	if columnType == "DATE" {
+		if t, ok := value.(time.Time); ok {
+			return t.UTC().Format("2006-01-02")
+		}
 	}
 	return fmt.Sprintf("%v", value)
 }

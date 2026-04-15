@@ -463,6 +463,7 @@ if err != nil {
 defer rows.Close()
 
 fmt.Println(rows.Columns())
+fmt.Println(rows.ColumnTypes())
 for rows.Next() {
 	var id int32
 	var name string
@@ -481,6 +482,12 @@ This stores `Alice` exactly as provided, while the second row uses the schema de
 For typed integer columns, public writes and `Scan` destinations must match the declared SQL width exactly: `SMALLINT` <-> `int16`, `INT` <-> `int32`, and `BIGINT` <-> `int64`. There is no generic Go `int` interchange for these typed integer columns.
 
 For temporal columns, the public scan contract is `DATE` <-> `time.Time`, `TIMESTAMP` <-> `time.Time`, and `TIME` <-> `rovadb.Time`.
+
+For query-result metadata, `Rows.ColumnTypes()` returns the projected result
+types in column order when that metadata is available, using canonical names
+such as `INT`, `TEXT`, `DATE`, `TIME`, and `TIMESTAMP`. This is useful for
+presentation layers that need to distinguish `DATE` from `TIMESTAMP` while
+both still scan through `time.Time`.
 
 Untyped integer-expression results remain a narrow exception. Query shapes such
 as `SELECT 1`, `SELECT 1 + 2`, `COUNT(*)`, and `LENGTH(name)` currently
