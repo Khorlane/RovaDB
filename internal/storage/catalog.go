@@ -500,6 +500,27 @@ func appendCatalogDefaultValue(buf []byte, column CatalogColumn) ([]byte, error)
 		buf = append(buf, rowTypeReal)
 		binary.LittleEndian.PutUint64(raw[:], math.Float64bits(column.DefaultValue.F64))
 		return append(buf, raw[:]...), nil
+	case ValueKindDate:
+		var raw [4]byte
+		buf = append(buf, rowTypeDate)
+		binary.LittleEndian.PutUint32(raw[:], uint32(column.DefaultValue.DateDays))
+		return append(buf, raw[:]...), nil
+	case ValueKindTime:
+		if !validTimeSeconds(column.DefaultValue.TimeSeconds) {
+			return nil, errCorruptedCatalogPage
+		}
+		var raw [4]byte
+		buf = append(buf, rowTypeTime)
+		binary.LittleEndian.PutUint32(raw[:], uint32(column.DefaultValue.TimeSeconds))
+		return append(buf, raw[:]...), nil
+	case ValueKindTimestamp:
+		var millisRaw [8]byte
+		var zoneRaw [2]byte
+		buf = append(buf, rowTypeTimestamp)
+		binary.LittleEndian.PutUint64(millisRaw[:], uint64(column.DefaultValue.TimestampMillis))
+		binary.LittleEndian.PutUint16(zoneRaw[:], uint16(column.DefaultValue.TimestampZoneID))
+		buf = append(buf, millisRaw[:]...)
+		return append(buf, zoneRaw[:]...), nil
 	default:
 		return nil, errCorruptedCatalogPage
 	}
@@ -557,6 +578,32 @@ func readCatalogDefaultValue(data []byte, offset *int, column CatalogColumn) (Va
 		value := RealValue(math.Float64frombits(binary.LittleEndian.Uint64(data[*offset : *offset+8])))
 		*offset += 8
 		return value, nil
+	case rowTypeDate:
+		if *offset+4 > len(data) {
+			return Value{}, errCorruptedCatalogPage
+		}
+		value := DateValue(int32(binary.LittleEndian.Uint32(data[*offset : *offset+4])))
+		*offset += 4
+		return value, nil
+	case rowTypeTime:
+		if *offset+4 > len(data) {
+			return Value{}, errCorruptedCatalogPage
+		}
+		value := int32(binary.LittleEndian.Uint32(data[*offset : *offset+4]))
+		*offset += 4
+		if !validTimeSeconds(value) {
+			return Value{}, errCorruptedCatalogPage
+		}
+		return TimeValue(value), nil
+	case rowTypeTimestamp:
+		if *offset+10 > len(data) {
+			return Value{}, errCorruptedCatalogPage
+		}
+		millis := int64(binary.LittleEndian.Uint64(data[*offset : *offset+8]))
+		*offset += 8
+		zoneID := int16(binary.LittleEndian.Uint16(data[*offset : *offset+2]))
+		*offset += 2
+		return TimestampValue(millis, zoneID), nil
 	default:
 		return Value{}, errCorruptedCatalogPage
 	}
@@ -580,6 +627,12 @@ func catalogDefaultValueMatchesColumnType(columnType uint8, value Value) bool {
 		return columnType == CatalogColumnTypeBool
 	case ValueKindReal:
 		return columnType == CatalogColumnTypeReal
+	case ValueKindDate:
+		return columnType == CatalogColumnTypeDate
+	case ValueKindTime:
+		return columnType == CatalogColumnTypeTime
+	case ValueKindTimestamp:
+		return columnType == CatalogColumnTypeTimestamp
 	default:
 		return false
 	}

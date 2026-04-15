@@ -404,6 +404,26 @@ func TestRealEncodingIsDistinctFromIntStringAndBool(t *testing.T) {
 	}
 }
 
+func TestEncodeDecodeRowTemporalValues(t *testing.T) {
+	values := []Value{
+		DateValue(20553),
+		TimeValue(49521),
+		TimestampValue(1775828721000, 7),
+	}
+
+	encoded, err := EncodeRow(values)
+	if err != nil {
+		t.Fatalf("EncodeRow() error = %v", err)
+	}
+
+	decoded, err := DecodeRow(encoded)
+	if err != nil {
+		t.Fatalf("DecodeRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+}
+
 func TestDecodeRowTrailingJunk(t *testing.T) {
 	encoded, err := EncodeRow([]Value{Int64Value(1)})
 	if err != nil {
@@ -525,6 +545,67 @@ func TestEncodeDecodeSlottedRowMixed(t *testing.T) {
 	assertRowValuesEqual(t, decoded, values)
 }
 
+func TestEncodeDecodeSlottedRowTemporalValues(t *testing.T) {
+	values := []Value{
+		IntValue(7),
+		DateValue(20553),
+		TimeValue(49521),
+		TimestampValue(1775828721000, 7),
+		StringValue("alice"),
+	}
+	columnTypes := []uint8{
+		CatalogColumnTypeInt,
+		CatalogColumnTypeDate,
+		CatalogColumnTypeTime,
+		CatalogColumnTypeTimestamp,
+		CatalogColumnTypeText,
+	}
+
+	encoded, err := EncodeSlottedRow(values, columnTypes)
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+	decoded, err := DecodeSlottedRow(encoded, columnTypes)
+	if err != nil {
+		t.Fatalf("DecodeSlottedRow() error = %v", err)
+	}
+
+	assertRowValuesEqual(t, decoded, values)
+}
+
+func TestEncodeSlottedRowTemporalBinaryLayout(t *testing.T) {
+	values := []Value{
+		DateValue(20553),
+		TimeValue(49521),
+		TimestampValue(1775828721000, 7),
+	}
+	columnTypes := []uint8{
+		CatalogColumnTypeDate,
+		CatalogColumnTypeTime,
+		CatalogColumnTypeTimestamp,
+	}
+
+	encoded, err := EncodeSlottedRow(values, columnTypes)
+	if err != nil {
+		t.Fatalf("EncodeSlottedRow() error = %v", err)
+	}
+	if got, want := len(encoded), 4+1+4+4+10; got != want {
+		t.Fatalf("len(encoded) = %d, want %d", got, want)
+	}
+	if got := int32(binary.LittleEndian.Uint32(encoded[5:9])); got != 20553 {
+		t.Fatalf("date payload = %d, want 20553", got)
+	}
+	if got := int32(binary.LittleEndian.Uint32(encoded[9:13])); got != 49521 {
+		t.Fatalf("time payload = %d, want 49521", got)
+	}
+	if got := int64(binary.LittleEndian.Uint64(encoded[13:21])); got != 1775828721000 {
+		t.Fatalf("timestamp millis payload = %d, want 1775828721000", got)
+	}
+	if got := int16(binary.LittleEndian.Uint16(encoded[21:23])); got != 7 {
+		t.Fatalf("timestamp zone payload = %d, want 7", got)
+	}
+}
+
 func TestEncodeDecodeSlottedRowWithNulls(t *testing.T) {
 	values := []Value{
 		NullValue(),
@@ -632,6 +713,35 @@ func TestDecodeSlottedRowRejectsColumnCountMismatch(t *testing.T) {
 	}
 
 	_, err = DecodeSlottedRow(encoded, []uint8{CatalogColumnTypeInt, CatalogColumnTypeText})
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("DecodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestEncodeSlottedRowRejectsInvalidTimePayload(t *testing.T) {
+	_, err := EncodeSlottedRow([]Value{TimeValue(24 * 60 * 60)}, []uint8{CatalogColumnTypeTime})
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("EncodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestDecodeSlottedRowRejectsInvalidTimePayload(t *testing.T) {
+	data := make([]byte, 0, 9)
+	data = append(data, 1, 0, 1, 0, 0)
+	var raw [4]byte
+	binary.LittleEndian.PutUint32(raw[:], 24*60*60)
+	data = append(data, raw[:]...)
+
+	_, err := DecodeSlottedRow(data, []uint8{CatalogColumnTypeTime})
+	if !errors.Is(err, errInvalidRowData) {
+		t.Fatalf("DecodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
+	}
+}
+
+func TestDecodeSlottedRowRejectsTruncatedTimestampPayload(t *testing.T) {
+	data := []byte{1, 0, 1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8}
+
+	_, err := DecodeSlottedRow(data, []uint8{CatalogColumnTypeTimestamp})
 	if !errors.Is(err, errInvalidRowData) {
 		t.Fatalf("DecodeSlottedRow() error = %v, want %v", err, errInvalidRowData)
 	}

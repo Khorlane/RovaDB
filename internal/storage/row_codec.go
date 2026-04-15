@@ -6,11 +6,14 @@ import (
 )
 
 const (
-	rowTypeNull   = 0
-	rowTypeInt64  = 1
-	rowTypeString = 2
-	rowTypeBool   = 3
-	rowTypeReal   = 4
+	rowTypeNull      = 0
+	rowTypeInt64     = 1
+	rowTypeString    = 2
+	rowTypeBool      = 3
+	rowTypeReal      = 4
+	rowTypeDate      = 5
+	rowTypeTime      = 6
+	rowTypeTimestamp = 7
 )
 
 // EncodeRow encodes one row payload using the current row storage format.
@@ -50,6 +53,27 @@ func EncodeRow(values []Value) ([]byte, error) {
 			buf = append(buf, rowTypeReal)
 			binary.LittleEndian.PutUint64(raw[:], math.Float64bits(value.F64))
 			buf = append(buf, raw[:]...)
+		case ValueKindDate:
+			var raw [4]byte
+			buf = append(buf, rowTypeDate)
+			binary.LittleEndian.PutUint32(raw[:], uint32(value.DateDays))
+			buf = append(buf, raw[:]...)
+		case ValueKindTime:
+			if !validTimeSeconds(value.TimeSeconds) {
+				return nil, errCorruptedRowData
+			}
+			var raw [4]byte
+			buf = append(buf, rowTypeTime)
+			binary.LittleEndian.PutUint32(raw[:], uint32(value.TimeSeconds))
+			buf = append(buf, raw[:]...)
+		case ValueKindTimestamp:
+			var millisRaw [8]byte
+			var zoneRaw [2]byte
+			buf = append(buf, rowTypeTimestamp)
+			binary.LittleEndian.PutUint64(millisRaw[:], uint64(value.TimestampMillis))
+			binary.LittleEndian.PutUint16(zoneRaw[:], uint16(value.TimestampZoneID))
+			buf = append(buf, millisRaw[:]...)
+			buf = append(buf, zoneRaw[:]...)
 		default:
 			return nil, errCorruptedRowData
 		}
@@ -121,6 +145,32 @@ func DecodeRow(data []byte) ([]Value, error) {
 			value := math.Float64frombits(binary.LittleEndian.Uint64(data[offset : offset+8]))
 			offset += 8
 			values = append(values, RealValue(value))
+		case rowTypeDate:
+			if offset+4 > len(data) {
+				return nil, errCorruptedRowData
+			}
+			value := int32(binary.LittleEndian.Uint32(data[offset : offset+4]))
+			offset += 4
+			values = append(values, DateValue(value))
+		case rowTypeTime:
+			if offset+4 > len(data) {
+				return nil, errCorruptedRowData
+			}
+			value := int32(binary.LittleEndian.Uint32(data[offset : offset+4]))
+			offset += 4
+			if !validTimeSeconds(value) {
+				return nil, errCorruptedRowData
+			}
+			values = append(values, TimeValue(value))
+		case rowTypeTimestamp:
+			if offset+10 > len(data) {
+				return nil, errCorruptedRowData
+			}
+			millis := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+			offset += 8
+			zoneID := int16(binary.LittleEndian.Uint16(data[offset : offset+2]))
+			offset += 2
+			values = append(values, TimestampValue(millis, zoneID))
 		default:
 			return nil, errCorruptedRowData
 		}
@@ -201,6 +251,30 @@ func EncodeSlottedRow(values []Value, columnTypes []uint8) ([]byte, error) {
 			binary.LittleEndian.PutUint16(raw[:], uint16(len(text)))
 			buf = append(buf, raw[:]...)
 			buf = append(buf, text...)
+		case CatalogColumnTypeDate:
+			if value.Kind != ValueKindDate {
+				return nil, errInvalidRowData
+			}
+			var raw [4]byte
+			binary.LittleEndian.PutUint32(raw[:], uint32(value.DateDays))
+			buf = append(buf, raw[:]...)
+		case CatalogColumnTypeTime:
+			if value.Kind != ValueKindTime || !validTimeSeconds(value.TimeSeconds) {
+				return nil, errInvalidRowData
+			}
+			var raw [4]byte
+			binary.LittleEndian.PutUint32(raw[:], uint32(value.TimeSeconds))
+			buf = append(buf, raw[:]...)
+		case CatalogColumnTypeTimestamp:
+			if value.Kind != ValueKindTimestamp {
+				return nil, errInvalidRowData
+			}
+			var millisRaw [8]byte
+			var zoneRaw [2]byte
+			binary.LittleEndian.PutUint64(millisRaw[:], uint64(value.TimestampMillis))
+			binary.LittleEndian.PutUint16(zoneRaw[:], uint16(value.TimestampZoneID))
+			buf = append(buf, millisRaw[:]...)
+			buf = append(buf, zoneRaw[:]...)
 		default:
 			return nil, errInvalidRowData
 		}
@@ -293,6 +367,32 @@ func DecodeSlottedRow(data []byte, columnTypes []uint8) ([]Value, error) {
 			}
 			values = append(values, StringValue(string(data[offset:offset+length])))
 			offset += length
+		case CatalogColumnTypeDate:
+			if offset+4 > len(data) {
+				return nil, errInvalidRowData
+			}
+			value := int32(binary.LittleEndian.Uint32(data[offset : offset+4]))
+			offset += 4
+			values = append(values, DateValue(value))
+		case CatalogColumnTypeTime:
+			if offset+4 > len(data) {
+				return nil, errInvalidRowData
+			}
+			value := int32(binary.LittleEndian.Uint32(data[offset : offset+4]))
+			offset += 4
+			if !validTimeSeconds(value) {
+				return nil, errInvalidRowData
+			}
+			values = append(values, TimeValue(value))
+		case CatalogColumnTypeTimestamp:
+			if offset+10 > len(data) {
+				return nil, errInvalidRowData
+			}
+			millis := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+			offset += 8
+			zoneID := int16(binary.LittleEndian.Uint16(data[offset : offset+2]))
+			offset += 2
+			values = append(values, TimestampValue(millis, zoneID))
 		default:
 			return nil, errInvalidRowData
 		}
@@ -306,4 +406,8 @@ func DecodeSlottedRow(data []byte, columnTypes []uint8) ([]Value, error) {
 
 func publicIntInRange(v int64) bool {
 	return v >= math.MinInt32 && v <= math.MaxInt32
+}
+
+func validTimeSeconds(v int32) bool {
+	return v >= 0 && v < 24*60*60
 }

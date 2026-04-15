@@ -262,6 +262,61 @@ func TestCatalogRoundTripPreservesTemporalColumnTypes(t *testing.T) {
 	}
 }
 
+func TestCatalogRoundTripPreservesTemporalDefaults(t *testing.T) {
+	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_temporal_defaults.db"))
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+
+	want := &CatalogData{
+		Tables: []CatalogTable{
+			{
+				Name:       "events",
+				TableID:    1,
+				RootPageID: 1,
+				Columns: []CatalogColumn{
+					{Name: "event_date", Type: CatalogColumnTypeDate, HasDefault: true, DefaultValue: DateValue(20553)},
+					{Name: "event_time", Type: CatalogColumnTypeTime, HasDefault: true, DefaultValue: TimeValue(49521)},
+					{Name: "recorded_at", Type: CatalogColumnTypeTimestamp, HasDefault: true, DefaultValue: TimestampValue(1775828721000, 7)},
+				},
+			},
+		},
+	}
+	if err := SaveCatalog(pager, want); err != nil {
+		t.Fatalf("SaveCatalog() error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	reopenPager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() reload error = %v", err)
+	}
+	got, err := LoadCatalog(reopenPager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+
+	columns := got.Tables[0].Columns
+	wantDefaults := []Value{
+		DateValue(20553),
+		TimeValue(49521),
+		TimestampValue(1775828721000, 7),
+	}
+	for i := range wantDefaults {
+		if !columns[i].HasDefault || columns[i].DefaultValue != wantDefaults[i] {
+			t.Fatalf("columns[%d] = %#v, want default %#v", i, columns[i], wantDefaults[i])
+		}
+	}
+}
+
 func TestCatalogRoundTripPreservesColumnNullabilityAndDefaults(t *testing.T) {
 	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_coldefs.db"))
 	if err != nil {
@@ -413,6 +468,10 @@ func TestSaveCatalogRejectsInconsistentColumnDefaultMetadata(t *testing.T) {
 			name:   "wrong typed integer width",
 			column: CatalogColumn{Name: "id", Type: CatalogColumnTypeInt, HasDefault: true, DefaultValue: BigIntValue(1)},
 		},
+		{
+			name:   "invalid time default",
+			column: CatalogColumn{Name: "event_time", Type: CatalogColumnTypeTime, HasDefault: true, DefaultValue: TimeValue(24 * 60 * 60)},
+		},
 	}
 
 	for _, tc := range tests {
@@ -463,6 +522,17 @@ func TestLoadCatalogRejectsMalformedColumnDefaultMetadata(t *testing.T) {
 			columnName:   "score",
 			columnType:   CatalogColumnTypeReal,
 			defaultBytes: []byte{255},
+		},
+		{
+			name:       "invalid time payload",
+			columnName: "event_time",
+			columnType: CatalogColumnTypeTime,
+			defaultBytes: func() []byte {
+				buf := []byte{rowTypeTime}
+				var raw [4]byte
+				binary.LittleEndian.PutUint32(raw[:], 24*60*60)
+				return append(buf, raw[:]...)
+			}(),
 		},
 	}
 

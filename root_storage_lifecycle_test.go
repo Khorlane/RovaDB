@@ -1788,6 +1788,135 @@ func TestRealRollbackCloseReopenKeepsCommittedState(t *testing.T) {
 	})
 }
 
+func TestTemporalPhysicalRowsRoundTripAcrossRewriteAndReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	wantRows := [][]parser.Value{
+		{
+			parser.IntValue(1),
+			parser.DateValue(20553),
+			parser.TimeValue(49521),
+			parser.TimestampValue(1775828721000, 7),
+			parser.StringValue("alpha"),
+		},
+		{
+			parser.IntValue(2),
+			parser.DateValue(-7),
+			parser.TimeValue(0),
+			parser.TimestampValue(-12345, -3),
+			parser.NullValue(),
+		},
+	}
+	for _, sql := range []string{
+		"CREATE TABLE events (id INT, event_date DATE, event_time TIME, recorded_at TIMESTAMP, note TEXT)",
+	} {
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("Exec(%q) error = %v", sql, err)
+		}
+	}
+
+	_, err = db.execMutatingStatement(func() error {
+		stagedTables := cloneTables(db.tables)
+		if err := db.loadRowsIntoTables(stagedTables, "events"); err != nil {
+			return err
+		}
+		stagedTables["events"].Rows = cloneRows(wantRows)
+		return db.applyStagedTableRewrite(stagedTables, "events")
+	})
+	if err != nil {
+		t.Fatalf("execMutatingStatement() error = %v", err)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+
+	reopened := db.tables["events"]
+	if reopened == nil {
+		t.Fatal("reopened db.tables[events] = nil")
+	}
+	gotTypes := []string{
+		reopened.Columns[0].Type,
+		reopened.Columns[1].Type,
+		reopened.Columns[2].Type,
+		reopened.Columns[3].Type,
+		reopened.Columns[4].Type,
+	}
+	wantTypes := []string{
+		parser.ColumnTypeInt,
+		parser.ColumnTypeDate,
+		parser.ColumnTypeTime,
+		parser.ColumnTypeTimestamp,
+		parser.ColumnTypeText,
+	}
+	if !reflect.DeepEqual(gotTypes, wantTypes) {
+		t.Fatalf("reopened column types = %#v, want %#v", gotTypes, wantTypes)
+	}
+	if err := db.loadRowsIntoTables(db.tables, "events"); err != nil {
+		t.Fatalf("loadRowsIntoTables() error = %v", err)
+	}
+	if got := db.tables["events"].Rows; !reflect.DeepEqual(got, wantRows) {
+		t.Fatalf("reopened rows = %#v, want %#v", got, wantRows)
+	}
+	if got := db.tables["events"].Rows[0][3].TimestampZoneID; got != 7 {
+		t.Fatalf("reopened rows[0][3].TimestampZoneID = %d, want 7", got)
+	}
+	if got := db.tables["events"].Rows[1][3].TimestampZoneID; got != -3 {
+		t.Fatalf("reopened rows[1][3].TimestampZoneID = %d, want -3", got)
+	}
+
+	dataPageIDs, err := committedTableDataPageIDs(db.pool, reopened)
+	if err != nil {
+		t.Fatalf("committedTableDataPageIDs() error = %v", err)
+	}
+	if len(dataPageIDs) != 1 {
+		t.Fatalf("len(committedTableDataPageIDs()) = %d, want 1", len(dataPageIDs))
+	}
+	dataPageID := dataPageIDs[0]
+	tableID := reopened.TableID
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+
+	dbFile, err := storage.OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("storage.OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := storage.NewPager(dbFile.File())
+	if err != nil {
+		t.Fatalf("storage.NewPager() error = %v", err)
+	}
+	page, err := pager.Get(dataPageID)
+	if err != nil {
+		t.Fatalf("pager.Get() error = %v", err)
+	}
+	if err := storage.ValidateOwnedDataPage(page.Data(), tableID); err != nil {
+		t.Fatalf("storage.ValidateOwnedDataPage() error = %v", err)
+	}
+	storageRows, err := storage.ReadSlottedRowsFromTablePageData(page.Data(), []uint8{
+		storage.CatalogColumnTypeInt,
+		storage.CatalogColumnTypeDate,
+		storage.CatalogColumnTypeTime,
+		storage.CatalogColumnTypeTimestamp,
+		storage.CatalogColumnTypeText,
+	})
+	if err != nil {
+		t.Fatalf("storage.ReadSlottedRowsFromTablePageData() error = %v", err)
+	}
+	if got := parserRowsFromStorage(storageRows); !reflect.DeepEqual(got, wantRows) {
+		t.Fatalf("parserRowsFromStorage(storageRows) = %#v, want %#v", got, wantRows)
+	}
+}
+
 func TestTypedIntegerCloseReopenPreservesExactWidthsAcrossMaterializeAndScan(t *testing.T) {
 	path := testDBPath(t)
 
