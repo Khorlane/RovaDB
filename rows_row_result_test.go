@@ -3,6 +3,7 @@ package rovadb
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestRowsScanBeforeNext(t *testing.T) {
@@ -691,6 +692,88 @@ func TestRowsScanRealSupport(t *testing.T) {
 	}
 	if f != 3.14 {
 		t.Fatalf("Scan() got %v, want 3.14", f)
+	}
+}
+
+func TestTimeStringAndAccessors(t *testing.T) {
+	got, err := NewTime(9, 8, 7)
+	if err != nil {
+		t.Fatalf("NewTime() error = %v", err)
+	}
+	if got.String() != "09:08:07" {
+		t.Fatalf("Time.String() = %q, want %q", got.String(), "09:08:07")
+	}
+	if got.Hour() != 9 || got.Minute() != 8 || got.Second() != 7 {
+		t.Fatalf("Time accessors = (%d, %d, %d), want (9, 8, 7)", got.Hour(), got.Minute(), got.Second())
+	}
+}
+
+func TestNewTimeRejectsInvalidClockValues(t *testing.T) {
+	tests := []struct {
+		name   string
+		hour   int
+		minute int
+		second int
+	}{
+		{name: "hour low", hour: -1, minute: 0, second: 0},
+		{name: "hour high", hour: 24, minute: 0, second: 0},
+		{name: "minute low", hour: 0, minute: -1, second: 0},
+		{name: "minute high", hour: 0, minute: 60, second: 0},
+		{name: "second low", hour: 0, minute: 0, second: -1},
+		{name: "second high", hour: 0, minute: 0, second: 60},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := NewTime(tc.hour, tc.minute, tc.second); err == nil {
+				t.Fatalf("NewTime(%d, %d, %d) error = nil, want validation failure", tc.hour, tc.minute, tc.second)
+			}
+		})
+	}
+}
+
+func TestRowsScanTemporalSupport(t *testing.T) {
+	clock, err := NewTime(12, 34, 56)
+	if err != nil {
+		t.Fatalf("NewTime() error = %v", err)
+	}
+	timestamp := time.Date(2026, time.April, 15, 16, 17, 18, 0, time.UTC)
+
+	rows := newRowsWithScanTypes(nil, [][]any{{clock, timestamp, timestamp}}, []string{"TIME", "DATE", "TIMESTAMP"})
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+
+	var gotTime Time
+	var gotDate time.Time
+	var gotTimestamp time.Time
+	if err := rows.Scan(&gotTime, &gotDate, &gotTimestamp); err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if gotTime != clock {
+		t.Fatalf("Scan(Time) = %#v, want %#v", gotTime, clock)
+	}
+	if !gotDate.Equal(timestamp) {
+		t.Fatalf("Scan(DATE) = %v, want %v", gotDate, timestamp)
+	}
+	if !gotTimestamp.Equal(timestamp) {
+		t.Fatalf("Scan(TIMESTAMP) = %v, want %v", gotTimestamp, timestamp)
+	}
+}
+
+func TestRowsScanTemporalTypeMismatch(t *testing.T) {
+	clock, err := NewTime(1, 2, 3)
+	if err != nil {
+		t.Fatalf("NewTime() error = %v", err)
+	}
+	rows := newRowsWithScanTypes(nil, [][]any{{clock}}, []string{"TIME"})
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+
+	var wrong time.Time
+	if err := rows.Scan(&wrong); !errors.Is(err, ErrUnsupportedScanType) {
+		t.Fatalf("Scan(*time.Time for TIME) error = %v, want ErrUnsupportedScanType", err)
 	}
 }
 

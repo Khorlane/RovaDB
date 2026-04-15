@@ -1,5 +1,7 @@
 package rovadb
 
+import "time"
+
 // Rows represents a fully materialized query result.
 type Rows struct {
 	columns   []string
@@ -134,6 +136,10 @@ func (r *Rows) Scan(dest ...any) error {
 			*d = assignment.value.(bool)
 		case *float64:
 			*d = assignment.value.(float64)
+		case *Time:
+			*d = assignment.value.(Time)
+		case *time.Time:
+			*d = assignment.value.(time.Time)
 		case *any:
 			*d = assignment.value
 		default:
@@ -216,6 +222,30 @@ func scanAssignableValue(dest any, src any, scanType string) (any, error) {
 			return nil, ErrUnsupportedScanType
 		}
 		return f, nil
+	case *Time:
+		if d == nil {
+			return nil, ErrUnsupportedScanType
+		}
+		if scanType != "" && scanType != "TIME" {
+			return nil, ErrUnsupportedScanType
+		}
+		tv, ok := src.(Time)
+		if !ok {
+			return nil, ErrUnsupportedScanType
+		}
+		return tv, nil
+	case *time.Time:
+		if d == nil {
+			return nil, ErrUnsupportedScanType
+		}
+		if scanType != "" && scanType != "DATE" && scanType != "TIMESTAMP" {
+			return nil, ErrUnsupportedScanType
+		}
+		tv, ok := src.(time.Time)
+		if !ok {
+			return nil, ErrUnsupportedScanType
+		}
+		return tv, nil
 	case *any:
 		if d == nil {
 			return nil, ErrUnsupportedScanType

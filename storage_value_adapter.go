@@ -23,6 +23,12 @@ func storageValueFromParser(value parser.Value) storage.Value {
 		return storage.BoolValue(value.Bool)
 	case parser.ValueKindReal:
 		return storage.RealValue(value.F64)
+	case parser.ValueKindDate:
+		return storage.DateValue(value.DateDays)
+	case parser.ValueKindTime:
+		return storage.TimeValue(value.TimeSeconds)
+	case parser.ValueKindTimestamp:
+		return storage.TimestampValue(value.TimestampMillis, value.TimestampZoneID)
 	default:
 		return storage.Value{}
 	}
@@ -54,6 +60,12 @@ func parserValueFromStorage(value storage.Value) parser.Value {
 		return parser.BoolValue(value.Bool)
 	case storage.ValueKindReal:
 		return parser.RealValue(value.F64)
+	case storage.ValueKindDate:
+		return parser.DateValue(value.DateDays)
+	case storage.ValueKindTime:
+		return parser.TimeValue(value.TimeSeconds)
+	case storage.ValueKindTimestamp:
+		return parser.TimestampValue(value.TimestampMillis, value.TimestampZoneID)
 	default:
 		return parser.Value{}
 	}

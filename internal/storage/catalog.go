@@ -9,12 +9,15 @@ const (
 	catalogVersion = 8
 	catalogPageID  = 0
 
-	CatalogColumnTypeInt      = 1
-	CatalogColumnTypeText     = 2
-	CatalogColumnTypeBool     = 3
-	CatalogColumnTypeReal     = 4
-	CatalogColumnTypeSmallInt = 5
-	CatalogColumnTypeBigInt   = 6
+	CatalogColumnTypeInt       = 1
+	CatalogColumnTypeText      = 2
+	CatalogColumnTypeBool      = 3
+	CatalogColumnTypeReal      = 4
+	CatalogColumnTypeSmallInt  = 5
+	CatalogColumnTypeBigInt    = 6
+	CatalogColumnTypeDate      = 7
+	CatalogColumnTypeTime      = 8
+	CatalogColumnTypeTimestamp = 9
 )
 
 // CatalogData is the tiny storage-side catalog DTO persisted through CAT/DIR storage.
@@ -629,7 +632,7 @@ func catalogIntegerValueForColumn(columnType uint8, value int64) (Value, error) 
 
 func catalogColumnTypeValid(columnType uint8) bool {
 	switch columnType {
-	case CatalogColumnTypeSmallInt, CatalogColumnTypeInt, CatalogColumnTypeBigInt, CatalogColumnTypeText, CatalogColumnTypeBool, CatalogColumnTypeReal:
+	case CatalogColumnTypeSmallInt, CatalogColumnTypeInt, CatalogColumnTypeBigInt, CatalogColumnTypeText, CatalogColumnTypeBool, CatalogColumnTypeReal, CatalogColumnTypeDate, CatalogColumnTypeTime, CatalogColumnTypeTimestamp:
 		return true
 	default:
 		return false

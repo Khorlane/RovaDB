@@ -14,6 +14,9 @@ const (
 	ValueKindString
 	ValueKindBool
 	ValueKindReal
+	ValueKindDate
+	ValueKindTime
+	ValueKindTimestamp
 	ValueKindPlaceholder
 )
 
@@ -22,6 +25,10 @@ type Value struct {
 	I16              int16
 	I32              int32
 	I64              int64
+	DateDays         int32
+	TimeSeconds      int32
+	TimestampMillis  int64
+	TimestampZoneID  int16
 	Str              string
 	Bool             bool
 	F64              float64
@@ -64,6 +71,22 @@ func RealValue(v float64) Value {
 	return Value{Kind: ValueKindReal, F64: v}
 }
 
+func DateValue(daysSinceEpoch int32) Value {
+	return Value{Kind: ValueKindDate, DateDays: daysSinceEpoch}
+}
+
+func TimeValue(secondsSinceMidnight int32) Value {
+	return Value{Kind: ValueKindTime, TimeSeconds: secondsSinceMidnight}
+}
+
+func TimestampValue(millisecondsSinceEpoch int64, zoneID int16) Value {
+	return Value{
+		Kind:            ValueKindTimestamp,
+		TimestampMillis: millisecondsSinceEpoch,
+		TimestampZoneID: zoneID,
+	}
+}
+
 func PlaceholderValue() Value {
 	return Value{Kind: ValueKindPlaceholder, PlaceholderIndex: -1}
 }
@@ -86,6 +109,12 @@ func (v Value) ParserValue() parser.Value {
 		return parser.BoolValue(v.Bool)
 	case ValueKindReal:
 		return parser.RealValue(v.F64)
+	case ValueKindDate:
+		return parser.DateValue(v.DateDays)
+	case ValueKindTime:
+		return parser.TimeValue(v.TimeSeconds)
+	case ValueKindTimestamp:
+		return parser.TimestampValue(v.TimestampMillis, v.TimestampZoneID)
 	case ValueKindPlaceholder:
 		return parser.Value{Kind: parser.ValueKindPlaceholder, PlaceholderIndex: v.PlaceholderIndex}
 	default:
@@ -358,6 +387,10 @@ func valueFromParser(v parser.Value) Value {
 		I16:              v.I16,
 		I32:              v.I32,
 		I64:              v.I64,
+		DateDays:         v.DateDays,
+		TimeSeconds:      v.TimeSeconds,
+		TimestampMillis:  v.TimestampMillis,
+		TimestampZoneID:  v.TimestampZoneID,
 		Str:              v.Str,
 		Bool:             v.Bool,
 		F64:              v.F64,

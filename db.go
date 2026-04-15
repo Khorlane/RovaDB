@@ -3931,6 +3931,12 @@ func declaredCatalogColumnType(columnType string) uint8 {
 		return storage.CatalogColumnTypeBool
 	case parser.ColumnTypeReal:
 		return storage.CatalogColumnTypeReal
+	case parser.ColumnTypeDate:
+		return storage.CatalogColumnTypeDate
+	case parser.ColumnTypeTime:
+		return storage.CatalogColumnTypeTime
+	case parser.ColumnTypeTimestamp:
+		return storage.CatalogColumnTypeTimestamp
 	default:
 		return storage.CatalogColumnTypeText
 	}
@@ -3948,6 +3954,12 @@ func physicalStorageColumnType(columnType string) uint8 {
 		return storage.CatalogColumnTypeBool
 	case parser.ColumnTypeReal:
 		return storage.CatalogColumnTypeReal
+	case parser.ColumnTypeDate:
+		return storage.CatalogColumnTypeDate
+	case parser.ColumnTypeTime:
+		return storage.CatalogColumnTypeTime
+	case parser.ColumnTypeTimestamp:
+		return storage.CatalogColumnTypeTimestamp
 	default:
 		return storage.CatalogColumnTypeText
 	}
@@ -3965,6 +3977,12 @@ func parserColumnType(columnType uint8) (string, error) {
 		return parser.ColumnTypeBool, nil
 	case storage.CatalogColumnTypeReal:
 		return parser.ColumnTypeReal, nil
+	case storage.CatalogColumnTypeDate:
+		return parser.ColumnTypeDate, nil
+	case storage.CatalogColumnTypeTime:
+		return parser.ColumnTypeTime, nil
+	case storage.CatalogColumnTypeTimestamp:
+		return parser.ColumnTypeTimestamp, nil
 	case storage.CatalogColumnTypeText:
 		return parser.ColumnTypeText, nil
 	default:

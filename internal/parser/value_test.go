@@ -100,6 +100,32 @@ func TestRealValue(t *testing.T) {
 	}
 }
 
+func TestTemporalValueConstructors(t *testing.T) {
+	date := DateValue(123)
+	if date.Kind != ValueKindDate || date.DateDays != 123 {
+		t.Fatalf("DateValue() = %#v, want DATE 123 days", date)
+	}
+	if got := date.Any(); got != int32(123) {
+		t.Fatalf("DateValue().Any() = %#v, want int32(123)", got)
+	}
+
+	clock := TimeValue(45296)
+	if clock.Kind != ValueKindTime || clock.TimeSeconds != 45296 {
+		t.Fatalf("TimeValue() = %#v, want TIME 45296 seconds", clock)
+	}
+	if got := clock.Any(); got != int32(45296) {
+		t.Fatalf("TimeValue().Any() = %#v, want int32(45296)", got)
+	}
+
+	stamp := TimestampValue(1700000000123, 7)
+	if stamp.Kind != ValueKindTimestamp || stamp.TimestampMillis != 1700000000123 || stamp.TimestampZoneID != 7 {
+		t.Fatalf("TimestampValue() = %#v, want TIMESTAMP millis+zone payload", stamp)
+	}
+	if got := stamp.Any(); got != int64(1700000000123) {
+		t.Fatalf("TimestampValue().Any() = %#v, want int64(1700000000123)", got)
+	}
+}
+
 func TestPlaceholderValue(t *testing.T) {
 	got := PlaceholderValue()
 	if got.Kind != ValueKindPlaceholder {

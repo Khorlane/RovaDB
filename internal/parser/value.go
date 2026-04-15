@@ -18,6 +18,9 @@ const (
 	ValueKindString
 	ValueKindBool
 	ValueKindReal
+	ValueKindDate
+	ValueKindTime
+	ValueKindTimestamp
 	ValueKindPlaceholder
 )
 
@@ -73,6 +76,10 @@ type Value struct {
 	I16              int16
 	I32              int32
 	I64              int64
+	DateDays         int32
+	TimeSeconds      int32
+	TimestampMillis  int64
+	TimestampZoneID  int16
 	Str              string
 	Bool             bool
 	F64              float64
@@ -136,6 +143,22 @@ func RealValue(v float64) Value {
 	return Value{Kind: ValueKindReal, F64: v}
 }
 
+func DateValue(daysSinceEpoch int32) Value {
+	return Value{Kind: ValueKindDate, DateDays: daysSinceEpoch}
+}
+
+func TimeValue(secondsSinceMidnight int32) Value {
+	return Value{Kind: ValueKindTime, TimeSeconds: secondsSinceMidnight}
+}
+
+func TimestampValue(millisecondsSinceEpoch int64, zoneID int16) Value {
+	return Value{
+		Kind:            ValueKindTimestamp,
+		TimestampMillis: millisecondsSinceEpoch,
+		TimestampZoneID: zoneID,
+	}
+}
+
 // PlaceholderValue builds a positional placeholder Value.
 func PlaceholderValue() Value {
 	return Value{Kind: ValueKindPlaceholder, PlaceholderIndex: -1}
@@ -160,6 +183,12 @@ func (v Value) Any() any {
 		return v.Bool
 	case ValueKindReal:
 		return v.F64
+	case ValueKindDate:
+		return v.DateDays
+	case ValueKindTime:
+		return v.TimeSeconds
+	case ValueKindTimestamp:
+		return v.TimestampMillis
 	case ValueKindPlaceholder:
 		return nil
 	default:
