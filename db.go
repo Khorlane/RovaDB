@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Khorlane/RovaDB/internal/bufferpool"
 	"github.com/Khorlane/RovaDB/internal/executor"
@@ -1302,6 +1303,14 @@ func tableNamesForSelectHandoff(handoff *executor.SelectExecutionHandoff) []stri
 }
 
 func apiValue(value parser.Value) any {
+	switch value.Kind {
+	case parser.ValueKindDate:
+		return time.Unix(int64(value.DateDays)*int64(secondsPerDay), 0).UTC()
+	case parser.ValueKindTime:
+		return Time{secondsSinceMidnight: value.TimeSeconds}
+	case parser.ValueKindTimestamp:
+		return time.UnixMilli(value.TimestampMillis).UTC()
+	}
 	return value.Any()
 }
 

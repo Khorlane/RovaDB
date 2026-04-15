@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
@@ -3455,6 +3456,104 @@ func TestQuerySelectWhereTemporalTypeMismatch(t *testing.T) {
 			}
 			if rows.Err() == nil {
 				t.Fatal("Err() = nil, want type mismatch error")
+			}
+		})
+	}
+}
+
+func TestQueryTemporalMaterializationAndScan(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE events (id INT, event_date DATE, event_time TIME, recorded_at TIMESTAMP)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO events VALUES (1, '2026-04-15', '12:34:56', '2026-04-15 16:17:18')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	wantDate := time.Date(2026, time.April, 15, 0, 0, 0, 0, time.UTC)
+	wantTimestamp := time.Date(2026, time.April, 15, 16, 17, 18, 0, time.UTC)
+	wantTime, err := NewTime(12, 34, 56)
+	if err != nil {
+		t.Fatalf("NewTime() error = %v", err)
+	}
+
+	rows, err := db.Query("SELECT event_date, event_time, recorded_at FROM events WHERE id = 1")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Next() = false, want true")
+	}
+
+	var gotDate time.Time
+	var gotTime Time
+	var gotTimestamp time.Time
+	if err := rows.Scan(&gotDate, &gotTime, &gotTimestamp); err != nil {
+		t.Fatalf("rows.Scan() error = %v", err)
+	}
+	if !gotDate.Equal(wantDate) {
+		t.Fatalf("rows.Scan(DATE) = %v, want %v", gotDate, wantDate)
+	}
+	if gotTime != wantTime {
+		t.Fatalf("rows.Scan(TIME) = %#v, want %#v", gotTime, wantTime)
+	}
+	if !gotTimestamp.Equal(wantTimestamp) {
+		t.Fatalf("rows.Scan(TIMESTAMP) = %v, want %v", gotTimestamp, wantTimestamp)
+	}
+
+	var rowDate time.Time
+	var rowTime Time
+	var rowTimestamp time.Time
+	if err := db.QueryRow("SELECT event_date, event_time, recorded_at FROM events WHERE id = 1").Scan(&rowDate, &rowTime, &rowTimestamp); err != nil {
+		t.Fatalf("QueryRow().Scan() error = %v", err)
+	}
+	if !rowDate.Equal(wantDate) {
+		t.Fatalf("QueryRow().Scan(DATE) = %v, want %v", rowDate, wantDate)
+	}
+	if rowTime != wantTime {
+		t.Fatalf("QueryRow().Scan(TIME) = %#v, want %#v", rowTime, wantTime)
+	}
+	if !rowTimestamp.Equal(wantTimestamp) {
+		t.Fatalf("QueryRow().Scan(TIMESTAMP) = %v, want %v", rowTimestamp, wantTimestamp)
+	}
+}
+
+func TestQueryTemporalScanTypeMismatch(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE events (id INT, event_date DATE, event_time TIME, recorded_at TIMESTAMP)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO events VALUES (1, '2026-04-15', '12:34:56', '2026-04-15 16:17:18')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		sql  string
+		dest any
+	}{
+		{name: "DATE rejects *Time", sql: "SELECT event_date FROM events WHERE id = 1", dest: new(Time)},
+		{name: "TIME rejects *time.Time", sql: "SELECT event_time FROM events WHERE id = 1", dest: new(time.Time)},
+		{name: "TIMESTAMP rejects *Time", sql: "SELECT recorded_at FROM events WHERE id = 1", dest: new(Time)},
+		{name: "TIMESTAMP rejects *string", sql: "SELECT recorded_at FROM events WHERE id = 1", dest: new(string)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := db.QueryRow(tc.sql).Scan(tc.dest); !errors.Is(err, ErrUnsupportedScanType) {
+				t.Fatalf("QueryRow().Scan() error = %v, want ErrUnsupportedScanType", err)
 			}
 		})
 	}

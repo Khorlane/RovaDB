@@ -737,24 +737,25 @@ func TestRowsScanTemporalSupport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTime() error = %v", err)
 	}
-	timestamp := time.Date(2026, time.April, 15, 16, 17, 18, 0, time.UTC)
+	date := time.Date(2026, time.April, 15, 0, 0, 0, 0, time.UTC)
+	timestamp := time.Date(2026, time.April, 15, 16, 17, 18, 123000000, time.UTC)
 
-	rows := newRowsWithScanTypes(nil, [][]any{{clock, timestamp, timestamp}}, []string{"TIME", "DATE", "TIMESTAMP"})
+	rows := newRowsWithScanTypes(nil, [][]any{{date, clock, timestamp}}, []string{"DATE", "TIME", "TIMESTAMP"})
 	if !rows.Next() {
 		t.Fatal("Next() = false, want true")
 	}
 
-	var gotTime Time
 	var gotDate time.Time
+	var gotTime Time
 	var gotTimestamp time.Time
-	if err := rows.Scan(&gotTime, &gotDate, &gotTimestamp); err != nil {
+	if err := rows.Scan(&gotDate, &gotTime, &gotTimestamp); err != nil {
 		t.Fatalf("Scan() error = %v", err)
+	}
+	if !gotDate.Equal(date) {
+		t.Fatalf("Scan(DATE) = %v, want %v", gotDate, date)
 	}
 	if gotTime != clock {
 		t.Fatalf("Scan(Time) = %#v, want %#v", gotTime, clock)
-	}
-	if !gotDate.Equal(timestamp) {
-		t.Fatalf("Scan(DATE) = %v, want %v", gotDate, timestamp)
 	}
 	if !gotTimestamp.Equal(timestamp) {
 		t.Fatalf("Scan(TIMESTAMP) = %v, want %v", gotTimestamp, timestamp)
@@ -766,14 +767,45 @@ func TestRowsScanTemporalTypeMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTime() error = %v", err)
 	}
-	rows := newRowsWithScanTypes(nil, [][]any{{clock}}, []string{"TIME"})
-	if !rows.Next() {
-		t.Fatal("Next() = false, want true")
+	date := time.Date(2026, time.April, 15, 0, 0, 0, 0, time.UTC)
+	timestamp := time.Date(2026, time.April, 15, 16, 17, 18, 0, time.UTC)
+
+	tests := []struct {
+		name     string
+		rows     *Rows
+		scanDest func() any
+	}{
+		{
+			name:     "DATE rejects *Time",
+			rows:     newRowsWithScanTypes(nil, [][]any{{date}}, []string{"DATE"}),
+			scanDest: func() any { return new(Time) },
+		},
+		{
+			name:     "TIME rejects *time.Time",
+			rows:     newRowsWithScanTypes(nil, [][]any{{clock}}, []string{"TIME"}),
+			scanDest: func() any { return new(time.Time) },
+		},
+		{
+			name:     "TIMESTAMP rejects *Time",
+			rows:     newRowsWithScanTypes(nil, [][]any{{timestamp}}, []string{"TIMESTAMP"}),
+			scanDest: func() any { return new(Time) },
+		},
+		{
+			name:     "DATE rejects *string",
+			rows:     newRowsWithScanTypes(nil, [][]any{{date}}, []string{"DATE"}),
+			scanDest: func() any { return new(string) },
+		},
 	}
 
-	var wrong time.Time
-	if err := rows.Scan(&wrong); !errors.Is(err, ErrUnsupportedScanType) {
-		t.Fatalf("Scan(*time.Time for TIME) error = %v, want ErrUnsupportedScanType", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if !tc.rows.Next() {
+				t.Fatal("Next() = false, want true")
+			}
+			if err := tc.rows.Scan(tc.scanDest()); !errors.Is(err, ErrUnsupportedScanType) {
+				t.Fatalf("Scan() error = %v, want ErrUnsupportedScanType", err)
+			}
+		})
 	}
 }
 

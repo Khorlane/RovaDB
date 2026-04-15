@@ -16,6 +16,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestQueryReloadsRowsFromStorageInsteadOfStaleTableCache(t *testing.T) {
@@ -2016,6 +2017,50 @@ func TestTypedIntegerCloseReopenPreservesExactWidthsAcrossMaterializeAndScan(t *
 	}
 	if err := db.QueryRow("SELECT COUNT(*) FROM numbers").Scan(new(int)); !errors.Is(err, ErrUnsupportedScanType) {
 		t.Fatalf("QueryRow(COUNT(*)).Scan(*int) error = %v, want ErrUnsupportedScanType", err)
+	}
+}
+
+func TestTemporalCloseReopenPreservesPublicMaterializationAndScan(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE events (id INT, event_date DATE, event_time TIME, recorded_at TIMESTAMP)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO events VALUES (1, '2026-04-15', '12:34:56', '2026-04-15 16:17:18')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	wantDate := time.Date(2026, time.April, 15, 0, 0, 0, 0, time.UTC)
+	wantTimestamp := time.Date(2026, time.April, 15, 16, 17, 18, 0, time.UTC)
+	wantTime, err := NewTime(12, 34, 56)
+	if err != nil {
+		t.Fatalf("NewTime() error = %v", err)
+	}
+
+	var gotDate time.Time
+	var gotTime Time
+	var gotTimestamp time.Time
+	if err := db.QueryRow("SELECT event_date, event_time, recorded_at FROM events WHERE id = 1").Scan(&gotDate, &gotTime, &gotTimestamp); err != nil {
+		t.Fatalf("QueryRow().Scan() error = %v", err)
+	}
+	if !gotDate.Equal(wantDate) {
+		t.Fatalf("QueryRow().Scan(DATE) = %v, want %v", gotDate, wantDate)
+	}
+	if gotTime != wantTime {
+		t.Fatalf("QueryRow().Scan(TIME) = %#v, want %#v", gotTime, wantTime)
+	}
+	if !gotTimestamp.Equal(wantTimestamp) {
+		t.Fatalf("QueryRow().Scan(TIMESTAMP) = %v, want %v", gotTimestamp, wantTimestamp)
 	}
 }
 
