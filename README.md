@@ -105,6 +105,7 @@ Recent completed milestones include:
 - column nullability and literal defaults
 - physical integer widths
 - strict integer semantics
+- temporal core basics
 
 The current engine baseline includes:
 
@@ -114,8 +115,9 @@ The current engine baseline includes:
 - locked parser -> planner -> execution -> storage layering with one-way dependencies
 - explicit public transactions through the Go API
 - named primary and foreign keys with immediate referential integrity enforcement
-- strict value semantics for `SMALLINT`, `INT`, `BIGINT`, `TEXT`, `BOOL`, `REAL`, and `NULL`
+- strict value semantics for `SMALLINT`, `INT`, `BIGINT`, `TEXT`, `BOOL`, `REAL`, `DATE`, `TIME`, `TIMESTAMP`, and `NULL`
 - exact-width integer binding, write, arithmetic, storage, and scan behavior
+- canonical temporal literal parsing, strict temporal writes, persisted temporal storage/catalog metadata, temporal predicates, temporal `ORDER BY`, and public temporal scan mappings
 - deterministic query behavior, explicit error surfaces, and growing lifecycle coverage
 
 Current development is focused on extending capability without weakening correctness, determinism, storage integrity, or API discipline.
@@ -170,7 +172,8 @@ See `docs/dev/ARCHITECTURAL_BOUNDARIES.md` for the authoritative boundary contra
 - explicit public transactions via `Begin`, `Tx.Exec`, `Tx.Query`, `Tx.QueryRow`, `Commit`, and `Rollback`
 - public catalog introspection via `ListTables` and `GetTableSchema`
 - shared product version via `Version()`
-- strict value support for `SMALLINT`, `INT`, `BIGINT`, `TEXT`, `BOOL`, `REAL`, and `NULL`
+- strict value support for `SMALLINT`, `INT`, `BIGINT`, `TEXT`, `BOOL`, `REAL`, `DATE`, `TIME`, `TIMESTAMP`, and `NULL`
+- temporal basics for canonical literals, strict family-matched writes/comparisons, temporal `WHERE`, temporal `ORDER BY`, and public scan targets
 - narrow index-only access for eligible plain single-table `COUNT(*)` and single-column indexed projection queries
 
 ### Scope Discipline
@@ -308,6 +311,9 @@ Destructive DDL behavior:
 - `TEXT`
 - `BOOL`
 - `REAL`
+- `DATE`
+- `TIME`
+- `TIMESTAMP`
 
 ### Column nullability and literal defaults
 
@@ -345,6 +351,18 @@ Examples:
 - there is no implicit coercion between `INT` and `REAL`
 - REAL-to-REAL `WHERE` comparisons support `=`, `!=`, `<`, `<=`, `>`, and `>=`
 - mixed `INT` / `REAL`, `TEXT` / `REAL`, and `BOOL` / `REAL` comparisons remain strict type mismatches
+
+### Temporal semantics
+
+- supported temporal schema types are `DATE`, `TIME`, and `TIMESTAMP`
+- accepted canonical quoted payloads are `'YYYY-MM-DD'` for `DATE`, `'HH:MM:SS'` for `TIME`, and `'YYYY-MM-DD HH:MM:SS'` for `TIMESTAMP`
+- quoted strings that match those canonical payloads are classified as temporal literals; other quoted strings remain `TEXT`
+- writes are strict by temporal family: `DATE` accepts only `DATE`, `TIME` accepts only `TIME`, and `TIMESTAMP` accepts only `TIMESTAMP`, plus `NULL` where allowed
+- temporal `WHERE` predicates support `=`, `!=`, `<`, `<=`, `>`, and `>=` when both sides are the same temporal family
+- temporal `ORDER BY` is supported within the current query subset
+- there is no implicit casting or implicit coercion between temporal families or between temporal and non-temporal types
+- public scan contract is `DATE` -> `*time.Time`, `TIMESTAMP` -> `*time.Time`, and `TIME` -> `*rovadb.Time`
+- not supported in this milestone: fractional seconds, alternate literal formats, temporal arithmetic, and built-in temporal functions
 
 ### Text comparison semantics
 
@@ -384,6 +402,8 @@ Supported Go argument types are:
 - `nil`
 
 Unsupported argument types fail with an error.
+
+String arguments that exactly match the canonical temporal literal payloads bind as temporal values: `YYYY-MM-DD` -> `DATE`, `HH:MM:SS` -> `TIME`, and `YYYY-MM-DD HH:MM:SS` -> `TIMESTAMP`. Other strings bind as `TEXT`.
 
 For SQL integer binding, placeholder width is exact: `SMALLINT` binds through
 `int16`, `INT` through `int32`, and `BIGINT` through `int64`. Go `int` and
@@ -459,6 +479,8 @@ if err := rows.Err(); err != nil {
 This stores `Alice` exactly as provided, while the second row uses the schema defaults because the `INSERT` omits `name`, `active`, and `score`.
 
 For typed integer columns, public writes and `Scan` destinations must match the declared SQL width exactly: `SMALLINT` <-> `int16`, `INT` <-> `int32`, and `BIGINT` <-> `int64`. There is no generic Go `int` interchange for these typed integer columns.
+
+For temporal columns, the public scan contract is `DATE` <-> `time.Time`, `TIMESTAMP` <-> `time.Time`, and `TIME` <-> `rovadb.Time`.
 
 Untyped integer-expression results remain a narrow exception. Query shapes such
 as `SELECT 1`, `SELECT 1 + 2`, `COUNT(*)`, and `LENGTH(name)` currently

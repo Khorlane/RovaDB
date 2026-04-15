@@ -290,6 +290,9 @@ Allowed literal categories:
 - string literal
 - boolean literal
 - real literal
+- canonical date literal
+- canonical time literal
+- canonical timestamp literal
 - `NULL`, but only where the column remains nullable
 
 Datatype compatibility is checked against the target column's normal assignment rules.
@@ -300,6 +303,9 @@ Examples:
 - `REAL DEFAULT 1.25` is valid
 - `TEXT DEFAULT 'ready'` is valid
 - `BOOL DEFAULT TRUE` is valid
+- `DATE DEFAULT '2026-04-10'` is valid
+- `TIME DEFAULT '13:45:21'` is valid
+- `TIMESTAMP DEFAULT '2026-04-10 13:45:21'` is valid
 - `TEXT DEFAULT NULL` is valid if the column is nullable
 - `INT DEFAULT 'abc'` is invalid
 - `BOOL DEFAULT 1` is invalid
@@ -338,8 +344,41 @@ Supported schema datatypes:
 - `TEXT`
 - `BOOL`
 - `REAL`
+- `DATE`
+- `TIME`
+- `TIMESTAMP`
 
 `NULL` is a value state, not a standalone schema type.
+
+### Temporal Type Contract
+
+- `DATE`, `TIME`, and `TIMESTAMP` are distinct schema types
+- `DATE` and `TIMESTAMP` materialize to Go `time.Time` in the public API
+- `TIME` materializes to the public `rovadb.Time` value
+- no implicit coercion exists between temporal families or between temporal and non-temporal types
+
+### Temporal Write, Comparison, and Ordering Contract
+
+- `DATE` columns accept only `DATE` or `NULL`
+- `TIME` columns accept only `TIME` or `NULL`
+- `TIMESTAMP` columns accept only `TIMESTAMP` or `NULL`
+- temporal writes enforce exact family matching
+- temporal predicates support `=`, `!=`, `<>`, `<`, `<=`, `>`, and `>=` only when both sides are the same temporal family
+- temporal `ORDER BY` is supported within the current query subset
+
+### Temporal Public Scan Contract
+
+- `DATE` scans only into `*time.Time`
+- `TIMESTAMP` scans only into `*time.Time`
+- `TIME` scans only into `*rovadb.Time`
+
+### Temporal Non-Goals
+
+- fractional seconds
+- alternate literal formats
+- temporal arithmetic
+- built-in temporal functions
+- implicit casting and implicit coercion
 
 ## 6. Integer Semantics
 
@@ -517,13 +556,19 @@ Supported literal forms:
 - string literal
 - boolean literal
 - real literal
+- canonical date literal
+- canonical time literal
+- canonical timestamp literal
 - `NULL`
 
 Classification rules:
 
 - unquoted whole numbers are integer literals
 - unquoted decimals are real literals
-- quoted text remains string literal `TEXT`
+- quoted canonical `YYYY-MM-DD` payloads are `DATE`
+- quoted canonical `HH:MM:SS` payloads are `TIME`
+- quoted canonical `YYYY-MM-DD HH:MM:SS` payloads are `TIMESTAMP`
+- other quoted text remains string literal `TEXT`
 - unquoted `TRUE` and `FALSE` are boolean literals
 - `NULL` is the null literal
 
@@ -546,6 +591,8 @@ Supported Go argument types:
 - `nil`
 
 Unsupported argument types are rejected.
+
+String arguments that exactly match the canonical temporal literal payloads bind as temporal values: `YYYY-MM-DD` -> `DATE`, `HH:MM:SS` -> `TIME`, and `YYYY-MM-DD HH:MM:SS` -> `TIMESTAMP`. Other strings bind as `TEXT`.
 
 ## 12. Expression Inventory
 
@@ -660,8 +707,10 @@ Supported SELECT features:
 - single-table `FROM`
 - two-table inner equi-joins via explicit `INNER JOIN ... ON ...` and comma join plus `WHERE`
 - `WHERE` with `NOT`, precedence, and parenthesized grouping
+- same-family temporal `WHERE` predicates for `DATE`, `TIME`, and `TIMESTAMP` using `=`, `!=`, `<>`, `<`, `<=`, `>`, and `>=`
 - scalar functions: `LOWER`, `UPPER`, `LENGTH`, and `ABS`
 - aggregates: `COUNT(*)`, `COUNT(expr)`, `MIN`, `MAX`, `AVG`, and `SUM`
+- temporal `ORDER BY` within the supported query subset
 
 ### Narrow Index-Only Surface
 
@@ -696,6 +745,11 @@ Not supported today:
 - SQL `BEGIN`
 - executable SQL `COMMIT`
 - executable SQL `ROLLBACK`
+- fractional-second temporal literals
+- alternate temporal literal formats
+- temporal arithmetic
+- built-in temporal functions
+- implicit casting or implicit coercion across temporal families
 - schema changes other than `ALTER TABLE ... ADD COLUMN`, `ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY`, `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY`, `ALTER TABLE ... DROP PRIMARY KEY`, and `ALTER TABLE ... DROP FOREIGN KEY`
 
 ## 18. Accepted Examples
@@ -704,6 +758,7 @@ Representative accepted examples:
 
 - `CREATE TABLE users (id INT NOT NULL, name TEXT DEFAULT 'ready', active BOOL NOT NULL DEFAULT TRUE, score REAL DEFAULT 0.0)`
 - `CREATE TABLE metrics (small SMALLINT, normal INT, big BIGINT)`
+- `CREATE TABLE events (event_date DATE, event_time TIME, recorded_at TIMESTAMP)`
 - `CREATE UNIQUE INDEX idx_users_name ON users (name ASC)`
 - `CREATE INDEX idx_users_name_score ON users (name ASC, score DESC)`
 - `DROP TABLE users`
@@ -715,6 +770,7 @@ Representative accepted examples:
 - `ALTER TABLE users DROP PRIMARY KEY`
 - `ALTER TABLE users DROP FOREIGN KEY fk_users_team`
 - `INSERT INTO users VALUES (1, 'Alice', TRUE, 3.14)`
+- `INSERT INTO events VALUES ('2026-04-10', '13:45:21', '2026-04-10 13:45:21')`
 - `INSERT INTO users (id, name) VALUES (?, ?)`
 - `UPDATE users SET name = 'Bob' WHERE id = 1`
 - `UPDATE users SET score = ABS(score) WHERE id = ?`
@@ -726,6 +782,7 @@ Representative accepted examples:
 - `SELECT COUNT(*) FROM users WHERE active = TRUE`
 - `SELECT AVG(score), SUM(score), MIN(score), MAX(score) FROM users`
 - `SELECT u.name, d.name FROM users u JOIN departments d ON u.department_id = d.id`
+- `SELECT recorded_at FROM events WHERE recorded_at >= '2026-04-10 00:00:00' ORDER BY recorded_at`
 
 ## 19. Rejected Examples
 
@@ -756,6 +813,8 @@ Representative rejected examples:
 - `SELECT * FROM users WHERE id IN (SELECT id FROM archived_users)`
 - `SELECT * FROM users NATURAL JOIN departments`
 - `SELECT * FROM users JOIN departments USING (department_id)`
+- `INSERT INTO events VALUES ('2026/04/10', '13:45:21', '2026-04-10 13:45:21')`
+- `SELECT * FROM events WHERE event_date = '2026-04-10 13:45:21'`
 - binding Go `int` into a typed SQL integer placeholder
 - scanning typed `INT` into `*int64`
 - inserting `1` into a `BOOL` column

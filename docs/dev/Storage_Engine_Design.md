@@ -2,7 +2,7 @@
 
 This document defines the authoritative storage-engine design for RovaDB.
 
-It is the production storage reference for durable data representation, physical page ownership, catalog and directory persistence, index-definition persistence and maintenance, schema-object lifecycle behavior, storage-facing exact-width integer rules, and recovery-oriented invariants.
+It is the production storage reference for durable data representation, physical page ownership, catalog and directory persistence, index-definition persistence and maintenance, schema-object lifecycle behavior, storage-facing exact-width integer and temporal type rules, and recovery-oriented invariants.
 
 It replaces narrower storage and lifecycle-oriented design notes by consolidating the current durable truth into one document.
 
@@ -11,7 +11,7 @@ It replaces narrower storage and lifecycle-oriented design notes by consolidatin
 - define the locked storage-engine model for RovaDB
 - preserve the durable truths needed to prevent storage drift over time
 - keep physical storage, catalog persistence, index persistence, and schema lifecycle behavior aligned
-- document the storage-facing contract for exact-width integers
+- document the storage-facing contract for exact-width integers and temporal types
 - define the recovery, reopen, and corruption-detection expectations that preserve correctness
 
 ## Scope
@@ -22,7 +22,7 @@ This document covers:
 - catalog and directory persistence
 - durable index-definition storage and runtime maintenance
 - schema-object lifecycle behavior for dropped tables and indexes
-- storage-facing integer width and durable-format rules
+- storage-facing integer width, temporal type identity, and durable-format rules
 - recovery, reopen, and corruption-detection invariants
 
 This document does not define:
@@ -45,7 +45,7 @@ The storage engine is responsible for:
 - durable catalog and directory metadata
 - schema-object durability across open, close, reopen, and recovery
 - corruption detection with explicit failure rather than silent repair
-- preserving exact-width type identity where physical layout depends on declared schema type
+- preserving exact-width integer identity and temporal type identity where physical layout depends on declared schema type
 
 The storage engine is correctness-first. Where there is tension between flexibility and durable truth, durable truth wins.
 
@@ -408,6 +408,38 @@ Current examples include:
 These results materialize as `int64` and scan only into `*int64`.
 
 This seam is intentional and narrow. It does not weaken exact-width schema-aware storage or typed result behavior.
+
+### 3.11 Temporal Storage and Catalog Contract
+
+RovaDB also supports these distinct temporal schema types:
+
+- `DATE`
+- `TIME`
+- `TIMESTAMP`
+
+The storage engine must preserve their declared identity exactly across:
+
+- writes
+- physical storage
+- catalog persistence
+- reopen
+- query materialization
+
+Required behavior:
+
+- temporal values remain family-distinct; `DATE`, `TIME`, and `TIMESTAMP` are not interchangeable
+- canonical temporal values persist and round-trip without being collapsed into `TEXT`
+- temporal writes enforce exact family matching rather than implicit coercion
+- catalog metadata must preserve the original declared temporal type exactly
+- reopen must preserve temporal values and declared temporal schema identity exactly
+
+Current non-goals remain:
+
+- fractional seconds
+- alternate temporal literal formats
+- temporal arithmetic
+- built-in temporal functions
+- implicit temporal casting or coercion
 
 ## 4. Durable Index Design
 
