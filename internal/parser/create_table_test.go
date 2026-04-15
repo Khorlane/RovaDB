@@ -53,6 +53,21 @@ func TestParseCreateTableColumnDefinitionMetadata(t *testing.T) {
 			sql:  "CREATE TABLE t (score REAL DEFAULT 1.5)",
 			want: ColumnDef{Name: "score", Type: ColumnTypeReal, HasDefault: true, DefaultValue: RealValue(1.5)},
 		},
+		{
+			name: "date",
+			sql:  "CREATE TABLE t (d DATE)",
+			want: ColumnDef{Name: "d", Type: ColumnTypeDate},
+		},
+		{
+			name: "time",
+			sql:  "CREATE TABLE t (tm TIME)",
+			want: ColumnDef{Name: "tm", Type: ColumnTypeTime},
+		},
+		{
+			name: "timestamp",
+			sql:  "CREATE TABLE t (ts TIMESTAMP)",
+			want: ColumnDef{Name: "ts", Type: ColumnTypeTimestamp},
+		},
 	}
 
 	for _, tc := range tests {
@@ -68,6 +83,27 @@ func TestParseCreateTableColumnDefinitionMetadata(t *testing.T) {
 				t.Fatalf("Columns[0] = %#v, want %#v", got.Columns[0], tc.want)
 			}
 		})
+	}
+}
+
+func TestParseCreateTableTemporalTypes(t *testing.T) {
+	got, err := parseCreateTableTokens("CREATE TABLE t (d DATE, tm TIME, ts TIMESTAMP)")
+	if err != nil {
+		t.Fatalf("parseCreateTableTokens() error = %v", err)
+	}
+
+	want := []ColumnDef{
+		{Name: "d", Type: ColumnTypeDate},
+		{Name: "tm", Type: ColumnTypeTime},
+		{Name: "ts", Type: ColumnTypeTimestamp},
+	}
+	if len(got.Columns) != len(want) {
+		t.Fatalf("len(Columns) = %d, want %d", len(got.Columns), len(want))
+	}
+	for i := range want {
+		if got.Columns[i] != want[i] {
+			t.Fatalf("Columns[%d] = %#v, want %#v", i, got.Columns[i], want[i])
+		}
 	}
 }
 

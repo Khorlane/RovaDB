@@ -222,6 +222,66 @@ func TestParseLiteralValuePlaceholder(t *testing.T) {
 	}
 }
 
+func TestParseLiteralValueTemporalCanonical(t *testing.T) {
+	tests := []struct {
+		name  string
+		token string
+		want  Value
+	}{
+		{name: "date", token: "'2026-04-10'", want: DateValue(20553)},
+		{name: "time", token: "'13:45:21'", want: TimeValue(49521)},
+		{name: "timestamp", token: "'2026-04-10 13:45:21'", want: TimestampValue(1775828721000, 0)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseLiteralValue(tc.token)
+			if !ok {
+				t.Fatalf("parseLiteralValue(%q) ok = false, want true", tc.token)
+			}
+			if got != tc.want {
+				t.Fatalf("parseLiteralValue(%q) = %#v, want %#v", tc.token, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseLiteralValueTemporalInvalid(t *testing.T) {
+	tests := []string{
+		"'2026/04/10'",
+		"'2026-4-1'",
+		"'1:2:3'",
+		"'2026-04-10T13:45:21'",
+		"'2026-02-30'",
+		"'24:00:00'",
+		"'23:59:60'",
+	}
+
+	for _, token := range tests {
+		t.Run(token, func(t *testing.T) {
+			if got, ok := parseLiteralValue(token); ok {
+				t.Fatalf("parseLiteralValue(%q) = %#v, want failure", token, got)
+			}
+		})
+	}
+}
+
+func TestParseLiteralValuePreservesOrdinaryStrings(t *testing.T) {
+	tests := []string{"'hello'", "'2026-not-a-date'", "'release 2026/04'"}
+
+	for _, token := range tests {
+		t.Run(token, func(t *testing.T) {
+			got, ok := parseLiteralValue(token)
+			if !ok {
+				t.Fatalf("parseLiteralValue(%q) ok = false, want true", token)
+			}
+			if got.Kind != ValueKindString {
+				t.Fatalf("parseLiteralValue(%q).Kind = %v, want %v", token, got.Kind, ValueKindString)
+			}
+		})
+	}
+}
+
 func TestParseSelectExprValueKinds(t *testing.T) {
 	intSel, ok := ParseSelectExpr("SELECT 1")
 	if !ok {

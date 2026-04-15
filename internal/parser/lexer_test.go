@@ -3,7 +3,7 @@ package parser
 import "testing"
 
 func TestLexSQLCreateTableTokens(t *testing.T) {
-	tokens, err := lexSQL("CREATE TABLE users (small_id SMALLINT, id INT, big_id BIGINT, name TEXT, active BOOL, score REAL)")
+	tokens, err := lexSQL("CREATE TABLE users (small_id SMALLINT, id INT, big_id BIGINT, name TEXT, active BOOL, score REAL, event_date DATE, event_time TIME, recorded_at TIMESTAMP)")
 	if err != nil {
 		t.Fatalf("lexSQL() error = %v", err)
 	}
@@ -30,6 +30,15 @@ func TestLexSQLCreateTableTokens(t *testing.T) {
 		tokenComma,
 		tokenIdentifier,
 		tokenKeywordReal,
+		tokenComma,
+		tokenIdentifier,
+		tokenKeywordDate,
+		tokenComma,
+		tokenIdentifier,
+		tokenKeywordTime,
+		tokenComma,
+		tokenIdentifier,
+		tokenKeywordTimestamp,
 		tokenRParen,
 		tokenEOF,
 	}

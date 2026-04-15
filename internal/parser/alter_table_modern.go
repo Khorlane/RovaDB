@@ -323,8 +323,8 @@ func (p *alterTableTokenParser) parseColumnType() (string, error) {
 
 func (p *alterTableTokenParser) parseColumnDefaultLiteral() (Value, error) {
 	tok := p.current()
-	value, ok := parseLiteralToken(tok)
-	if !ok || value.Kind == ValueKindPlaceholder {
+	value, err := parseLiteralToken(tok)
+	if err != nil || value.Kind == ValueKindPlaceholder {
 		return Value{}, newParseError("unsupported alter table form")
 	}
 	p.pos++

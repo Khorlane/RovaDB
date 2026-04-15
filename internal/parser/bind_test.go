@@ -182,6 +182,9 @@ func TestBindArgumentValueSupportedTypes(t *testing.T) {
 		{name: "int32", arg: int32(1), want: boundIntegerValue(1, BoundIntegerTypeInt32)},
 		{name: "int64", arg: int64(1), want: boundIntegerValue(1, BoundIntegerTypeInt64)},
 		{name: "string", arg: "steve", want: StringValue("steve")},
+		{name: "date string", arg: "2026-04-10", want: DateValue(20553)},
+		{name: "time string", arg: "13:45:21", want: TimeValue(49521)},
+		{name: "timestamp string", arg: "2026-04-10 13:45:21", want: TimestampValue(1775828721000, 0)},
 		{name: "bool true", arg: true, want: BoolValue(true)},
 		{name: "bool false", arg: false, want: BoolValue(false)},
 		{name: "float64", arg: 3.14, want: RealValue(3.14)},
@@ -199,6 +202,27 @@ func TestBindArgumentValueSupportedTypes(t *testing.T) {
 			}
 			if tc.want.IsTypedInteger() && got.Kind == ValueKindIntegerLiteral {
 				t.Fatalf("bindArgumentValue() kind = %v, want typed integer kind", got.Kind)
+			}
+		})
+	}
+}
+
+func TestBindArgumentValueRejectsMalformedTemporalStrings(t *testing.T) {
+	tests := []string{
+		"2026/04/10",
+		"2026-4-1",
+		"1:2:3",
+		"2026-04-10T13:45:21",
+		"2026-02-30",
+		"24:00:00",
+		"23:59:60",
+	}
+
+	for _, arg := range tests {
+		t.Run(arg, func(t *testing.T) {
+			_, err := bindArgumentValue(arg)
+			if err == nil || !strings.Contains(err.Error(), "invalid temporal literal") {
+				t.Fatalf("bindArgumentValue() error = %v, want invalid temporal literal", err)
 			}
 		})
 	}

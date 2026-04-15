@@ -277,7 +277,7 @@ func (p *createTableTokenParser) parseColumnDef() (ColumnDef, error) {
 func (p *createTableTokenParser) parseColumnType() (string, error) {
 	typeTok := p.current()
 	switch typeTok.Kind {
-	case tokenKeywordSmallInt, tokenKeywordInt, tokenKeywordBigInt, tokenKeywordText, tokenKeywordBool, tokenKeywordReal:
+	case tokenKeywordSmallInt, tokenKeywordInt, tokenKeywordBigInt, tokenKeywordText, tokenKeywordBool, tokenKeywordReal, tokenKeywordDate, tokenKeywordTime, tokenKeywordTimestamp:
 		p.pos++
 		return normalizeColumnType(typeTok.Kind), nil
 	default:
@@ -287,8 +287,8 @@ func (p *createTableTokenParser) parseColumnType() (string, error) {
 
 func (p *createTableTokenParser) parseColumnDefaultLiteral() (Value, error) {
 	tok := p.current()
-	value, ok := parseLiteralToken(tok)
-	if !ok || value.Kind == ValueKindPlaceholder {
+	value, err := parseLiteralToken(tok)
+	if err != nil || value.Kind == ValueKindPlaceholder {
 		return Value{}, newParseError("unsupported query form")
 	}
 	p.pos++
@@ -325,6 +325,12 @@ func normalizeColumnType(kind tokenKind) string {
 		return ColumnTypeBool
 	case tokenKeywordReal:
 		return ColumnTypeReal
+	case tokenKeywordDate:
+		return ColumnTypeDate
+	case tokenKeywordTime:
+		return ColumnTypeTime
+	case tokenKeywordTimestamp:
+		return ColumnTypeTimestamp
 	default:
 		return ""
 	}

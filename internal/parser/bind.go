@@ -217,7 +217,7 @@ func bindArgumentValue(arg any) (Value, error) {
 	case int64:
 		return boundIntegerValue(v, BoundIntegerTypeInt64), nil
 	case string:
-		return StringValue(v), nil
+		return bindStringArgumentValue(v)
 	case bool:
 		return BoolValue(v), nil
 	case float64:
@@ -229,6 +229,14 @@ func bindArgumentValue(arg any) (Value, error) {
 
 func newBindError(msg string) error {
 	return fmt.Errorf("bind: %s", msg)
+}
+
+func bindStringArgumentValue(v string) (Value, error) {
+	value, err := parseStringLiteralPayload(v)
+	if err != nil {
+		return Value{}, newBindError("invalid temporal literal")
+	}
+	return value, nil
 }
 
 func collectExprPlaceholders(expr *ValueExpr) []*Value {

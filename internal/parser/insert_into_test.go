@@ -63,6 +63,24 @@ func TestParseInsert(t *testing.T) {
 			cols:   nil,
 			values: []Value{RealValue(-2.5)},
 		},
+		{
+			name:   "date literal",
+			input:  "INSERT INTO users VALUES ('2026-04-10')",
+			cols:   nil,
+			values: []Value{DateValue(20553)},
+		},
+		{
+			name:   "time literal",
+			input:  "INSERT INTO users VALUES ('13:45:21')",
+			cols:   nil,
+			values: []Value{TimeValue(49521)},
+		},
+		{
+			name:   "timestamp literal",
+			input:  "INSERT INTO users VALUES ('2026-04-10 13:45:21')",
+			cols:   nil,
+			values: []Value{TimestampValue(1775828721000, 0)},
+		},
 	}
 
 	for _, tc := range tests {
@@ -89,6 +107,26 @@ func TestParseInsert(t *testing.T) {
 				if got.Values[i] != tc.values[i] {
 					t.Fatalf("parseInsert().Values[%d] = %#v, want %#v", i, got.Values[i], tc.values[i])
 				}
+			}
+		})
+	}
+}
+
+func TestParseInsertRejectsMalformedTemporalLiterals(t *testing.T) {
+	tests := []string{
+		"INSERT INTO users VALUES ('2026/04/10')",
+		"INSERT INTO users VALUES ('2026-4-1')",
+		"INSERT INTO users VALUES ('1:2:3')",
+		"INSERT INTO users VALUES ('2026-04-10T13:45:21')",
+		"INSERT INTO users VALUES ('2026-02-30')",
+		"INSERT INTO users VALUES ('24:00:00')",
+		"INSERT INTO users VALUES ('23:59:60')",
+	}
+
+	for _, sql := range tests {
+		t.Run(sql, func(t *testing.T) {
+			if got, err := parseInsert(sql); err == nil {
+				t.Fatalf("parseInsert() = %#v, want error", got)
 			}
 		})
 	}

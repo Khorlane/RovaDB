@@ -3,6 +3,7 @@ package parser
 import (
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ValueKind identifies the stored value type.
@@ -275,3 +276,262 @@ func parseRealLiteral(token string) (float64, bool) {
 func parseInt64Literal(token string) (int64, error) {
 	return strconv.ParseInt(token, 10, 64)
 }
+
+type temporalLiteralStatus int
+
+const (
+	temporalLiteralNotRecognized temporalLiteralStatus = iota
+	temporalLiteralRecognized
+	temporalLiteralInvalid
+)
+
+func parseStringLiteralPayload(payload string) (Value, error) {
+	value, status := parseTemporalLiteralPayload(payload)
+	switch status {
+	case temporalLiteralRecognized:
+		return value, nil
+	case temporalLiteralInvalid:
+		return Value{}, newParseError("unsupported query form")
+	default:
+		return StringValue(payload), nil
+	}
+}
+
+func parseTemporalLiteralPayload(payload string) (Value, temporalLiteralStatus) {
+	if strings.TrimSpace(payload) != payload {
+		trimmed := strings.TrimSpace(payload)
+		if looksTemporalLiteral(trimmed) || looksTemporalNearMiss(trimmed) {
+			return Value{}, temporalLiteralInvalid
+		}
+		return Value{}, temporalLiteralNotRecognized
+	}
+
+	switch {
+	case isCanonicalTimestampLiteral(payload):
+		value, ok := parseCanonicalTimestampLiteral(payload)
+		if !ok {
+			return Value{}, temporalLiteralInvalid
+		}
+		return value, temporalLiteralRecognized
+	case isCanonicalDateLiteral(payload):
+		value, ok := parseCanonicalDateLiteral(payload)
+		if !ok {
+			return Value{}, temporalLiteralInvalid
+		}
+		return value, temporalLiteralRecognized
+	case isCanonicalTimeLiteral(payload):
+		value, ok := parseCanonicalTimeLiteral(payload)
+		if !ok {
+			return Value{}, temporalLiteralInvalid
+		}
+		return value, temporalLiteralRecognized
+	case looksTemporalNearMiss(payload):
+		return Value{}, temporalLiteralInvalid
+	default:
+		return Value{}, temporalLiteralNotRecognized
+	}
+}
+
+func looksTemporalLiteral(payload string) bool {
+	return isCanonicalDateLiteral(payload) || isCanonicalTimeLiteral(payload) || isCanonicalTimestampLiteral(payload)
+}
+
+func looksTemporalNearMiss(payload string) bool {
+	switch {
+	case isDateNearMiss(payload):
+		return true
+	case isTimeNearMiss(payload):
+		return true
+	case isTimestampNearMiss(payload):
+		return true
+	default:
+		return false
+	}
+}
+
+func isCanonicalDateLiteral(payload string) bool {
+	return len(payload) == len("2006-01-02") &&
+		isAllDigits(payload[0:4]) &&
+		payload[4] == '-' &&
+		isAllDigits(payload[5:7]) &&
+		payload[7] == '-' &&
+		isAllDigits(payload[8:10])
+}
+
+func isCanonicalTimeLiteral(payload string) bool {
+	return len(payload) == len("15:04:05") &&
+		isAllDigits(payload[0:2]) &&
+		payload[2] == ':' &&
+		isAllDigits(payload[3:5]) &&
+		payload[5] == ':' &&
+		isAllDigits(payload[6:8])
+}
+
+func isCanonicalTimestampLiteral(payload string) bool {
+	return len(payload) == len("2006-01-02 15:04:05") &&
+		isCanonicalDateLiteral(payload[:10]) &&
+		payload[10] == ' ' &&
+		isCanonicalTimeLiteral(payload[11:])
+}
+
+func parseCanonicalDateLiteral(payload string) (Value, bool) {
+	year, ok := parseFixedWidthDigits(payload[0:4])
+	if !ok {
+		return Value{}, false
+	}
+	month, ok := parseFixedWidthDigits(payload[5:7])
+	if !ok {
+		return Value{}, false
+	}
+	day, ok := parseFixedWidthDigits(payload[8:10])
+	if !ok {
+		return Value{}, false
+	}
+	if !validCalendarDate(year, month, day) {
+		return Value{}, false
+	}
+
+	ts := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+	return DateValue(int32(ts.Unix() / secondsPerDayUnix)), true
+}
+
+func parseCanonicalTimeLiteral(payload string) (Value, bool) {
+	hour, ok := parseFixedWidthDigits(payload[0:2])
+	if !ok {
+		return Value{}, false
+	}
+	minute, ok := parseFixedWidthDigits(payload[3:5])
+	if !ok {
+		return Value{}, false
+	}
+	second, ok := parseFixedWidthDigits(payload[6:8])
+	if !ok {
+		return Value{}, false
+	}
+	if hour < 0 || hour >= 24 || minute < 0 || minute >= 60 || second < 0 || second >= 60 {
+		return Value{}, false
+	}
+	return TimeValue(int32(hour*3600 + minute*60 + second)), true
+}
+
+func parseCanonicalTimestampLiteral(payload string) (Value, bool) {
+	dateValue, ok := parseCanonicalDateLiteral(payload[:10])
+	if !ok {
+		return Value{}, false
+	}
+	timeValue, ok := parseCanonicalTimeLiteral(payload[11:])
+	if !ok {
+		return Value{}, false
+	}
+
+	millis := int64(dateValue.DateDays)*millisPerDay + int64(timeValue.TimeSeconds)*millisPerSecond
+	return TimestampValue(millis, 0), true
+}
+
+func parseFixedWidthDigits(value string) (int, bool) {
+	if !isAllDigits(value) {
+		return 0, false
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+func isAllDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func validCalendarDate(year, month, day int) bool {
+	if month < 1 || month > 12 || day < 1 || day > 31 {
+		return false
+	}
+	ts := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+	return ts.Year() == year && int(ts.Month()) == month && ts.Day() == day
+}
+
+func isDateNearMiss(payload string) bool {
+	if strings.ContainsAny(payload, ":Tt ") {
+		return false
+	}
+	if strings.Count(payload, "-")+strings.Count(payload, "/") != 2 {
+		return false
+	}
+	return splitTemporalNumericParts(payload, '-', '/') == 3
+}
+
+func isTimeNearMiss(payload string) bool {
+	if strings.ContainsAny(payload, "-/Tt ") {
+		return false
+	}
+	if strings.Count(payload, ":") != 2 {
+		return false
+	}
+	return splitTemporalNumericParts(payload, ':') == 3
+}
+
+func isTimestampNearMiss(payload string) bool {
+	if strings.Contains(strings.ToUpper(payload), "AM") || strings.Contains(strings.ToUpper(payload), "PM") {
+		fields := strings.Fields(payload)
+		if len(fields) >= 2 && isDateNearMiss(fields[0]) {
+			return true
+		}
+	}
+
+	for _, sep := range []string{" ", "T", "t"} {
+		parts := strings.Split(payload, sep)
+		if len(parts) != 2 {
+			continue
+		}
+		if (isCanonicalDateLiteral(parts[0]) || isDateNearMiss(parts[0])) &&
+			(isCanonicalTimeLiteral(parts[1]) || isTimeNearMiss(parts[1])) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func splitTemporalNumericParts(payload string, separators ...byte) int {
+	parts := make([]string, 0, 3)
+	start := 0
+	for i := 0; i < len(payload); i++ {
+		for _, sep := range separators {
+			if payload[i] != sep {
+				continue
+			}
+			part := payload[start:i]
+			if !isAllDigits(part) {
+				return 0
+			}
+			parts = append(parts, part)
+			start = i + 1
+			goto nextCharacter
+		}
+		if payload[i] < '0' || payload[i] > '9' {
+			return 0
+		}
+	nextCharacter:
+	}
+	last := payload[start:]
+	if !isAllDigits(last) {
+		return 0
+	}
+	parts = append(parts, last)
+	return len(parts)
+}
+
+const (
+	secondsPerDayUnix = 24 * 60 * 60
+	millisPerSecond   = 1000
+	millisPerDay      = secondsPerDayUnix * millisPerSecond
+)

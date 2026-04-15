@@ -58,6 +58,9 @@ const (
 	tokenKeywordText
 	tokenKeywordBool
 	tokenKeywordReal
+	tokenKeywordDate
+	tokenKeywordTime
+	tokenKeywordTimestamp
 	tokenNumber
 	tokenString
 	tokenPlaceholder
@@ -306,6 +309,12 @@ func classifyWord(word string) tokenKind {
 		return tokenKeywordBool
 	case ColumnTypeReal:
 		return tokenKeywordReal
+	case ColumnTypeDate:
+		return tokenKeywordDate
+	case ColumnTypeTime:
+		return tokenKeywordTime
+	case ColumnTypeTimestamp:
+		return tokenKeywordTimestamp
 	default:
 		return tokenIdentifier
 	}

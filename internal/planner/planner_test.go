@@ -463,3 +463,23 @@ func TestChooseJoinScanUsesPlannerQueryTranslation(t *testing.T) {
 		t.Fatalf("chooseJoinScan() = %#v, want users(u).id = accounts(a).id", scan)
 	}
 }
+
+func TestValueFromParserPreservesTemporalTypedValues(t *testing.T) {
+	tests := []struct {
+		name string
+		in   parser.Value
+		want Value
+	}{
+		{name: "date", in: parser.DateValue(20553), want: DateValue(20553)},
+		{name: "time", in: parser.TimeValue(49521), want: TimeValue(49521)},
+		{name: "timestamp", in: parser.TimestampValue(1775828721000, 0), want: TimestampValue(1775828721000, 0)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := valueFromParser(tc.in); got != tc.want {
+				t.Fatalf("valueFromParser() = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}

@@ -504,3 +504,68 @@ func TestParseSelectLiteralTokens(t *testing.T) {
 		})
 	}
 }
+
+func TestParseSelectExprTemporalProjectionLiterals(t *testing.T) {
+	got, ok := ParseSelectExpr("SELECT '2026-04-10', '13:45:21', '2026-04-10 13:45:21' FROM users")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	if got == nil || len(got.ProjectionExprs) != 3 {
+		t.Fatalf("ParseSelectExpr() = %#v, want three projection exprs", got)
+	}
+
+	want := []Value{
+		DateValue(20553),
+		TimeValue(49521),
+		TimestampValue(1775828721000, 0),
+	}
+	for i := range want {
+		if got.ProjectionExprs[i].Kind != ValueExprKindLiteral {
+			t.Fatalf("ProjectionExprs[%d].Kind = %v, want %v", i, got.ProjectionExprs[i].Kind, ValueExprKindLiteral)
+		}
+		if got.ProjectionExprs[i].Value != want[i] {
+			t.Fatalf("ProjectionExprs[%d].Value = %#v, want %#v", i, got.ProjectionExprs[i].Value, want[i])
+		}
+	}
+}
+
+func TestParseSelectExprTemporalWhereLiterals(t *testing.T) {
+	got, ok := ParseSelectExpr("SELECT id FROM users WHERE event_date = '2026-04-10' AND event_time = '13:45:21' AND recorded_at = '2026-04-10 13:45:21'")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+	if got == nil || got.Where == nil || len(got.Where.Items) != 3 {
+		t.Fatalf("ParseSelectExpr() = %#v, want three WHERE items", got)
+	}
+
+	want := []Value{
+		DateValue(20553),
+		TimeValue(49521),
+		TimestampValue(1775828721000, 0),
+	}
+	for i := range want {
+		if got.Where.Items[i].Condition.Right != want[i] {
+			t.Fatalf("Where.Items[%d].Condition.Right = %#v, want %#v", i, got.Where.Items[i].Condition.Right, want[i])
+		}
+	}
+}
+
+func TestParseSelectExprRejectsMalformedTemporalLiterals(t *testing.T) {
+	tests := []string{
+		"SELECT id FROM users WHERE event_date = '2026/04/10'",
+		"SELECT id FROM users WHERE event_date = '2026-4-1'",
+		"SELECT id FROM users WHERE event_time = '1:2:3'",
+		"SELECT id FROM users WHERE recorded_at = '2026-04-10T13:45:21'",
+		"SELECT id FROM users WHERE event_date = '2026-02-30'",
+		"SELECT id FROM users WHERE event_time = '24:00:00'",
+		"SELECT id FROM users WHERE event_time = '23:59:60'",
+	}
+
+	for _, sql := range tests {
+		t.Run(sql, func(t *testing.T) {
+			if got, ok := ParseSelectExpr(sql); ok {
+				t.Fatalf("ParseSelectExpr() = %#v, want parse failure", got)
+			}
+		})
+	}
+}
