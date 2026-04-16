@@ -29,6 +29,9 @@ func TestRunHelp(t *testing.T) {
 	if !strings.Contains(output, "help sql") {
 		t.Fatalf("output missing help sql command:\n%s", output)
 	}
+	if !strings.Contains(output, "create <path>") {
+		t.Fatalf("output missing create command:\n%s", output)
+	}
 	if strings.Contains(output, "help select|insert|update|delete") {
 		t.Fatalf("output should no longer advertise dense SQL topic list:\n%s", output)
 	}
@@ -252,6 +255,19 @@ func TestRunHelpOpen(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "OPEN example:") || !strings.Contains(out.String(), "open test.db") {
 		t.Fatalf("output missing open help:\n%s", out.String())
+	}
+}
+
+func TestRunHelpCreate(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	code := runWithArgs(strings.NewReader("help create\nquit\n"), &out, &errOut, nil)
+	if code != 0 {
+		t.Fatalf("run() code = %d, want 0", code)
+	}
+	if !strings.Contains(out.String(), "CREATE example:") || !strings.Contains(out.String(), "create test.db") {
+		t.Fatalf("output missing create help:\n%s", out.String())
 	}
 }
 
@@ -548,6 +564,25 @@ func TestRunOpenExistingDatabase(t *testing.T) {
 	}
 }
 
+func TestRunCreateNewDatabase(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	path := filepath.Join(t.TempDir(), "test.db")
+	code := runWithArgs(strings.NewReader("create "+path+"\ndb\nquit\n"), &out, &errOut, nil)
+	if code != 0 {
+		t.Fatalf("run() code = %d, want 0", code)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "created "+path) {
+		t.Fatalf("output missing create message:\n%s", output)
+	}
+	if !strings.Contains(output, "current database: "+path) {
+		t.Fatalf("output missing current db after create:\n%s", output)
+	}
+}
+
 func TestRunSampleDatabase(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
@@ -657,6 +692,29 @@ func TestRunRejectsOpenWhileDatabaseIsOpen(t *testing.T) {
 	}
 	if !strings.Contains(output, "close it before opening another database") {
 		t.Fatalf("output missing guidance message:\n%s", output)
+	}
+}
+
+func TestRunRejectsCreateWhileDatabaseIsOpen(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	dir := t.TempDir()
+	firstPath := filepath.Join(dir, "first.db")
+	secondPath := filepath.Join(dir, "second.db")
+	input := "create " + firstPath + "\ncreate " + secondPath + "\nquit\n"
+
+	code := runWithArgs(strings.NewReader(input), &out, &errOut, nil)
+	if code != 0 {
+		t.Fatalf("run() code = %d, want 0", code)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "a database is already open: "+firstPath) {
+		t.Fatalf("output missing already-open message:\n%s", output)
+	}
+	if !strings.Contains(output, "close it before creating another database") {
+		t.Fatalf("output missing create guidance message:\n%s", output)
 	}
 }
 
@@ -816,7 +874,7 @@ func TestRunWithUnsupportedStartupFlag(t *testing.T) {
 	if !strings.Contains(errOut.String(), "unsupported flag: --help") {
 		t.Fatalf("errOut missing unsupported-flag message:\n%s", errOut.String())
 	}
-	if !strings.Contains(errOut.String(), "usage: rovadb [db-path]") {
+	if !strings.Contains(errOut.String(), "usage: rovadb [db-path] | rovadb open <path> | rovadb create <path>") {
 		t.Fatalf("errOut missing usage message:\n%s", errOut.String())
 	}
 }
@@ -830,11 +888,101 @@ func TestRunWithTooManyStartupArgs(t *testing.T) {
 		t.Fatalf("runWithArgs() code = %d, want 1", code)
 	}
 
-	if !strings.Contains(errOut.String(), "expected at most one database path argument") {
+	if !strings.Contains(errOut.String(), "expected at most one database path argument or an open/create command") {
 		t.Fatalf("errOut missing extra-args message:\n%s", errOut.String())
 	}
-	if !strings.Contains(errOut.String(), "usage: rovadb [db-path]") {
+	if !strings.Contains(errOut.String(), "usage: rovadb [db-path] | rovadb open <path> | rovadb create <path>") {
 		t.Fatalf("errOut missing usage message:\n%s", errOut.String())
+	}
+}
+
+func TestRunWithStartupCreateCreatesAndOpensDatabase(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	path := filepath.Join(t.TempDir(), "created.db")
+	code := runWithArgs(strings.NewReader("db\nquit\n"), &out, &errOut, []string{"create", path})
+	if code != 0 {
+		t.Fatalf("runWithArgs() code = %d, want 0", code)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "created "+path) {
+		t.Fatalf("output missing startup create message:\n%s", output)
+	}
+	if !strings.Contains(output, "current database: "+path) {
+		t.Fatalf("output missing current db after startup create:\n%s", output)
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("errOut = %q, want empty", errOut.String())
+	}
+}
+
+func TestRunWithStartupOpenOpensExistingDatabase(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	path := filepath.Join(t.TempDir(), "opened.db")
+	db, err := rovadb.Create(path)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close() error = %v", err)
+	}
+
+	code := runWithArgs(strings.NewReader("db\nquit\n"), &out, &errOut, []string{"open", path})
+	if code != 0 {
+		t.Fatalf("runWithArgs() code = %d, want 0", code)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "opened existing "+path) {
+		t.Fatalf("output missing startup open message:\n%s", output)
+	}
+	if !strings.Contains(output, "current database: "+path) {
+		t.Fatalf("output missing current db after startup open:\n%s", output)
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("errOut = %q, want empty", errOut.String())
+	}
+}
+
+func TestRunWithStartupOpenMissingFails(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	path := filepath.Join(t.TempDir(), "missing.db")
+	code := runWithArgs(strings.NewReader(""), &out, &errOut, []string{"open", path})
+	if code != 1 {
+		t.Fatalf("runWithArgs() code = %d, want 1", code)
+	}
+
+	if !strings.Contains(errOut.String(), "open error: "+path+" was not found") {
+		t.Fatalf("errOut missing startup open missing error:\n%s", errOut.String())
+	}
+}
+
+func TestRunWithStartupCreateExistingFails(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	path := filepath.Join(t.TempDir(), "existing.db")
+	db, err := rovadb.Create(path)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close() error = %v", err)
+	}
+
+	code := runWithArgs(strings.NewReader(""), &out, &errOut, []string{"create", path})
+	if code != 1 {
+		t.Fatalf("runWithArgs() code = %d, want 1", code)
+	}
+
+	if !strings.Contains(errOut.String(), "create error: storage: file already exists") {
+		t.Fatalf("errOut missing startup create existing error:\n%s", errOut.String())
 	}
 }
 

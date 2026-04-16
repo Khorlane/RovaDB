@@ -42,6 +42,19 @@ type helpTopic struct {
 	lines []string
 }
 
+type startupMode int
+
+const (
+	startupModeDefault startupMode = iota
+	startupModeOpen
+	startupModeCreate
+)
+
+type startupConfig struct {
+	mode startupMode
+	path string
+}
+
 var sqlStarterKeywords = map[string]struct{}{
 	"select":   {},
 	"insert":   {},
@@ -110,6 +123,13 @@ var helpTopics = map[string]helpTopic{
 			"open existing.db",
 		},
 	},
+	"create": {
+		title: "CREATE example:",
+		lines: []string{
+			"create test.db",
+			"create fresh.db",
+		},
+	},
 	"sample": {
 		title: "SAMPLE example:",
 		lines: []string{
@@ -165,15 +185,16 @@ func runWithArgs(in io.Reader, out io.Writer, errOut io.Writer, args []string) i
 	if err := writeResponse(out, "Type help for commands."); err != nil {
 		return 1
 	}
-	if err := validateStartupArgs(args); err != nil {
+	startup, err := parseStartupArgs(args)
+	if err != nil {
 		_ = writeResponse(errOut, "%v", err)
-		_ = writeResponse(errOut, "usage: rovadb [db-path]")
+		_ = writeResponse(errOut, "usage: rovadb [db-path] | rovadb open <path> | rovadb create <path>")
 		return 1
 	}
 
 	session := &cliSession{}
-	if len(args) > 0 {
-		if err := openStartupPath(out, errOut, session, args[0]); err != nil {
+	if startup.mode != startupModeDefault || startup.path != "" {
+		if err := applyStartupConfig(out, errOut, session, startup); err != nil {
 			return 1
 		}
 	}
@@ -238,6 +259,8 @@ func handleBuiltInCommandWithOptions(out io.Writer, errOut io.Writer, session *c
 		return commandResult{handled: true, exit: true}, nil
 	case strings.EqualFold(input, "open"):
 		return commandResult{handled: true}, writeResponse(out, "usage: open <path>")
+	case strings.EqualFold(input, "create"):
+		return commandResult{handled: true}, writeResponse(out, "usage: create <path>")
 	case strings.EqualFold(input, "sample"):
 		return commandResult{handled: true}, writeResponse(out, "usage: sample <path>")
 	case strings.EqualFold(input, "run"):
@@ -252,6 +275,9 @@ func handleBuiltInCommandWithOptions(out io.Writer, errOut io.Writer, session *c
 		return commandResult{handled: true, failed: failed}, err
 	case strings.HasPrefix(strings.ToLower(input), "open "):
 		failed, err := handleOpenCommand(out, errOut, session, input, opts)
+		return commandResult{handled: true, failed: failed}, err
+	case isCreatePathCommand(input):
+		failed, err := handleCreateCommand(out, errOut, session, input)
 		return commandResult{handled: true, failed: failed}, err
 	case strings.HasPrefix(strings.ToLower(input), "sample "):
 		failed, err := handleSampleCommand(out, errOut, session, input)
@@ -338,6 +364,9 @@ func printHelp(out io.Writer) error {
 		return err
 	}
 	if err := writeHelpLine(out, "help sql", "Show example SQL statements"); err != nil {
+		return err
+	}
+	if err := writeHelpLine(out, "create <path>", "Create and open a new database"); err != nil {
 		return err
 	}
 	if err := writeHelpLine(out, "open <path>", "Open an existing database"); err != nil {
@@ -468,6 +497,29 @@ func handleOpenCommand(out io.Writer, errOut io.Writer, session *cliSession, inp
 		return true, nil
 	}
 	return false, writeResponse(out, "opened existing %s", path)
+}
+
+func handleCreateCommand(out io.Writer, errOut io.Writer, session *cliSession, input string) (bool, error) {
+	path := strings.TrimSpace(input[len("create "):])
+	if path == "" {
+		return true, writeResponse(out, "usage: create <path>")
+	}
+	if session.db != nil {
+		if err := writeResponse(out, "a database is already open: %s", session.path); err != nil {
+			return false, err
+		}
+		return true, writeResponse(out, "close it before creating another database")
+	}
+	db, err := rovadb.Create(path)
+	if err != nil {
+		if writeErr := writeResponse(errOut, "create error: %v", err); writeErr != nil {
+			return false, writeErr
+		}
+		return true, nil
+	}
+	session.db = db
+	session.path = path
+	return false, writeResponse(out, "created %s", path)
 }
 
 func handleSampleCommand(out io.Writer, errOut io.Writer, session *cliSession, input string) (bool, error) {
@@ -619,19 +671,27 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-func validateStartupArgs(args []string) error {
-	if len(args) <= 1 {
-		if len(args) == 1 && strings.HasPrefix(args[0], "-") {
-			return fmt.Errorf("unsupported flag: %s", args[0])
-		}
-		return nil
+func parseStartupArgs(args []string) (startupConfig, error) {
+	if len(args) == 0 {
+		return startupConfig{}, nil
 	}
 	for _, arg := range args {
 		if strings.HasPrefix(arg, "-") {
-			return fmt.Errorf("unsupported flag: %s", arg)
+			return startupConfig{}, fmt.Errorf("unsupported flag: %s", arg)
 		}
 	}
-	return fmt.Errorf("expected at most one database path argument")
+	if len(args) == 1 {
+		return startupConfig{path: args[0]}, nil
+	}
+	if len(args) == 2 {
+		switch strings.ToLower(strings.TrimSpace(args[0])) {
+		case "open":
+			return startupConfig{mode: startupModeOpen, path: args[1]}, nil
+		case "create":
+			return startupConfig{mode: startupModeCreate, path: args[1]}, nil
+		}
+	}
+	return startupConfig{}, fmt.Errorf("expected at most one database path argument or an open/create command")
 }
 
 func isSelectQuery(input string) bool {
@@ -651,6 +711,11 @@ func startsNewScriptStatement(input string) bool {
 	return isScriptLineSQL(input) || isScriptBuiltIn(input)
 }
 
+func isCreatePathCommand(input string) bool {
+	fields := strings.Fields(strings.TrimSpace(input))
+	return len(fields) == 2 && strings.EqualFold(fields[0], "create")
+}
+
 func isScriptBuiltIn(input string) bool {
 	lower := strings.ToLower(strings.TrimSpace(input))
 	switch {
@@ -662,12 +727,14 @@ func isScriptBuiltIn(input string) bool {
 		strings.EqualFold(lower, "version"),
 		strings.EqualFold(lower, "close"),
 		isExitCommand(lower),
+		strings.EqualFold(lower, "create"),
 		strings.EqualFold(lower, "open"),
 		strings.EqualFold(lower, "sample"),
 		strings.EqualFold(lower, "run"),
 		strings.EqualFold(lower, "tables"),
 		strings.EqualFold(lower, "schema"),
 		strings.HasPrefix(lower, "schema "),
+		isCreatePathCommand(lower),
 		strings.HasPrefix(lower, "open "),
 		strings.HasPrefix(lower, "sample "),
 		strings.HasPrefix(lower, "run "):
@@ -704,23 +771,52 @@ func printCurrentDB(out io.Writer, session *cliSession) error {
 	return writeResponse(out, "current database: %s", session.path)
 }
 
-func openStartupPath(out io.Writer, errOut io.Writer, session *cliSession, path string) error {
-	if strings.TrimSpace(path) == "" {
+func applyStartupConfig(out io.Writer, errOut io.Writer, session *cliSession, startup startupConfig) error {
+	path := strings.TrimSpace(startup.path)
+	if path == "" {
 		return nil
 	}
-	if !fileExists(path) {
-		if err := writeResponse(out, "%s was not found", path); err != nil {
+	switch startup.mode {
+	case startupModeCreate:
+		db, err := rovadb.Create(path)
+		if err != nil {
+			if writeErr := writeResponse(errOut, "create error: %v", err); writeErr != nil {
+				return writeErr
+			}
 			return err
 		}
-		return writeResponse(out, "starting with no database open")
-	}
-	if err := openExistingPath(session, path); err != nil {
-		if writeErr := writeResponse(errOut, "open error: %v", err); writeErr != nil {
-			return writeErr
+		session.db = db
+		session.path = path
+		return writeResponse(out, "created %s", path)
+	case startupModeOpen:
+		if !fileExists(path) {
+			if err := writeResponse(errOut, "open error: %s was not found", path); err != nil {
+				return err
+			}
+			return os.ErrNotExist
 		}
-		return writeResponse(out, "starting with no database open")
+		if err := openExistingPath(session, path); err != nil {
+			if writeErr := writeResponse(errOut, "open error: %v", err); writeErr != nil {
+				return writeErr
+			}
+			return err
+		}
+		return writeResponse(out, "opened existing %s", path)
+	default:
+		if !fileExists(path) {
+			if err := writeResponse(out, "%s was not found", path); err != nil {
+				return err
+			}
+			return writeResponse(out, "starting with no database open")
+		}
+		if err := openExistingPath(session, path); err != nil {
+			if writeErr := writeResponse(errOut, "open error: %v", err); writeErr != nil {
+				return writeErr
+			}
+			return writeResponse(out, "starting with no database open")
+		}
+		return writeResponse(out, "opened existing %s", path)
 	}
-	return writeResponse(out, "opened existing %s", path)
 }
 
 func handleCreateConfirmation(out io.Writer, session *cliSession, input string) error {
