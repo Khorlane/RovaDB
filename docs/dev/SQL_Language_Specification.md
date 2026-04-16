@@ -382,7 +382,10 @@ Required behavior:
 ### Temporal Public Scan Contract
 
 - `DATE` scans only into `*time.Time`
+- scanned `DATE` values preserve calendar date semantics and do not carry meaningful time-of-day behavior
 - `TIMESTAMP` scans only into `*time.Time`
+- scanned `TIMESTAMP` values preserve the timezone location reconstructed from the persisted `zone_id`
+- `TIMESTAMP` comparison and ordering semantics remain based on absolute chronological value, not timezone location
 - `TIME` scans only into `*rovadb.Time`
 
 ### Temporal Non-Goals
