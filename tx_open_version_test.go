@@ -35,8 +35,8 @@ func TestOpenRejectsOrphanWALWhenDBFileIsMissing(t *testing.T) {
 }
 
 func TestVersionReturnsCurrentProductVersion(t *testing.T) {
-	if got := Version(); got != "v0.47.0" {
-		t.Fatalf("Version() = %q, want %q", got, "v0.47.0")
+	if got := Version(); got != "v0.48.0" {
+		t.Fatalf("Version() = %q, want %q", got, "v0.48.0")
 	}
 }
 
