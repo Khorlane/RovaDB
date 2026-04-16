@@ -725,6 +725,13 @@ func TestExecuteUpdateTemporalTargetsRequireExactFamilies(t *testing.T) {
 			wantErr:    errTypeMismatch,
 		},
 		{
+			name:       "timestamp rejects unresolved timestamp",
+			columnType: parser.ColumnTypeTimestamp,
+			initial:    parser.TimestampValue(1775828721000, 0),
+			value:      parser.TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21),
+			wantErr:    errUnresolvedTimestamp,
+		},
+		{
 			name:       "timestamp rejects bool",
 			columnType: parser.ColumnTypeTimestamp,
 			initial:    parser.TimestampValue(1775828721000, 0),

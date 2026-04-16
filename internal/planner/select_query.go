@@ -17,6 +17,7 @@ const (
 	ValueKindDate
 	ValueKindTime
 	ValueKindTimestamp
+	ValueKindTimestampUnresolved
 	ValueKindPlaceholder
 )
 
@@ -29,6 +30,12 @@ type Value struct {
 	TimeSeconds      int32
 	TimestampMillis  int64
 	TimestampZoneID  int16
+	TimestampYear    int32
+	TimestampMonth   int32
+	TimestampDay     int32
+	TimestampHour    int32
+	TimestampMinute  int32
+	TimestampSecond  int32
 	Str              string
 	Bool             bool
 	F64              float64
@@ -87,6 +94,18 @@ func TimestampValue(millisecondsSinceEpoch int64, zoneID int16) Value {
 	}
 }
 
+func TimestampUnresolvedValue(year, month, day, hour, minute, second int) Value {
+	return Value{
+		Kind:            ValueKindTimestampUnresolved,
+		TimestampYear:   int32(year),
+		TimestampMonth:  int32(month),
+		TimestampDay:    int32(day),
+		TimestampHour:   int32(hour),
+		TimestampMinute: int32(minute),
+		TimestampSecond: int32(second),
+	}
+}
+
 func PlaceholderValue() Value {
 	return Value{Kind: ValueKindPlaceholder, PlaceholderIndex: -1}
 }
@@ -115,6 +134,15 @@ func (v Value) ParserValue() parser.Value {
 		return parser.TimeValue(v.TimeSeconds)
 	case ValueKindTimestamp:
 		return parser.TimestampValue(v.TimestampMillis, v.TimestampZoneID)
+	case ValueKindTimestampUnresolved:
+		return parser.TimestampUnresolvedValue(
+			int(v.TimestampYear),
+			int(v.TimestampMonth),
+			int(v.TimestampDay),
+			int(v.TimestampHour),
+			int(v.TimestampMinute),
+			int(v.TimestampSecond),
+		)
 	case ValueKindPlaceholder:
 		return parser.Value{Kind: parser.ValueKindPlaceholder, PlaceholderIndex: v.PlaceholderIndex}
 	default:
@@ -391,6 +419,12 @@ func valueFromParser(v parser.Value) Value {
 		TimeSeconds:      v.TimeSeconds,
 		TimestampMillis:  v.TimestampMillis,
 		TimestampZoneID:  v.TimestampZoneID,
+		TimestampYear:    v.TimestampYear,
+		TimestampMonth:   v.TimestampMonth,
+		TimestampDay:     v.TimestampDay,
+		TimestampHour:    v.TimestampHour,
+		TimestampMinute:  v.TimestampMinute,
+		TimestampSecond:  v.TimestampSecond,
 		Str:              v.Str,
 		Bool:             v.Bool,
 		F64:              v.F64,

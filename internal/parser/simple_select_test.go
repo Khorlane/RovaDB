@@ -517,7 +517,7 @@ func TestParseSelectExprTemporalProjectionLiterals(t *testing.T) {
 	want := []Value{
 		DateValue(20553),
 		TimeValue(49521),
-		TimestampValue(1775828721000, 0),
+		TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21),
 	}
 	for i := range want {
 		if got.ProjectionExprs[i].Kind != ValueExprKindLiteral {
@@ -541,7 +541,7 @@ func TestParseSelectExprTemporalWhereLiterals(t *testing.T) {
 	want := []Value{
 		DateValue(20553),
 		TimeValue(49521),
-		TimestampValue(1775828721000, 0),
+		TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21),
 	}
 	for i := range want {
 		if got.Where.Items[i].Condition.Right != want[i] {

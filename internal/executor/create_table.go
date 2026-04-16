@@ -11,6 +11,7 @@ var (
 	errWrongValueCount         = newExecError("column count mismatch")
 	errColumnDoesNotExist      = newExecError("column not found")
 	errTypeMismatch            = newExecError("type mismatch")
+	errUnresolvedTimestamp     = newExecError("unresolved TIMESTAMP requires database-context normalization")
 	errUnsupportedStatement    = newExecError("unsupported query form")
 	errNotImplemented          = newExecError("not implemented")
 	errCountOrderByUnsupported = newExecError("unsupported query form")

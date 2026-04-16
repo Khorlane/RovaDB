@@ -218,6 +218,9 @@ func normalizeColumnScalarValue(typeName string, value parser.Value) (parser.Val
 	case parser.ColumnTypeTime:
 		return normalizeExactTemporalColumnValue(value, parser.ValueKindTime)
 	case parser.ColumnTypeTimestamp:
+		if value.Kind == parser.ValueKindTimestampUnresolved {
+			return parser.Value{}, errUnresolvedTimestamp
+		}
 		return normalizeExactTemporalColumnValue(value, parser.ValueKindTimestamp)
 	default:
 		return parser.Value{}, errTypeMismatch

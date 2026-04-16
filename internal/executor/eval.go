@@ -56,6 +56,9 @@ func compareValues(op string, left, right parser.Value) (bool, error) {
 			return false, errTypeMismatch
 		}
 	}
+	if left.Kind == parser.ValueKindTimestampUnresolved || right.Kind == parser.ValueKindTimestampUnresolved {
+		return false, errUnresolvedTimestamp
+	}
 	if left.IsInteger() && right.IsInteger() {
 		resolvedLeft, resolvedRight, err := resolveIntegerComparisonOperands(left, right)
 		if err != nil {
@@ -126,6 +129,9 @@ func compareValues(op string, left, right parser.Value) (bool, error) {
 func compareSortableValues(left, right parser.Value) (int, error) {
 	if left.Kind == parser.ValueKindNull || right.Kind == parser.ValueKindNull {
 		return 0, errTypeMismatch
+	}
+	if left.Kind == parser.ValueKindTimestampUnresolved || right.Kind == parser.ValueKindTimestampUnresolved {
+		return 0, errUnresolvedTimestamp
 	}
 	if left.IsInteger() && right.IsInteger() {
 		resolvedLeft, resolvedRight, err := resolveIntegerComparisonOperands(left, right)

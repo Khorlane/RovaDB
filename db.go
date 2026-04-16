@@ -452,6 +452,7 @@ func (db *DB) exec(query string, args ...any) (Result, error) {
 	if err := parser.BindPlaceholders(stmt, args); err != nil {
 		return Result{}, err
 	}
+	normalizeStatementTimestampValues(stmt, db.defaultLocation)
 	if err := db.rejectSystemTableMutation(stmt); err != nil {
 		return Result{}, err
 	}
@@ -844,6 +845,7 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
+		normalizeSelectPlanTimestampValues(plan, db.defaultLocation)
 		var handoff *executor.SelectExecutionHandoff
 		if plan.ScanType == planner.ScanTypeIndexOnly {
 			indexOnlyHandoff, err := executor.NewIndexOnlyExecutionHandoff(plan)

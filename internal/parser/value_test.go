@@ -124,6 +124,20 @@ func TestTemporalValueConstructors(t *testing.T) {
 	if got := stamp.Any(); got != int64(1700000000123) {
 		t.Fatalf("TimestampValue().Any() = %#v, want int64(1700000000123)", got)
 	}
+
+	unresolved := TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21)
+	if unresolved.Kind != ValueKindTimestampUnresolved ||
+		unresolved.TimestampYear != 2026 ||
+		unresolved.TimestampMonth != 4 ||
+		unresolved.TimestampDay != 10 ||
+		unresolved.TimestampHour != 13 ||
+		unresolved.TimestampMinute != 45 ||
+		unresolved.TimestampSecond != 21 {
+		t.Fatalf("TimestampUnresolvedValue() = %#v, want calendar+clock payload", unresolved)
+	}
+	if got := unresolved.Any(); got != nil {
+		t.Fatalf("TimestampUnresolvedValue().Any() = %#v, want nil", got)
+	}
 }
 
 func TestPlaceholderValue(t *testing.T) {
@@ -230,7 +244,7 @@ func TestParseLiteralValueTemporalCanonical(t *testing.T) {
 	}{
 		{name: "date", token: "'2026-04-10'", want: DateValue(20553)},
 		{name: "time", token: "'13:45:21'", want: TimeValue(49521)},
-		{name: "timestamp", token: "'2026-04-10 13:45:21'", want: TimestampValue(1775828721000, 0)},
+		{name: "timestamp", token: "'2026-04-10 13:45:21'", want: TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21)},
 	}
 
 	for _, tc := range tests {

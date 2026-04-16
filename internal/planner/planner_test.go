@@ -473,6 +473,7 @@ func TestValueFromParserPreservesTemporalTypedValues(t *testing.T) {
 		{name: "date", in: parser.DateValue(20553), want: DateValue(20553)},
 		{name: "time", in: parser.TimeValue(49521), want: TimeValue(49521)},
 		{name: "timestamp", in: parser.TimestampValue(1775828721000, 0), want: TimestampValue(1775828721000, 0)},
+		{name: "timestamp unresolved", in: parser.TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21), want: TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21)},
 	}
 
 	for _, tc := range tests {

@@ -416,6 +416,34 @@ func TestCompareValuesTemporalFamiliesRejectCrossFamilyAndNonTemporalComparisons
 	}
 }
 
+func TestCompareValuesRejectsUnresolvedTimestampOperands(t *testing.T) {
+	tests := []struct {
+		name  string
+		left  parser.Value
+		right parser.Value
+	}{
+		{
+			name:  "unresolved vs resolved",
+			left:  parser.TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21),
+			right: parser.TimestampValue(1775828721000, 0),
+		},
+		{
+			name:  "resolved vs unresolved",
+			left:  parser.TimestampValue(1775828721000, 0),
+			right: parser.TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := compareValues("=", tc.left, tc.right)
+			if err != errUnresolvedTimestamp {
+				t.Fatalf("compareValues() error = %v, want %v", err, errUnresolvedTimestamp)
+			}
+		})
+	}
+}
+
 func TestCompareSortableValuesTemporalFamiliesUseTypedPayloads(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -453,5 +481,15 @@ func TestCompareSortableValuesTemporalFamiliesUseTypedPayloads(t *testing.T) {
 				t.Fatalf("compareSortableValues() = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestCompareSortableValuesRejectsUnresolvedTimestampOperands(t *testing.T) {
+	_, err := compareSortableValues(
+		parser.TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21),
+		parser.TimestampValue(1775828721000, 0),
+	)
+	if err != errUnresolvedTimestamp {
+		t.Fatalf("compareSortableValues() error = %v, want %v", err, errUnresolvedTimestamp)
 	}
 }

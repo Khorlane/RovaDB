@@ -474,6 +474,7 @@ func TestExecuteInsertTemporalRejectsMismatchedAndNonTemporalValues(t *testing.T
 		{name: "time rejects real", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeTime}, value: parser.RealValue(1.25)},
 		{name: "timestamp rejects date", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeTimestamp}, value: parser.DateValue(20553)},
 		{name: "timestamp rejects time", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeTimestamp}, value: parser.TimeValue(49521)},
+		{name: "timestamp rejects unresolved timestamp", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeTimestamp}, value: parser.TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21)},
 		{name: "timestamp rejects bool", column: parser.ColumnDef{Name: "target", Type: parser.ColumnTypeTimestamp}, value: parser.BoolValue(true)},
 	}
 
@@ -487,8 +488,12 @@ func TestExecuteInsertTemporalRejectsMismatchedAndNonTemporalValues(t *testing.T
 				TableName: "events",
 				Values:    []parser.Value{tc.value},
 			}, tables)
-			if err != errTypeMismatch {
-				t.Fatalf("Execute() error = %v, want %v", err, errTypeMismatch)
+			wantErr := errTypeMismatch
+			if tc.value.Kind == parser.ValueKindTimestampUnresolved {
+				wantErr = errUnresolvedTimestamp
+			}
+			if err != wantErr {
+				t.Fatalf("Execute() error = %v, want %v", err, wantErr)
 			}
 		})
 	}
@@ -680,6 +685,12 @@ func TestNormalizeColumnValueForDefRequiresExactTemporalFamilies(t *testing.T) {
 			column:    parser.ColumnDef{Name: "recorded_at", Type: parser.ColumnTypeTimestamp},
 			value:     parser.DateValue(20553),
 			wantError: errTypeMismatch,
+		},
+		{
+			name:      "timestamp rejects unresolved timestamp",
+			column:    parser.ColumnDef{Name: "recorded_at", Type: parser.ColumnTypeTimestamp},
+			value:     parser.TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21),
+			wantError: errUnresolvedTimestamp,
 		},
 		{
 			name:   "null remains unchanged",

@@ -22,6 +22,7 @@ const (
 	ValueKindDate
 	ValueKindTime
 	ValueKindTimestamp
+	ValueKindTimestampUnresolved
 	ValueKindPlaceholder
 )
 
@@ -81,6 +82,12 @@ type Value struct {
 	TimeSeconds      int32
 	TimestampMillis  int64
 	TimestampZoneID  int16
+	TimestampYear    int32
+	TimestampMonth   int32
+	TimestampDay     int32
+	TimestampHour    int32
+	TimestampMinute  int32
+	TimestampSecond  int32
 	Str              string
 	Bool             bool
 	F64              float64
@@ -160,6 +167,18 @@ func TimestampValue(millisecondsSinceEpoch int64, zoneID int16) Value {
 	}
 }
 
+func TimestampUnresolvedValue(year, month, day, hour, minute, second int) Value {
+	return Value{
+		Kind:            ValueKindTimestampUnresolved,
+		TimestampYear:   int32(year),
+		TimestampMonth:  int32(month),
+		TimestampDay:    int32(day),
+		TimestampHour:   int32(hour),
+		TimestampMinute: int32(minute),
+		TimestampSecond: int32(second),
+	}
+}
+
 // PlaceholderValue builds a positional placeholder Value.
 func PlaceholderValue() Value {
 	return Value{Kind: ValueKindPlaceholder, PlaceholderIndex: -1}
@@ -190,6 +209,8 @@ func (v Value) Any() any {
 		return v.TimeSeconds
 	case ValueKindTimestamp:
 		return v.TimestampMillis
+	case ValueKindTimestampUnresolved:
+		return nil
 	case ValueKindPlaceholder:
 		return nil
 	default:
@@ -415,17 +436,37 @@ func parseCanonicalTimeLiteral(payload string) (Value, bool) {
 }
 
 func parseCanonicalTimestampLiteral(payload string) (Value, bool) {
-	dateValue, ok := parseCanonicalDateLiteral(payload[:10])
+	year, ok := parseFixedWidthDigits(payload[0:4])
 	if !ok {
 		return Value{}, false
 	}
-	timeValue, ok := parseCanonicalTimeLiteral(payload[11:])
+	month, ok := parseFixedWidthDigits(payload[5:7])
 	if !ok {
 		return Value{}, false
 	}
-
-	millis := int64(dateValue.DateDays)*millisPerDay + int64(timeValue.TimeSeconds)*millisPerSecond
-	return TimestampValue(millis, 0), true
+	day, ok := parseFixedWidthDigits(payload[8:10])
+	if !ok {
+		return Value{}, false
+	}
+	hour, ok := parseFixedWidthDigits(payload[11:13])
+	if !ok {
+		return Value{}, false
+	}
+	minute, ok := parseFixedWidthDigits(payload[14:16])
+	if !ok {
+		return Value{}, false
+	}
+	second, ok := parseFixedWidthDigits(payload[17:19])
+	if !ok {
+		return Value{}, false
+	}
+	if !validCalendarDate(year, month, day) {
+		return Value{}, false
+	}
+	if hour < 0 || hour >= 24 || minute < 0 || minute >= 60 || second < 0 || second >= 60 {
+		return Value{}, false
+	}
+	return TimestampUnresolvedValue(year, month, day, hour, minute, second), true
 }
 
 func parseFixedWidthDigits(value string) (int, bool) {
@@ -532,6 +573,4 @@ func splitTemporalNumericParts(payload string, separators ...byte) int {
 
 const (
 	secondsPerDayUnix = 24 * 60 * 60
-	millisPerSecond   = 1000
-	millisPerDay      = secondsPerDayUnix * millisPerSecond
 )

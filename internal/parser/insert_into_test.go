@@ -79,7 +79,7 @@ func TestParseInsert(t *testing.T) {
 			name:   "timestamp literal",
 			input:  "INSERT INTO users VALUES ('2026-04-10 13:45:21')",
 			cols:   nil,
-			values: []Value{TimestampValue(1775828721000, 0)},
+			values: []Value{TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21)},
 		},
 	}
 

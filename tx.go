@@ -60,6 +60,7 @@ func (tx *Tx) Exec(query string, args ...any) (Result, error) {
 	if err := parser.BindPlaceholders(stmt, args); err != nil {
 		return Result{}, err
 	}
+	normalizeStatementTimestampValues(stmt, tx.db.defaultLocation)
 	if err := rejectSystemTableMutationTables(tx.tables, stmt); err != nil {
 		return Result{}, err
 	}
@@ -163,6 +164,7 @@ func (tx *Tx) Query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
+		normalizeSelectPlanTimestampValues(plan, tx.db.defaultLocation)
 		execTables := cloneTables(tx.tables)
 		handoff, err := executor.NewSelectExecutionHandoff(plan)
 		if err != nil {

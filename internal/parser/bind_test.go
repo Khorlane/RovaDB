@@ -184,7 +184,7 @@ func TestBindArgumentValueSupportedTypes(t *testing.T) {
 		{name: "string", arg: "steve", want: StringValue("steve")},
 		{name: "date string", arg: "2026-04-10", want: DateValue(20553)},
 		{name: "time string", arg: "13:45:21", want: TimeValue(49521)},
-		{name: "timestamp string", arg: "2026-04-10 13:45:21", want: TimestampValue(1775828721000, 0)},
+		{name: "timestamp string", arg: "2026-04-10 13:45:21", want: TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21)},
 		{name: "bool true", arg: true, want: BoolValue(true)},
 		{name: "bool false", arg: false, want: BoolValue(false)},
 		{name: "float64", arg: 3.14, want: RealValue(3.14)},

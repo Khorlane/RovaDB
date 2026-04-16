@@ -3,6 +3,7 @@ package executor
 import (
 	"testing"
 
+	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/planner"
 )
 
@@ -127,6 +128,32 @@ func TestNewSelectExecutionHandoffExposesAccessPath(t *testing.T) {
 	}
 	if accessPath.IndexLookup.TableName != "users" || accessPath.IndexLookup.ColumnName != "name" {
 		t.Fatalf("handoff.AccessPath().IndexLookup = %#v, want users/name", accessPath.IndexLookup)
+	}
+}
+
+func TestNewSelectExecutionHandoffPreservesUnresolvedTimestampValues(t *testing.T) {
+	stmt, ok := parser.ParseSelectExpr("SELECT id FROM events WHERE recorded_at = '2026-04-10 13:45:21'")
+	if !ok {
+		t.Fatal("ParseSelectExpr() ok = false, want true")
+	}
+
+	plan, err := planner.PlanSelect(stmt)
+	if err != nil {
+		t.Fatalf("PlanSelect() error = %v", err)
+	}
+
+	handoff, err := NewSelectExecutionHandoff(plan)
+	if err != nil {
+		t.Fatalf("NewSelectExecutionHandoff() error = %v", err)
+	}
+	if handoff == nil || handoff.bridge == nil || handoff.bridge.query == nil || handoff.bridge.query.where == nil {
+		t.Fatalf("handoff = %#v, want bridged query with WHERE clause", handoff)
+	}
+
+	got := handoff.bridge.query.where.items[0].condition.right
+	want := parser.TimestampUnresolvedValue(2026, 4, 10, 13, 45, 21)
+	if got != want {
+		t.Fatalf("handoff.bridge.query.where.items[0].condition.right = %#v, want %#v", got, want)
 	}
 }
 
