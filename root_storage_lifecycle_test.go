@@ -2046,7 +2046,7 @@ func TestTemporalCloseReopenPreservesPublicMaterializationAndScan(t *testing.T) 
 	if err != nil {
 		t.Fatalf("LoadLocation() error = %v", err)
 	}
-	wantTimestamp := time.Date(2026, time.April, 15, 16, 17, 18, 0, location).UTC()
+	wantTimestamp := time.Date(2026, time.April, 15, 16, 17, 18, 0, location)
 	wantTime, err := NewTime(12, 34, 56)
 	if err != nil {
 		t.Fatalf("NewTime() error = %v", err)
@@ -2066,6 +2066,9 @@ func TestTemporalCloseReopenPreservesPublicMaterializationAndScan(t *testing.T) 
 	}
 	if !gotTimestamp.Equal(wantTimestamp) {
 		t.Fatalf("QueryRow().Scan(TIMESTAMP) = %v, want %v", gotTimestamp, wantTimestamp)
+	}
+	if gotTimestamp.Location().String() != "America/New_York" {
+		t.Fatalf("QueryRow().Scan(TIMESTAMP) location = %q, want %q", gotTimestamp.Location().String(), "America/New_York")
 	}
 }
 

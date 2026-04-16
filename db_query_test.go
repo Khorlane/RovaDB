@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/storage"
 	"github.com/Khorlane/RovaDB/internal/temporal"
 )
@@ -3481,7 +3482,7 @@ func TestQueryTemporalMaterializationAndScan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLocation() error = %v", err)
 	}
-	wantTimestamp := time.Date(2026, time.April, 15, 16, 17, 18, 0, location).UTC()
+	wantTimestamp := time.Date(2026, time.April, 15, 16, 17, 18, 0, location)
 	wantTime, err := NewTime(12, 34, 56)
 	if err != nil {
 		t.Fatalf("NewTime() error = %v", err)
@@ -3512,6 +3513,9 @@ func TestQueryTemporalMaterializationAndScan(t *testing.T) {
 	if !gotTimestamp.Equal(wantTimestamp) {
 		t.Fatalf("rows.Scan(TIMESTAMP) = %v, want %v", gotTimestamp, wantTimestamp)
 	}
+	if gotTimestamp.Location().String() != "America/New_York" {
+		t.Fatalf("rows.Scan(TIMESTAMP) location = %q, want %q", gotTimestamp.Location().String(), "America/New_York")
+	}
 
 	var rowDate time.Time
 	var rowTime Time
@@ -3528,6 +3532,109 @@ func TestQueryTemporalMaterializationAndScan(t *testing.T) {
 	if !rowTimestamp.Equal(wantTimestamp) {
 		t.Fatalf("QueryRow().Scan(TIMESTAMP) = %v, want %v", rowTimestamp, wantTimestamp)
 	}
+	if rowTimestamp.Location().String() != "America/New_York" {
+		t.Fatalf("QueryRow().Scan(TIMESTAMP) location = %q, want %q", rowTimestamp.Location().String(), "America/New_York")
+	}
+}
+
+func TestQueryTimestampMaterializationFailsForOutOfRangeZoneID(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	if err != nil {
+		t.Fatalf("OpenWithOptions() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE events (id INT, recorded_at TIMESTAMP)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	location, err := temporal.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("LoadLocation() error = %v", err)
+	}
+	millis := time.Date(2026, time.April, 10, 13, 45, 21, 0, location).UnixMilli()
+
+	_, err = db.execMutatingStatement(func() error {
+		stagedTables := cloneTables(db.tables)
+		if err := db.loadRowsIntoTables(stagedTables, "events"); err != nil {
+			return err
+		}
+		stagedTables["events"].Rows = [][]parser.Value{
+			{parser.IntValue(1), parser.TimestampValue(millis, 9)},
+		}
+		return db.applyStagedTableRewrite(stagedTables, "events")
+	})
+	if err != nil {
+		t.Fatalf("execMutatingStatement() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	err = db.QueryRow("SELECT recorded_at FROM events WHERE id = 1").Scan(new(time.Time))
+	assertErrorContainsAll(t, err, "timestamp materialization", "zone_id 9", "out of range", "corrupted catalog page")
+}
+
+func TestQueryTimestampMaterializationFailsForInvalidDictionaryEntry(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	if err != nil {
+		t.Fatalf("OpenWithOptions() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE events (id INT, recorded_at TIMESTAMP)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	location, err := temporal.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("LoadLocation() error = %v", err)
+	}
+	millis := time.Date(2026, time.April, 10, 13, 45, 21, 0, location).UnixMilli()
+
+	_, err = db.execMutatingStatement(func() error {
+		stagedTables := cloneTables(db.tables)
+		if err := db.loadRowsIntoTables(stagedTables, "events"); err != nil {
+			return err
+		}
+		stagedTables["events"].Rows = [][]parser.Value{
+			{parser.IntValue(1), parser.TimestampValue(millis, 1)},
+		}
+		return db.applyStagedTableRewrite(stagedTables, "events")
+	})
+	if err != nil {
+		t.Fatalf("execMutatingStatement() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rawDB, pager := openRawStorage(t, path)
+	catalog, err := storage.LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("storage.LoadCatalog() error = %v", err)
+	}
+	catalog = catalogWithDirectoryRootsForSave(t, rawDB.File(), catalog)
+	catalog.TimezoneDictionary = []string{"America/New_York", "Mars/Olympus"}
+	if err := storage.SaveCatalog(pager, catalog); err != nil {
+		t.Fatalf("storage.SaveCatalog() error = %v", err)
+	}
+	rewriteDirectoryRootMappingsForCatalogTables(t, rawDB.File(), catalog)
+	if err := pager.FlushDirty(); err != nil {
+		t.Fatalf("pager.FlushDirty() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("raw Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	err = db.QueryRow("SELECT recorded_at FROM events WHERE id = 1").Scan(new(time.Time))
+	assertErrorContainsAll(t, err, "timestamp materialization", `zone_id 1 ("Mars/Olympus")`, "could not be loaded", `invalid timezone "Mars/Olympus"`)
 }
 
 func TestQueryTemporalScanTypeMismatch(t *testing.T) {

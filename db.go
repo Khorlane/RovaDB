@@ -906,7 +906,11 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 			if err != nil {
 				return &Rows{err: err, idx: -1}, nil
 			}
-			return newRowsWithScanTypes(columns, materializeRows(rows), columnTypes), nil
+			materializedRows, err := materializeRows(rows, newTimestampMaterializationContext(db.catalogTimezoneDictionary))
+			if err != nil {
+				return &Rows{err: err, idx: -1}, nil
+			}
+			return newRowsWithScanTypes(columns, materializedRows, columnTypes), nil
 		}
 		if tableName, columnName, ok := simpleEqualityPlanningTarget(sel); ok {
 			table := db.tables[tableName]
@@ -933,14 +937,22 @@ func (db *DB) query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
-		return newRowsWithScanTypes(columns, materializeRows(rows), columnTypes), nil
+		materializedRows, err := materializeRows(rows, newTimestampMaterializationContext(db.catalogTimezoneDictionary))
+		if err != nil {
+			return &Rows{err: err, idx: -1}, nil
+		}
+		return newRowsWithScanTypes(columns, materializedRows, columnTypes), nil
 	}
 
 	value, err := executor.Eval(sel.Expr)
 	if err != nil {
 		return &Rows{err: err, idx: -1}, nil
 	}
-	return newRows(nil, [][]any{{apiValue(value)}}), nil
+	materializedValue, err := apiValue(value, nil)
+	if err != nil {
+		return &Rows{err: err, idx: -1}, nil
+	}
+	return newRows(nil, [][]any{{materializedValue}}), nil
 }
 
 func (db *DB) queryIndexOnly(handoff *executor.IndexOnlyExecutionHandoff) (*Rows, bool, error) {
@@ -1009,16 +1021,20 @@ func (db *DB) QueryRow(query string, args ...any) *Row {
 	return newRow(rows)
 }
 
-func materializeRows(rows [][]parser.Value) [][]any {
+func materializeRows(rows [][]parser.Value, timestampCtx *timestampMaterializationContext) ([][]any, error) {
 	materialized := make([][]any, 0, len(rows))
 	for _, row := range rows {
 		values := make([]any, 0, len(row))
 		for _, value := range row {
-			values = append(values, apiValue(value))
+			materializedValue, err := apiValue(value, timestampCtx)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, materializedValue)
 		}
 		materialized = append(materialized, values)
 	}
-	return materialized
+	return materialized, nil
 }
 
 func (db *DB) tablesForSelectHandoff(handoff *executor.SelectExecutionHandoff) (map[string]*executor.Table, error) {
@@ -1152,12 +1168,17 @@ func (db *DB) projectAllRowsFromIndexOnly(handoff *executor.IndexOnlyExecutionHa
 
 	projectedColumnType := projectedColumnTypeByName(table, handoff.ColumnName())
 	projected := make([][]any, 0, len(values))
+	timestampCtx := newTimestampMaterializationContext(db.catalogTimezoneDictionary)
 	for _, value := range values {
 		projectedValue, err := rebindLegacySimpleIndexProjectedValue(parserValueFromStorage(value), projectedColumnType)
 		if err != nil {
 			return nil, err
 		}
-		projected = append(projected, []any{apiValue(projectedValue)})
+		materializedValue, err := apiValue(projectedValue, timestampCtx)
+		if err != nil {
+			return nil, err
+		}
+		projected = append(projected, []any{materializedValue})
 	}
 
 	columns, err := executor.ProjectedColumnNamesWithHandoff(handoff.FallbackSelectHandoff(), cloneSelectTableMeta(table))
@@ -1381,16 +1402,16 @@ func tableNamesForSelectHandoff(handoff *executor.SelectExecutionHandoff) []stri
 	}
 }
 
-func apiValue(value parser.Value) any {
+func apiValue(value parser.Value, timestampCtx *timestampMaterializationContext) (any, error) {
 	switch value.Kind {
 	case parser.ValueKindDate:
-		return time.Unix(int64(value.DateDays)*int64(secondsPerDay), 0).UTC()
+		return time.Unix(int64(value.DateDays)*int64(secondsPerDay), 0).UTC(), nil
 	case parser.ValueKindTime:
-		return Time{secondsSinceMidnight: value.TimeSeconds}
+		return Time{secondsSinceMidnight: value.TimeSeconds}, nil
 	case parser.ValueKindTimestamp:
-		return time.UnixMilli(value.TimestampMillis).UTC()
+		return timestampCtx.materializeTimestamp(value.TimestampMillis, value.TimestampZoneID)
 	}
-	return value.Any()
+	return value.Any(), nil
 }
 
 // rebindLegacySimpleIndexProjectedValue isolates the legacy simple-index path

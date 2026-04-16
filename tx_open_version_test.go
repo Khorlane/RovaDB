@@ -215,7 +215,7 @@ func TestTxExecAndQueryNormalizeTimestampsThroughDatabaseTimezoneContext(t *test
 	if err != nil {
 		t.Fatalf("LoadLocation() error = %v", err)
 	}
-	wantTimestamp := time.Date(2026, time.April, 10, 13, 45, 21, 0, location).UTC()
+	wantTimestamp := time.Date(2026, time.April, 10, 13, 45, 21, 0, location)
 	wantValue := parser.TimestampValue(wantTimestamp.UnixMilli(), 0)
 
 	if got := tx.tables["events"].Rows[0][1]; got != wantValue {
@@ -228,6 +228,9 @@ func TestTxExecAndQueryNormalizeTimestampsThroughDatabaseTimezoneContext(t *test
 	}
 	if !got.Equal(wantTimestamp) {
 		t.Fatalf("Tx.QueryRow().Scan() = %v, want %v", got, wantTimestamp)
+	}
+	if got.Location().String() != "America/New_York" {
+		t.Fatalf("Tx.QueryRow().Scan() location = %q, want %q", got.Location().String(), "America/New_York")
 	}
 }
 

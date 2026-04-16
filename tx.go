@@ -186,14 +186,22 @@ func (tx *Tx) Query(query string, args ...any) (*Rows, error) {
 		if err != nil {
 			return &Rows{err: err, idx: -1}, nil
 		}
-		return newRowsWithScanTypes(columns, materializeRows(rows), columnTypes), nil
+		materializedRows, err := materializeRows(rows, newTimestampMaterializationContext(tx.db.catalogTimezoneDictionary))
+		if err != nil {
+			return &Rows{err: err, idx: -1}, nil
+		}
+		return newRowsWithScanTypes(columns, materializedRows, columnTypes), nil
 	}
 
 	value, err := executor.Eval(sel.Expr)
 	if err != nil {
 		return &Rows{err: err, idx: -1}, nil
 	}
-	return newRows(nil, [][]any{{apiValue(value)}}), nil
+	materializedValue, err := apiValue(value, nil)
+	if err != nil {
+		return &Rows{err: err, idx: -1}, nil
+	}
+	return newRows(nil, [][]any{{materializedValue}}), nil
 }
 
 // QueryRow executes Query within the explicit transaction snapshot and wraps

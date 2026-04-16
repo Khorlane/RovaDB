@@ -7,6 +7,7 @@ import (
 	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/planner"
 	"github.com/Khorlane/RovaDB/internal/storage"
+	"github.com/Khorlane/RovaDB/internal/temporal"
 )
 
 type timestampNormalizationContext struct {
@@ -17,11 +18,23 @@ type timestampNormalizationContext struct {
 	zoneIDReady     bool
 }
 
+type timestampMaterializationContext struct {
+	dictionary []string
+	locations  map[int16]*time.Location
+}
+
 func newTimestampNormalizationContext(defaultTimezone string, location *time.Location, dictionary []string) *timestampNormalizationContext {
 	return &timestampNormalizationContext{
 		defaultTimezone: defaultTimezone,
 		location:        location,
 		dictionary:      dictionary,
+	}
+}
+
+func newTimestampMaterializationContext(dictionary []string) *timestampMaterializationContext {
+	return &timestampMaterializationContext{
+		dictionary: append([]string(nil), dictionary...),
+		locations:  make(map[int16]*time.Location),
 	}
 }
 
@@ -44,6 +57,43 @@ func (ctx *timestampNormalizationContext) defaultZoneID() (int16, error) {
 		return ctx.resolvedZoneID, nil
 	}
 	return 0, fmt.Errorf("timestamp normalization: default timezone %q missing from catalog dictionary: %w", ctx.defaultTimezone, newStorageError("corrupted catalog page"))
+}
+
+func (ctx *timestampMaterializationContext) materializeTimestamp(millisecondsSinceEpoch int64, zoneID int16) (time.Time, error) {
+	if ctx == nil {
+		return time.UnixMilli(millisecondsSinceEpoch).UTC(), nil
+	}
+	location, err := ctx.locationForZoneID(zoneID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.UnixMilli(millisecondsSinceEpoch).In(location), nil
+}
+
+func (ctx *timestampMaterializationContext) locationForZoneID(zoneID int16) (*time.Location, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("timestamp materialization: timezone dictionary is required")
+	}
+	if zoneID < 0 {
+		return nil, fmt.Errorf("timestamp materialization: zone_id %d out of range for timezone dictionary: %w", zoneID, newStorageError("corrupted catalog page"))
+	}
+	index := int(zoneID)
+	if index >= len(ctx.dictionary) {
+		return nil, fmt.Errorf("timestamp materialization: zone_id %d out of range for timezone dictionary: %w", zoneID, newStorageError("corrupted catalog page"))
+	}
+	if location, ok := ctx.locations[zoneID]; ok {
+		return location, nil
+	}
+	zoneName := ctx.dictionary[index]
+	if zoneName == "" {
+		return nil, fmt.Errorf("timestamp materialization: timezone dictionary entry for zone_id %d is empty: %w", zoneID, newStorageError("corrupted catalog page"))
+	}
+	location, err := temporal.LoadLocation(zoneName)
+	if err != nil {
+		return nil, fmt.Errorf("timestamp materialization: timezone dictionary entry for zone_id %d (%q) could not be loaded: %v", zoneID, zoneName, err)
+	}
+	ctx.locations[zoneID] = location
+	return location, nil
 }
 
 func storageValueFromParser(value parser.Value) storage.Value {
