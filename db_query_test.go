@@ -3537,6 +3537,44 @@ func TestQueryTemporalMaterializationAndScan(t *testing.T) {
 	}
 }
 
+func TestQueryTemporalMaterializationAndScanAfterReopen(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE events (id INT, recorded_at TIMESTAMP)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO events VALUES (1, '2026-04-15 16:17:18')"); err != nil {
+		t.Fatalf("Exec(insert) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	db = reopenDB(t, path)
+	defer db.Close()
+
+	location, err := temporal.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("LoadLocation() error = %v", err)
+	}
+	wantTimestamp := time.Date(2026, time.April, 15, 16, 17, 18, 0, location)
+
+	var got time.Time
+	if err := db.QueryRow("SELECT recorded_at FROM events WHERE id = 1").Scan(&got); err != nil {
+		t.Fatalf("QueryRow().Scan() after reopen error = %v", err)
+	}
+	if !got.Equal(wantTimestamp) {
+		t.Fatalf("QueryRow().Scan() after reopen = %v, want %v", got, wantTimestamp)
+	}
+	if got.Location().String() != "America/New_York" {
+		t.Fatalf("QueryRow().Scan() after reopen location = %q, want %q", got.Location().String(), "America/New_York")
+	}
+}
+
 func TestQueryTimestampMaterializationFailsForOutOfRangeZoneID(t *testing.T) {
 	path := testDBPath(t)
 
@@ -3578,7 +3616,7 @@ func TestQueryTimestampMaterializationFailsForOutOfRangeZoneID(t *testing.T) {
 	assertErrorContainsAll(t, err, "timestamp materialization", "zone_id 9", "out of range", "corrupted catalog page")
 }
 
-func TestQueryTimestampMaterializationFailsForInvalidDictionaryEntry(t *testing.T) {
+func TestOpenRejectsPersistedInvalidTimezoneDictionaryEntry(t *testing.T) {
 	path := testDBPath(t)
 
 	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
@@ -3612,29 +3650,14 @@ func TestQueryTimestampMaterializationFailsForInvalidDictionaryEntry(t *testing.
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	rawDB, pager := openRawStorage(t, path)
-	catalog, err := storage.LoadCatalog(pager)
-	if err != nil {
-		t.Fatalf("storage.LoadCatalog() error = %v", err)
-	}
-	catalog = catalogWithDirectoryRootsForSave(t, rawDB.File(), catalog)
-	catalog.TimezoneDictionary = []string{"America/New_York", "Mars/Olympus"}
-	if err := storage.SaveCatalog(pager, catalog); err != nil {
-		t.Fatalf("storage.SaveCatalog() error = %v", err)
-	}
-	rewriteDirectoryRootMappingsForCatalogTables(t, rawDB.File(), catalog)
-	if err := pager.FlushDirty(); err != nil {
-		t.Fatalf("pager.FlushDirty() error = %v", err)
-	}
-	if err := rawDB.Close(); err != nil {
-		t.Fatalf("raw Close() error = %v", err)
-	}
+	rewriteCatalogTemporalMetadataForTest(t, path, "America/New_York", temporal.CurrentTimezoneBasisVersion, []string{"America/New_York", "Mars/Olympus"})
 
-	db = reopenDB(t, path)
-	defer db.Close()
-
-	err = db.QueryRow("SELECT recorded_at FROM events WHERE id = 1").Scan(new(time.Time))
-	assertErrorContainsAll(t, err, "timestamp materialization", `zone_id 1 ("Mars/Olympus")`, "could not be loaded", `invalid timezone "Mars/Olympus"`)
+	reopened, err := Open(path)
+	if err == nil {
+		_ = reopened.Close()
+		t.Fatal("Open() error = nil, want invalid persisted timezone dictionary entry failure")
+	}
+	assertErrorContainsAll(t, err, "open", `zone_id 1 ("Mars/Olympus")`, `invalid timezone "Mars/Olympus"`, "corrupted catalog page")
 }
 
 func TestQueryTemporalScanTypeMismatch(t *testing.T) {

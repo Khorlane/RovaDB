@@ -1,6 +1,7 @@
 package rovadb
 
 import (
+	"encoding/binary"
 	"errors"
 	"os"
 	"strings"
@@ -193,6 +194,123 @@ func TestOpenReloadsPersistedTemporalTimezoneMetadata(t *testing.T) {
 	}
 }
 
+func TestOpenRejectsPersistedMismatchedTimezoneBasisVersion(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	if err != nil {
+		t.Fatalf("OpenWithOptions() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rewriteCatalogTemporalMetadataForTest(t, path, "America/New_York", "embedded-tzdata-v999", []string{"America/New_York"})
+
+	reopened, err := Open(path)
+	if err == nil {
+		_ = reopened.Close()
+		t.Fatal("Open() error = nil, want mismatched persisted timezone basis failure")
+	}
+	assertErrorContainsAll(t, err, "open", `persisted timezone basis version "embedded-tzdata-v999"`, temporal.CurrentTimezoneBasisVersion, "corrupted catalog page")
+}
+
+func TestOpenReloadsPersistedTemporalTimezoneMetadataWithMatchingBasisVersion(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	if err != nil {
+		t.Fatalf("OpenWithOptions() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rewriteCatalogTemporalMetadataForTest(t, path, "America/New_York", temporal.CurrentTimezoneBasisVersion, []string{"America/New_York", "UTC"})
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() reopen error = %v", err)
+	}
+	defer reopened.Close()
+
+	if reopened.defaultTimezone != "America/New_York" {
+		t.Fatalf("reopened.defaultTimezone = %q, want %q", reopened.defaultTimezone, "America/New_York")
+	}
+	if reopened.defaultLocation == nil || reopened.defaultLocation.String() != "America/New_York" {
+		t.Fatalf("reopened.defaultLocation = %#v, want America/New_York", reopened.defaultLocation)
+	}
+	if reopened.catalogTimezoneBasisVersion != temporal.CurrentTimezoneBasisVersion {
+		t.Fatalf("reopened.catalogTimezoneBasisVersion = %q, want %q", reopened.catalogTimezoneBasisVersion, temporal.CurrentTimezoneBasisVersion)
+	}
+	if got := strings.Join(reopened.catalogTimezoneDictionary, ","); got != "America/New_York,UTC" {
+		t.Fatalf("reopened.catalogTimezoneDictionary = %v, want [America/New_York UTC]", reopened.catalogTimezoneDictionary)
+	}
+}
+
+func TestOpenRejectsPersistedDefaultTimezoneMissingFromDictionary(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	if err != nil {
+		t.Fatalf("OpenWithOptions() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rewriteMalformedCatalogTemporalMetadataForTest(t, path, "America/New_York", temporal.CurrentTimezoneBasisVersion, []string{"UTC"})
+
+	reopened, err := Open(path)
+	if err == nil {
+		_ = reopened.Close()
+		t.Fatal("Open() error = nil, want missing persisted default timezone failure")
+	}
+	assertErrorContainsAll(t, err, `default timezone "America/New_York"`, "missing from dictionary ordering", "corrupted catalog page")
+}
+
+func TestOpenRejectsPersistedEmptyTimezoneDictionaryEntry(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	if err != nil {
+		t.Fatalf("OpenWithOptions() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rewriteMalformedCatalogTemporalMetadataForTest(t, path, "America/New_York", temporal.CurrentTimezoneBasisVersion, []string{"America/New_York", ""})
+
+	reopened, err := Open(path)
+	if err == nil {
+		_ = reopened.Close()
+		t.Fatal("Open() error = nil, want empty persisted timezone dictionary entry failure")
+	}
+	assertErrorContainsAll(t, err, "zone_id 1 is empty", "corrupted catalog page")
+}
+
+func TestOpenRejectsPersistedDuplicateTimezoneDictionaryEntry(t *testing.T) {
+	path := testDBPath(t)
+
+	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	if err != nil {
+		t.Fatalf("OpenWithOptions() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	rewriteMalformedCatalogTemporalMetadataForTest(t, path, "America/New_York", temporal.CurrentTimezoneBasisVersion, []string{"America/New_York", "America/New_York"})
+
+	reopened, err := Open(path)
+	if err == nil {
+		_ = reopened.Close()
+		t.Fatal("Open() error = nil, want duplicate persisted timezone dictionary entry failure")
+	}
+	assertErrorContainsAll(t, err, `zone_id 1 ("America/New_York")`, "duplicated", "corrupted catalog page")
+}
+
 func TestTxExecAndQueryNormalizeTimestampsThroughDatabaseTimezoneContext(t *testing.T) {
 	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
@@ -257,6 +375,138 @@ func TestBeginOnOpenDBReturnsActiveTx(t *testing.T) {
 	if db.tx != tx {
 		t.Fatalf("db.tx = %#v, want returned tx %#v", db.tx, tx)
 	}
+}
+
+func rewriteCatalogTemporalMetadataForTest(t *testing.T, path string, defaultTimezone string, timezoneBasisVersion string, timezoneDictionary []string) {
+	t.Helper()
+
+	rawDB, pager := openRawStorage(t, path)
+	catalog, err := storage.LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("storage.LoadCatalog() error = %v", err)
+	}
+	catalog = catalogWithDirectoryRootsForSave(t, rawDB.File(), catalog)
+	catalog.DefaultTimezone = defaultTimezone
+	catalog.TimezoneBasisVersion = timezoneBasisVersion
+	catalog.TimezoneDictionary = append([]string(nil), timezoneDictionary...)
+	if err := storage.SaveCatalog(pager, catalog); err != nil {
+		t.Fatalf("storage.SaveCatalog() error = %v", err)
+	}
+	rewriteDirectoryRootMappingsForCatalogTables(t, rawDB.File(), catalog)
+	if err := pager.FlushDirty(); err != nil {
+		t.Fatalf("pager.FlushDirty() error = %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("raw Close() error = %v", err)
+	}
+}
+
+func rewriteMalformedCatalogTemporalMetadataForTest(t *testing.T, path string, defaultTimezone string, timezoneBasisVersion string, timezoneDictionary []string) {
+	t.Helper()
+
+	rawDB, pager := openRawStorage(t, path)
+	page, err := pager.Get(0)
+	if err != nil {
+		t.Fatalf("pager.Get(0) error = %v", err)
+	}
+	mode, err := storage.DirectoryCATDIRStorageMode(page.Data())
+	if err != nil {
+		t.Fatalf("DirectoryCATDIRStorageMode() error = %v", err)
+	}
+	if mode != storage.DirectoryCATDIRStorageModeEmbedded {
+		t.Fatalf("rewriteMalformedCatalogTemporalMetadataForTest() requires embedded catalog storage, got mode %d", mode)
+	}
+	payloadBytes, err := storage.DirectoryCATDIRPayloadByteLength(page.Data())
+	if err != nil {
+		t.Fatalf("DirectoryCATDIRPayloadByteLength() error = %v", err)
+	}
+	payloadEnd := testDirectoryCatalogOffset + int(payloadBytes)
+	if payloadEnd > len(page.Data()) {
+		t.Fatalf("catalog payload end = %d, page size = %d", payloadEnd, len(page.Data()))
+	}
+	currentPayload := append([]byte(nil), page.Data()[testDirectoryCatalogOffset:payloadEnd]...)
+	rewrittenPayload := rewriteCatalogTemporalMetadataInPayloadForTest(t, currentPayload, defaultTimezone, timezoneBasisVersion, timezoneDictionary)
+
+	mappings, err := storage.ReadDirectoryRootIDMappings(rawDB.File())
+	if err != nil {
+		t.Fatalf("ReadDirectoryRootIDMappings() error = %v", err)
+	}
+	writeMalformedCatalogPageWithIDMappings(t, pager, rewrittenPayload, mappings)
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("raw Close() error = %v", err)
+	}
+}
+
+func rewriteCatalogTemporalMetadataInPayloadForTest(t *testing.T, currentPayload []byte, defaultTimezone string, timezoneBasisVersion string, timezoneDictionary []string) []byte {
+	t.Helper()
+
+	offset := 0
+	version, ok := readUint32ForCatalogPayload(currentPayload, &offset)
+	if !ok {
+		t.Fatal("readUint32ForCatalogPayload(version) = false")
+	}
+	if _, ok := readStringForCatalogPayload(currentPayload, &offset); !ok {
+		t.Fatal("readStringForCatalogPayload(default timezone) = false")
+	}
+	if _, ok := readStringForCatalogPayload(currentPayload, &offset); !ok {
+		t.Fatal("readStringForCatalogPayload(timezone basis version) = false")
+	}
+	dictionaryCount, ok := readUint32ForCatalogPayload(currentPayload, &offset)
+	if !ok {
+		t.Fatal("readUint32ForCatalogPayload(dictionary count) = false")
+	}
+	for i := uint32(0); i < dictionaryCount; i++ {
+		if _, ok := readStringForCatalogPayload(currentPayload, &offset); !ok {
+			t.Fatalf("readStringForCatalogPayload(dictionary[%d]) = false", i)
+		}
+	}
+
+	payload := make([]byte, 0, len(currentPayload)+64)
+	payload = appendUint32ForCatalogPayload(payload, version)
+	payload = appendStringForCatalogPayload(payload, defaultTimezone)
+	payload = appendStringForCatalogPayload(payload, timezoneBasisVersion)
+	payload = appendUint32ForCatalogPayload(payload, uint32(len(timezoneDictionary)))
+	for _, zone := range timezoneDictionary {
+		payload = appendStringForCatalogPayload(payload, zone)
+	}
+	payload = append(payload, currentPayload[offset:]...)
+	return payload
+}
+
+func appendUint32ForCatalogPayload(buf []byte, value uint32) []byte {
+	var raw [4]byte
+	binary.LittleEndian.PutUint32(raw[:], value)
+	return append(buf, raw[:]...)
+}
+
+func appendStringForCatalogPayload(buf []byte, value string) []byte {
+	var raw [2]byte
+	binary.LittleEndian.PutUint16(raw[:], uint16(len(value)))
+	buf = append(buf, raw[:]...)
+	return append(buf, value...)
+}
+
+func readUint32ForCatalogPayload(data []byte, offset *int) (uint32, bool) {
+	if *offset+4 > len(data) {
+		return 0, false
+	}
+	value := binary.LittleEndian.Uint32(data[*offset : *offset+4])
+	*offset += 4
+	return value, true
+}
+
+func readStringForCatalogPayload(data []byte, offset *int) (string, bool) {
+	if *offset+2 > len(data) {
+		return "", false
+	}
+	length := int(binary.LittleEndian.Uint16(data[*offset : *offset+2]))
+	*offset += 2
+	if *offset+length > len(data) {
+		return "", false
+	}
+	value := string(data[*offset : *offset+length])
+	*offset += length
+	return value, true
 }
 
 func TestBeginOnNilDBReturnsInvalidArgument(t *testing.T) {

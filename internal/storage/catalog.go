@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 )
 
@@ -347,18 +348,18 @@ func validateCatalogTemporalMetadata(defaultTimezone string, timezoneBasisVersio
 		return nil
 	}
 	if defaultTimezone == "" || timezoneBasisVersion == "" || len(timezoneDictionary) == 0 {
-		return errCorruptedCatalogPage
+		return fmt.Errorf("catalog temporal metadata is incomplete: %w", errCorruptedCatalogPage)
 	}
 	if timezoneDictionary[0] != defaultTimezone {
-		return errCorruptedCatalogPage
+		return fmt.Errorf("catalog temporal metadata default timezone %q missing from dictionary ordering: %w", defaultTimezone, errCorruptedCatalogPage)
 	}
 	seen := make(map[string]struct{}, len(timezoneDictionary))
-	for _, zone := range timezoneDictionary {
+	for i, zone := range timezoneDictionary {
 		if zone == "" {
-			return errCorruptedCatalogPage
+			return fmt.Errorf("catalog temporal metadata timezone dictionary entry for zone_id %d is empty: %w", i, errCorruptedCatalogPage)
 		}
 		if _, exists := seen[zone]; exists {
-			return errCorruptedCatalogPage
+			return fmt.Errorf("catalog temporal metadata timezone dictionary entry for zone_id %d (%q) is duplicated: %w", i, zone, errCorruptedCatalogPage)
 		}
 		seen[zone] = struct{}{}
 	}

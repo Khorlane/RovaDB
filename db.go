@@ -258,13 +258,14 @@ func OpenWithOptions(path string, opts OpenOptions) (*DB, error) {
 		_ = file.Close()
 		return nil, err
 	}
+	catalogDefaultLocation, err := validateCatalogTemporalMetadataForOpen(catalogDefaultTimezone, catalogTimezoneBasisVersion, catalogTimezoneDictionary)
+	if err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, err
+	}
 	if catalogDefaultTimezone != "" {
-		defaultLocation, err = temporal.LoadLocation(catalogDefaultTimezone)
-		if err != nil {
-			_ = pager.Close()
-			_ = file.Close()
-			return nil, fmt.Errorf("open: invalid persisted default timezone %q: %w", catalogDefaultTimezone, newStorageError("corrupted catalog page"))
-		}
+		defaultLocation = catalogDefaultLocation
 		defaultTimezone = catalogDefaultTimezone
 	}
 	tables, err := tablesFromCatalog(catalog)
@@ -351,6 +352,41 @@ func catalogTemporalMetadataForOpen(cat *storage.CatalogData, creatingNewDB bool
 		return "", "", nil, nil
 	}
 	return configuredDefaultTimezone, temporal.CurrentTimezoneBasisVersion, []string{configuredDefaultTimezone}, nil
+}
+
+func validateCatalogTemporalMetadataForOpen(defaultTimezone string, timezoneBasisVersion string, timezoneDictionary []string) (*time.Location, error) {
+	if defaultTimezone == "" && timezoneBasisVersion == "" && len(timezoneDictionary) == 0 {
+		return nil, nil
+	}
+	if defaultTimezone == "" || timezoneBasisVersion == "" || len(timezoneDictionary) == 0 {
+		return nil, fmt.Errorf("open: persisted timezone metadata is incomplete: %w", newStorageError("corrupted catalog page"))
+	}
+	if timezoneBasisVersion != temporal.CurrentTimezoneBasisVersion {
+		return nil, fmt.Errorf("open: persisted timezone basis version %q does not match runtime timezone basis version %q: %w", timezoneBasisVersion, temporal.CurrentTimezoneBasisVersion, newStorageError("corrupted catalog page"))
+	}
+
+	seen := make(map[string]int, len(timezoneDictionary))
+	var defaultLocation *time.Location
+	for i, zoneName := range timezoneDictionary {
+		if zoneName == "" {
+			return nil, fmt.Errorf("open: persisted timezone dictionary entry for zone_id %d is empty: %w", i, newStorageError("corrupted catalog page"))
+		}
+		if prior, exists := seen[zoneName]; exists {
+			return nil, fmt.Errorf("open: persisted timezone dictionary entry for zone_id %d (%q) duplicates zone_id %d: %w", i, zoneName, prior, newStorageError("corrupted catalog page"))
+		}
+		location, err := temporal.LoadLocation(zoneName)
+		if err != nil {
+			return nil, fmt.Errorf("open: invalid persisted timezone dictionary entry for zone_id %d (%q): %v: %w", i, zoneName, err, newStorageError("corrupted catalog page"))
+		}
+		seen[zoneName] = i
+		if zoneName == defaultTimezone {
+			defaultLocation = location
+		}
+	}
+	if defaultLocation == nil {
+		return nil, fmt.Errorf("open: persisted default timezone %q missing from timezone dictionary: %w", defaultTimezone, newStorageError("corrupted catalog page"))
+	}
+	return defaultLocation, nil
 }
 
 func rejectOrphanWALOnCreate(path string) error {
