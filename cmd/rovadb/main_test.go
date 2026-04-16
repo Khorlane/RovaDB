@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -36,6 +37,9 @@ func TestRunHelp(t *testing.T) {
 	}
 	if !strings.Contains(output, "sample <path>") {
 		t.Fatalf("output missing sample command:\n%s", output)
+	}
+	if !strings.Contains(output, "run <path>") {
+		t.Fatalf("output missing run command:\n%s", output)
 	}
 	if !strings.Contains(output, "version") {
 		t.Fatalf("output missing version command:\n%s", output)
@@ -329,6 +333,19 @@ func TestRunHelpSchema(t *testing.T) {
 	}
 }
 
+func TestRunHelpRun(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	code := runWithArgs(strings.NewReader("help run\nquit\n"), &out, &errOut, nil)
+	if code != 0 {
+		t.Fatalf("run() code = %d, want 0", code)
+	}
+	if !strings.Contains(out.String(), "RUN example:") || !strings.Contains(out.String(), "run setup.sql") {
+		t.Fatalf("output missing run help:\n%s", out.String())
+	}
+}
+
 func TestRunVersion(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
@@ -435,10 +452,10 @@ func TestRunDetachedSQLStillShowsOpenGuidance(t *testing.T) {
 	if !strings.Contains(output, "no database is open") {
 		t.Fatalf("output missing no-open message:\n%s", output)
 	}
-	if !strings.Contains(output, "open an existing database with: open <path>") {
+	if !strings.Contains(output, "open an existing db or create a new db with: open <path>") {
 		t.Fatalf("output missing open-shape hint:\n%s", output)
 	}
-	if !strings.Contains(output, "try: open test.db") {
+	if !strings.Contains(output, "try: open <path>") {
 		t.Fatalf("output missing concrete example hint:\n%s", output)
 	}
 }
@@ -466,7 +483,7 @@ func TestRunStartupHint(t *testing.T) {
 	}
 
 	output := out.String()
-	if !strings.Contains(output, "No database open. Try: open test.db") {
+	if !strings.Contains(output, "No database open. Try: open <path>") {
 		t.Fatalf("output missing startup hint:\n%s", output)
 	}
 }
@@ -1033,6 +1050,260 @@ func TestRunSchemaCommand(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
 		}
+	}
+}
+
+func TestRunScriptExecutesCommandsAndEchoesInput(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "script.db")
+	scriptPath := filepath.Join(dir, "setup.sql")
+
+	setupInput := strings.Join([]string{
+		"open " + dbPath,
+		"y",
+		"close",
+		"quit",
+		"",
+	}, "\n")
+	if code := runWithArgs(strings.NewReader(setupInput), &out, &errOut, nil); code != 0 {
+		t.Fatalf("setup run() code = %d, want 0", code)
+	}
+
+	out.Reset()
+	errOut.Reset()
+
+	script := strings.Join([]string{
+		"open " + dbPath,
+		"CREATE TABLE users (id INT, name TEXT)",
+		"INSERT INTO users VALUES (1, 'alice')",
+		"SELECT id, name FROM users ORDER BY id",
+		"close",
+		"",
+	}, "\n")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	input := strings.Join([]string{
+		"run " + scriptPath,
+		"db",
+		"quit",
+		"",
+	}, "\n")
+
+	code := runWithArgs(strings.NewReader(input), &out, &errOut, nil)
+	if code != 0 {
+		t.Fatalf("run() code = %d, want 0", code)
+	}
+
+	output := out.String()
+	for _, want := range []string{
+		"running script " + scriptPath,
+		"rovadb> open " + dbPath,
+		"opened existing " + dbPath,
+		"rovadb> CREATE TABLE users (id INT, name TEXT)",
+		"rovadb> INSERT INTO users VALUES (1, 'alice')",
+		"rovadb> SELECT id, name FROM users ORDER BY id",
+		"1  | alice",
+		"rovadb> close",
+		"closed " + dbPath,
+		"no database is open",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %q:\n%s", want, output)
+		}
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("errOut = %q, want empty", errOut.String())
+	}
+}
+
+func TestRunScriptOpenMissingDatabaseStopsImmediately(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "missing.db")
+	scriptPath := filepath.Join(dir, "missing.sql")
+	script := strings.Join([]string{
+		"open " + dbPath,
+		"CREATE TABLE users (id INT)",
+		"",
+	}, "\n")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	input := strings.Join([]string{
+		"run " + scriptPath,
+		"db",
+		"quit",
+		"",
+	}, "\n")
+
+	code := runWithArgs(strings.NewReader(input), &out, &errOut, nil)
+	if code != 0 {
+		t.Fatalf("run() code = %d, want 0", code)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "running script "+scriptPath) || !strings.Contains(output, "rovadb> open "+dbPath) {
+		t.Fatalf("output missing echoed script open:\n%s", output)
+	}
+	if strings.Contains(output, "rovadb> CREATE TABLE users (id INT)") {
+		t.Fatalf("script should stop after the missing-database error:\n%s", output)
+	}
+	if !strings.Contains(output, "no database is open") {
+		t.Fatalf("interactive prompt should resume after script failure:\n%s", output)
+	}
+	if !strings.Contains(errOut.String(), "open error: "+dbPath+" was not found") {
+		t.Fatalf("errOut missing script open failure:\n%s", errOut.String())
+	}
+}
+
+func TestRunScriptStopsOnSQLErrorAndReturnsToPrompt(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "script.db")
+	scriptPath := filepath.Join(dir, "script.sql")
+
+	setupInput := strings.Join([]string{
+		"open " + dbPath,
+		"y",
+		"close",
+		"quit",
+		"",
+	}, "\n")
+	if code := runWithArgs(strings.NewReader(setupInput), &out, &errOut, nil); code != 0 {
+		t.Fatalf("setup run() code = %d, want 0", code)
+	}
+
+	out.Reset()
+	errOut.Reset()
+
+	script := strings.Join([]string{
+		"open " + dbPath,
+		"CREATE TABLE users (id INT)",
+		"INSERT INTO missing VALUES (1)",
+		"INSERT INTO users VALUES (2)",
+		"",
+	}, "\n")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	input := strings.Join([]string{
+		"run " + scriptPath,
+		"SELECT id FROM users",
+		"quit",
+		"",
+	}, "\n")
+
+	code := runWithArgs(strings.NewReader(input), &out, &errOut, nil)
+	if code != 0 {
+		t.Fatalf("run() code = %d, want 0", code)
+	}
+
+	output := out.String()
+	for _, want := range []string{
+		"running script " + scriptPath,
+		"rovadb> open " + dbPath,
+		"rovadb> CREATE TABLE users (id INT)",
+		"rovadb> INSERT INTO missing VALUES (1)",
+		"id",
+		"(no rows)",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "rovadb> INSERT INTO users VALUES (2)") {
+		t.Fatalf("script should stop before executing lines after the SQL error:\n%s", output)
+	}
+	if !strings.Contains(errOut.String(), "exec error:") {
+		t.Fatalf("errOut missing script SQL error:\n%s", errOut.String())
+	}
+}
+
+func TestRunScriptSupportsMultilineSQLWithoutSemicolons(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "script.db")
+	scriptPath := filepath.Join(dir, "multiline.sql")
+
+	setupInput := strings.Join([]string{
+		"open " + dbPath,
+		"y",
+		"close",
+		"quit",
+		"",
+	}, "\n")
+	if code := runWithArgs(strings.NewReader(setupInput), &out, &errOut, nil); code != 0 {
+		t.Fatalf("setup run() code = %d, want 0", code)
+	}
+
+	out.Reset()
+	errOut.Reset()
+
+	script := strings.Join([]string{
+		"-- create schema",
+		"open " + dbPath,
+		"CREATE TABLE customers (",
+		"    cust_nbr INT,",
+		"    name TEXT,",
+		"    city TEXT",
+		")",
+		"",
+		"INSERT INTO customers VALUES (1, 'Alfred Morris', 'Charlotte')",
+		"INSERT INTO customers VALUES (2, 'Bo Peep', 'New York')",
+		"",
+		"-- verify rows later from the CLI",
+		"close",
+		"",
+	}, "\n")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	input := strings.Join([]string{
+		"run " + scriptPath,
+		"open " + dbPath,
+		"SELECT cust_nbr, name, city FROM customers ORDER BY cust_nbr",
+		"quit",
+		"",
+	}, "\n")
+
+	code := runWithArgs(strings.NewReader(input), &out, &errOut, nil)
+	if code != 0 {
+		t.Fatalf("run() code = %d, want 0", code)
+	}
+
+	output := out.String()
+	for _, want := range []string{
+		"running script " + scriptPath,
+		"rovadb> open " + dbPath,
+		"rovadb> CREATE TABLE customers (",
+		"rows affected: 0",
+		"rovadb> INSERT INTO customers VALUES (1, 'Alfred Morris', 'Charlotte')",
+		"rovadb> INSERT INTO customers VALUES (2, 'Bo Peep', 'New York')",
+		"rows affected: 1",
+		"cust_nbr | name          | city     ",
+		"1        | Alfred Morris | Charlotte",
+		"2        | Bo Peep       | New York ",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %q:\n%s", want, output)
+		}
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("errOut = %q, want empty", errOut.String())
 	}
 }
 

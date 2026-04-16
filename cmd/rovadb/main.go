@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,6 +25,16 @@ type cliSession struct {
 type commandResult struct {
 	handled bool
 	exit    bool
+	failed  bool
+}
+
+type lineExecutionOptions struct {
+	scriptMode bool
+	echoInput  bool
+}
+
+type scriptStatementBuffer struct {
+	lines []string
 }
 
 type helpTopic struct {
@@ -131,6 +142,13 @@ var helpTopics = map[string]helpTopic{
 			"schema customers",
 		},
 	},
+	"run": {
+		title: "RUN example:",
+		lines: []string{
+			"run setup.sql",
+			"Executes CLI commands from a script and stops on the first error",
+		},
+	},
 	"version": {
 		title: "VERSION example:",
 		lines: []string{
@@ -160,7 +178,7 @@ func runWithArgs(in io.Reader, out io.Writer, errOut io.Writer, args []string) i
 		}
 	}
 	if session.db == nil {
-		if err := writeResponse(out, "No database open. Try: open test.db"); err != nil {
+		if err := writeResponse(out, "No database open. Try: open <path>"); err != nil {
 			return 1
 		}
 	}
@@ -177,32 +195,12 @@ func runWithArgs(in io.Reader, out io.Writer, errOut io.Writer, args []string) i
 			break
 		}
 
-		input := strings.TrimSpace(scanner.Text())
-		if session.pendingCreatePath != "" {
-			if err := handleCreateConfirmation(out, session, input); err != nil {
-				if writeErr := writeResponse(errOut, "open error: %v", err); writeErr != nil {
-					return 1
-				}
-			}
-			continue
-		}
-
-		if input == "" {
-			continue
-		}
-
-		result, err := handleBuiltInCommand(out, errOut, session, input)
+		result, err := executeInputLine(out, errOut, session, scanner.Text(), lineExecutionOptions{})
 		if err != nil {
 			return 1
 		}
 		if result.exit {
 			return 0
-		}
-		if result.handled {
-			continue
-		}
-		if err := handleSQLOrUnknown(out, errOut, session, input); err != nil {
-			return 1
 		}
 	}
 
@@ -219,7 +217,7 @@ func runWithArgs(in io.Reader, out io.Writer, errOut io.Writer, args []string) i
 	return 0
 }
 
-func handleBuiltInCommand(out io.Writer, errOut io.Writer, session *cliSession, input string) (commandResult, error) {
+func handleBuiltInCommandWithOptions(out io.Writer, errOut io.Writer, session *cliSession, input string, opts lineExecutionOptions) (commandResult, error) {
 	switch {
 	case strings.EqualFold(input, "help"):
 		return commandResult{handled: true}, printHelp(out)
@@ -242,46 +240,94 @@ func handleBuiltInCommand(out io.Writer, errOut io.Writer, session *cliSession, 
 		return commandResult{handled: true}, writeResponse(out, "usage: open <path>")
 	case strings.EqualFold(input, "sample"):
 		return commandResult{handled: true}, writeResponse(out, "usage: sample <path>")
+	case strings.EqualFold(input, "run"):
+		return commandResult{handled: true, failed: true}, writeResponse(out, "usage: run <path>")
 	case strings.EqualFold(input, "tables"):
-		return commandResult{handled: true}, handleTablesCommand(out, errOut, session)
+		failed, err := handleTablesCommand(out, errOut, session)
+		return commandResult{handled: true, failed: failed}, err
 	case strings.EqualFold(input, "schema"):
-		return commandResult{handled: true}, writeResponse(out, "usage: schema <table>")
+		return commandResult{handled: true, failed: true}, writeResponse(out, "usage: schema <table>")
 	case strings.HasPrefix(strings.ToLower(input), "schema "):
-		return commandResult{handled: true}, handleSchemaCommand(out, errOut, session, input)
+		failed, err := handleSchemaCommand(out, errOut, session, input)
+		return commandResult{handled: true, failed: failed}, err
 	case strings.HasPrefix(strings.ToLower(input), "open "):
-		return commandResult{handled: true}, handleOpenCommand(out, errOut, session, input)
+		failed, err := handleOpenCommand(out, errOut, session, input, opts)
+		return commandResult{handled: true, failed: failed}, err
 	case strings.HasPrefix(strings.ToLower(input), "sample "):
-		return commandResult{handled: true}, handleSampleCommand(out, errOut, session, input)
+		failed, err := handleSampleCommand(out, errOut, session, input)
+		return commandResult{handled: true, failed: failed}, err
+	case strings.HasPrefix(strings.ToLower(input), "run "):
+		result, err := runScriptCommand(out, errOut, session, strings.TrimSpace(input[len("run "):]))
+		result.handled = true
+		return result, err
 	default:
 		return commandResult{}, nil
 	}
 }
 
-func handleSQLOrUnknown(out io.Writer, errOut io.Writer, session *cliSession, input string) error {
+func executeInputLine(out io.Writer, errOut io.Writer, session *cliSession, rawInput string, opts lineExecutionOptions) (commandResult, error) {
+	input := strings.TrimSpace(rawInput)
+	if opts.echoInput {
+		if err := writePromptLine(out, input); err != nil {
+			return commandResult{}, err
+		}
+	}
+	if session.pendingCreatePath != "" {
+		if opts.scriptMode {
+			path := session.pendingCreatePath
+			session.pendingCreatePath = ""
+			if err := writeResponse(errOut, "open error: create confirmation is not supported while running scripts: %s", path); err != nil {
+				return commandResult{}, err
+			}
+			return commandResult{failed: true}, nil
+		}
+		if err := handleCreateConfirmation(out, session, input); err != nil {
+			if writeErr := writeResponse(errOut, "open error: %v", err); writeErr != nil {
+				return commandResult{}, writeErr
+			}
+		}
+		return commandResult{}, nil
+	}
+	if input == "" {
+		return commandResult{}, nil
+	}
+
+	result, err := handleBuiltInCommandWithOptions(out, errOut, session, input, opts)
+	if err != nil || result.handled {
+		return result, err
+	}
+	failed, err := handleSQLOrUnknown(out, errOut, session, input)
+	result.failed = failed
+	return result, err
+}
+
+func handleSQLOrUnknown(out io.Writer, errOut io.Writer, session *cliSession, input string) (bool, error) {
 	sqlInput := normalizeCLIQuery(input)
 	if !isSQLInput(sqlInput) {
 		if err := writeResponse(out, "unknown command: %s", firstToken(input)); err != nil {
-			return err
+			return false, err
 		}
-		return writeResponse(out, "type help for commands")
+		return true, writeResponse(out, "type help for commands")
 	}
 	if session.db == nil {
-		return writeDetachedGuidance(out)
+		return true, writeDetachedGuidance(out)
 	}
 	if isSelectQuery(sqlInput) {
 		if err := runSelect(out, session.db, sqlInput); err != nil {
 			if writeErr := writeResponse(errOut, "query error: %v", err); writeErr != nil {
-				return writeErr
+				return false, writeErr
 			}
+			return true, nil
 		}
-		return nil
+		return false, nil
 	}
 	if err := runExec(out, session.db, sqlInput); err != nil {
 		if writeErr := writeResponse(errOut, "exec error: %v", err); writeErr != nil {
-			return writeErr
+			return false, writeErr
 		}
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
 func printHelp(out io.Writer) error {
@@ -298,6 +344,9 @@ func printHelp(out io.Writer) error {
 		return err
 	}
 	if err := writeHelpLine(out, "sample <path>", "Create and open a sample database"); err != nil {
+		return err
+	}
+	if err := writeHelpLine(out, "run <path>", "Execute CLI commands from a script file"); err != nil {
 		return err
 	}
 	if err := writeHelpLine(out, "close", "Close the current database"); err != nil {
@@ -358,82 +407,191 @@ func handleCloseCommand(out io.Writer, errOut io.Writer, session *cliSession) er
 	return writeResponse(out, "closed %s", path)
 }
 
-func handleTablesCommand(out io.Writer, errOut io.Writer, session *cliSession) error {
+func handleTablesCommand(out io.Writer, errOut io.Writer, session *cliSession) (bool, error) {
 	if session.db == nil {
-		return writeResponse(out, "no database is open")
+		return true, writeResponse(out, "no database is open")
 	}
 	if err := printTables(out, session.db); err != nil {
 		if writeErr := writeResponse(errOut, "tables error: %v", err); writeErr != nil {
-			return writeErr
+			return false, writeErr
 		}
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
-func handleSchemaCommand(out io.Writer, errOut io.Writer, session *cliSession, input string) error {
+func handleSchemaCommand(out io.Writer, errOut io.Writer, session *cliSession, input string) (bool, error) {
 	if session.db == nil {
-		return writeResponse(out, "no database is open")
+		return true, writeResponse(out, "no database is open")
 	}
 	tableName := strings.TrimSpace(input[len("schema "):])
 	if tableName == "" {
-		return writeResponse(out, "usage: schema <table>")
+		return true, writeResponse(out, "usage: schema <table>")
 	}
 	if err := printSchema(out, session.db, tableName); err != nil {
 		if writeErr := writeResponse(errOut, "schema error: %v", err); writeErr != nil {
-			return writeErr
+			return false, writeErr
 		}
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
-func handleOpenCommand(out io.Writer, errOut io.Writer, session *cliSession, input string) error {
+func handleOpenCommand(out io.Writer, errOut io.Writer, session *cliSession, input string, opts lineExecutionOptions) (bool, error) {
 	path := strings.TrimSpace(input[len("open "):])
 	if path == "" {
-		return writeResponse(out, "usage: open <path>")
+		return true, writeResponse(out, "usage: open <path>")
 	}
 	if session.db != nil {
 		if err := writeResponse(out, "a database is already open: %s", session.path); err != nil {
-			return err
+			return false, err
 		}
-		return writeResponse(out, "close it before opening another database")
+		return true, writeResponse(out, "close it before opening another database")
 	}
 	if !fileExists(path) {
+		if opts.scriptMode {
+			if writeErr := writeResponse(errOut, "open error: %s was not found", path); writeErr != nil {
+				return false, writeErr
+			}
+			return true, nil
+		}
 		session.pendingCreatePath = path
 		if err := writeResponse(out, "%s was not found", path); err != nil {
-			return err
+			return false, err
 		}
-		return writeResponse(out, "create %s? [y/n]", path)
+		return false, writeResponse(out, "create %s? [y/n]", path)
 	}
 	if err := openExistingPath(session, path); err != nil {
 		if writeErr := writeResponse(errOut, "open error: %v", err); writeErr != nil {
-			return writeErr
+			return false, writeErr
 		}
-		return nil
+		return true, nil
 	}
-	return writeResponse(out, "opened existing %s", path)
+	return false, writeResponse(out, "opened existing %s", path)
 }
 
-func handleSampleCommand(out io.Writer, errOut io.Writer, session *cliSession, input string) error {
+func handleSampleCommand(out io.Writer, errOut io.Writer, session *cliSession, input string) (bool, error) {
 	path := strings.TrimSpace(input[len("sample "):])
 	if path == "" {
-		return writeResponse(out, "usage: sample <path>")
+		return true, writeResponse(out, "usage: sample <path>")
 	}
 	if session.db != nil {
 		if err := writeResponse(out, "a database is already open: %s", session.path); err != nil {
-			return err
+			return false, err
 		}
-		return writeResponse(out, "close it before creating a sample database")
+		return true, writeResponse(out, "close it before creating a sample database")
 	}
 	if err := createSampleDatabase(session, path); err != nil {
 		if writeErr := writeResponse(errOut, "sample error: %v", err); writeErr != nil {
-			return writeErr
+			return false, writeErr
 		}
-		return nil
+		return true, nil
 	}
 	if err := writeResponse(out, "created sample database %s", path); err != nil {
-		return err
+		return false, err
 	}
-	return writeResponse(out, "sample tables: customers, orders")
+	return false, writeResponse(out, "sample tables: customers, orders")
+}
+
+func runScriptCommand(out io.Writer, errOut io.Writer, session *cliSession, path string) (commandResult, error) {
+	if path == "" {
+		return commandResult{failed: true}, writeResponse(out, "usage: run <path>")
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		if writeErr := writeResponse(errOut, "run error: %v", err); writeErr != nil {
+			return commandResult{}, writeErr
+		}
+		return commandResult{failed: true}, nil
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	if err := writeResponse(out, "running script %s", path); err != nil {
+		return commandResult{}, err
+	}
+
+	scanner := bufio.NewScanner(file)
+	var buffer scriptStatementBuffer
+	for scanner.Scan() {
+		line := scanner.Text()
+		result, handled, execErr := processScriptLine(out, errOut, session, &buffer, line)
+		if execErr != nil {
+			return commandResult{}, execErr
+		}
+		if handled && (result.exit || result.failed) {
+			return result, nil
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		if writeErr := writeResponse(errOut, "run error: %v", err); writeErr != nil {
+			return commandResult{}, writeErr
+		}
+		return commandResult{failed: true}, nil
+	}
+
+	if buffer.hasContent() {
+		result, execErr := executeInputLine(out, errOut, session, buffer.statement(), lineExecutionOptions{
+			scriptMode: true,
+			echoInput:  true,
+		})
+		if execErr != nil {
+			return commandResult{}, execErr
+		}
+		if result.exit || result.failed {
+			return result, nil
+		}
+	}
+
+	return commandResult{}, nil
+}
+
+func processScriptLine(out io.Writer, errOut io.Writer, session *cliSession, buffer *scriptStatementBuffer, rawLine string) (commandResult, bool, error) {
+	line := strings.TrimSpace(rawLine)
+	if shouldSkipScriptLine(line) {
+		if buffer.hasContent() {
+			result, err := executeInputLine(out, errOut, session, buffer.statement(), lineExecutionOptions{
+				scriptMode: true,
+				echoInput:  true,
+			})
+			buffer.reset()
+			return result, true, err
+		}
+		return commandResult{}, false, nil
+	}
+
+	if buffer.hasContent() && startsNewScriptStatement(line) {
+		result, err := executeInputLine(out, errOut, session, buffer.statement(), lineExecutionOptions{
+			scriptMode: true,
+			echoInput:  true,
+		})
+		buffer.reset()
+		if err != nil || result.exit || result.failed {
+			return result, true, err
+		}
+	}
+
+	if isScriptLineSQL(line) || buffer.hasContent() {
+		buffer.append(rawLine)
+		if strings.HasSuffix(line, ";") {
+			result, err := executeInputLine(out, errOut, session, buffer.statement(), lineExecutionOptions{
+				scriptMode: true,
+				echoInput:  true,
+			})
+			buffer.reset()
+			return result, true, err
+		}
+		return commandResult{}, false, nil
+	}
+
+	result, err := executeInputLine(out, errOut, session, rawLine, lineExecutionOptions{
+		scriptMode: true,
+		echoInput:  true,
+	})
+	return result, true, err
 }
 
 func isExitCommand(input string) bool {
@@ -480,9 +638,47 @@ func isSelectQuery(input string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(input)), "select")
 }
 
+func isScriptLineSQL(input string) bool {
+	return isSQLInput(normalizeCLIQuery(input))
+}
+
 func isSQLInput(input string) bool {
 	_, ok := sqlStarterKeywords[strings.ToLower(firstToken(input))]
 	return ok
+}
+
+func startsNewScriptStatement(input string) bool {
+	return isScriptLineSQL(input) || isScriptBuiltIn(input)
+}
+
+func isScriptBuiltIn(input string) bool {
+	lower := strings.ToLower(strings.TrimSpace(input))
+	switch {
+	case lower == "":
+		return false
+	case strings.EqualFold(lower, "help"),
+		strings.HasPrefix(lower, "help "),
+		strings.EqualFold(lower, "db"),
+		strings.EqualFold(lower, "version"),
+		strings.EqualFold(lower, "close"),
+		isExitCommand(lower),
+		strings.EqualFold(lower, "open"),
+		strings.EqualFold(lower, "sample"),
+		strings.EqualFold(lower, "run"),
+		strings.EqualFold(lower, "tables"),
+		strings.EqualFold(lower, "schema"),
+		strings.HasPrefix(lower, "schema "),
+		strings.HasPrefix(lower, "open "),
+		strings.HasPrefix(lower, "sample "),
+		strings.HasPrefix(lower, "run "):
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldSkipScriptLine(input string) bool {
+	return input == "" || strings.HasPrefix(input, "--")
 }
 
 func normalizeCLIQuery(input string) string {
@@ -738,6 +934,27 @@ func writeResponse(w io.Writer, format string, args ...any) error {
 	return err
 }
 
+func writePromptLine(w io.Writer, input string) error {
+	_, err := fmt.Fprintf(w, "rovadb> %s\n", strings.TrimSpace(input))
+	return err
+}
+
+func (b *scriptStatementBuffer) append(line string) {
+	b.lines = append(b.lines, line)
+}
+
+func (b *scriptStatementBuffer) hasContent() bool {
+	return len(b.lines) > 0
+}
+
+func (b *scriptStatementBuffer) statement() string {
+	return strings.TrimSpace(strings.Join(b.lines, "\n"))
+}
+
+func (b *scriptStatementBuffer) reset() {
+	b.lines = b.lines[:0]
+}
+
 func writeHelpLine(w io.Writer, command string, description string) error {
 	return writeResponse(w, "%-32s %s", command, description)
 }
@@ -746,10 +963,10 @@ func writeDetachedGuidance(w io.Writer) error {
 	if err := writeResponse(w, "no database is open"); err != nil {
 		return err
 	}
-	if err := writeResponse(w, "open an existing database with: open <path>"); err != nil {
+	if err := writeResponse(w, "open an existing db or create a new db with: open <path>"); err != nil {
 		return err
 	}
-	return writeResponse(w, "try: open test.db")
+	return writeResponse(w, "try: open <path>")
 }
 
 func writeBanner(w io.Writer) error {
@@ -761,4 +978,42 @@ func writeBanner(w io.Writer) error {
 	}
 	_, err := fmt.Fprintln(w, "+---------------------+")
 	return err
+}
+
+func printTables(out io.Writer, db *rovadb.DB) error {
+	tables, err := db.ListTables()
+	if err != nil {
+		return err
+	}
+	if len(tables) == 0 {
+		return writeResponse(out, "no tables")
+	}
+
+	names := make([]string, 0, len(tables))
+	for _, table := range tables {
+		names = append(names, table.Name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := writeResponse(out, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func printSchema(out io.Writer, db *rovadb.DB, tableName string) error {
+	table, err := db.GetTableSchema(tableName)
+	if err != nil {
+		return err
+	}
+	if err := writeResponse(out, "table: %s", table.Name); err != nil {
+		return err
+	}
+	for _, column := range table.Columns {
+		if err := writeResponse(out, "%s %s", column.Name, column.Type); err != nil {
+			return err
+		}
+	}
+	return nil
 }

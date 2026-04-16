@@ -11,7 +11,6 @@ const (
 	hoursPerDay         = 24
 	secondsPerHour      = minutesPerHour * secondsPerMinute
 	secondsPerDay       = hoursPerDay * secondsPerHour
-	maxSecondsInSQLTime = secondsPerDay - 1
 )
 
 var errInvalidTime = errors.New("rovadb: invalid TIME value")
