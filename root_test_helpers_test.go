@@ -338,7 +338,10 @@ type currentCatalogIndexColumnForTest struct {
 
 func currentCatalogBytesForTest(tables []currentCatalogTableForTest) []byte {
 	buf := make([]byte, 0, storage.PageSize)
-	buf = appendUint32LE(buf, 7)
+	buf = appendUint32LE(buf, 9)
+	buf = appendStringLE(buf, "")
+	buf = appendStringLE(buf, "")
+	buf = appendUint32LE(buf, 0)
 	buf = appendUint32LE(buf, uint32(len(tables)))
 	for _, table := range tables {
 		buf = appendStringLE(buf, table.name)
@@ -348,6 +351,7 @@ func currentCatalogBytesForTest(tables []currentCatalogTableForTest) []byte {
 		for _, column := range table.columns {
 			buf = appendStringLE(buf, column.name)
 			buf = append(buf, column.typ)
+			buf = append(buf, 0)
 		}
 		buf = appendUint16LE(buf, uint16(len(table.indexes)))
 		for _, index := range table.indexes {
@@ -621,7 +625,10 @@ func assertAutocommitClean(t *testing.T, db *DB, path string) {
 
 func corruptedIndexCatalogBytes(_ uint32) []byte {
 	buf := make([]byte, 0, storage.PageSize)
-	buf = appendUint32LE(buf, 8)
+	buf = appendUint32LE(buf, 9)
+	buf = appendStringLE(buf, "")
+	buf = appendStringLE(buf, "")
+	buf = appendUint32LE(buf, 0)
 	buf = appendUint32LE(buf, 1)
 	buf = appendStringLE(buf, "users")
 	buf = appendUint32LE(buf, 7)

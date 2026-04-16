@@ -495,7 +495,13 @@ func ApplyDirectoryRootIDMappings(cat *CatalogData, mappings []DirectoryRootIDMa
 		}
 	}
 
-	applied := &CatalogData{Tables: make([]CatalogTable, 0, len(cat.Tables))}
+	applied := &CatalogData{
+		Version:              cat.Version,
+		DefaultTimezone:      cat.DefaultTimezone,
+		TimezoneBasisVersion: cat.TimezoneBasisVersion,
+		TimezoneDictionary:   append([]string(nil), cat.TimezoneDictionary...),
+		Tables:               make([]CatalogTable, 0, len(cat.Tables)),
+	}
 	for _, table := range cat.Tables {
 		cloned := CatalogTable{
 			Name:        table.Name,

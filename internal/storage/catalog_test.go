@@ -262,6 +262,60 @@ func TestCatalogRoundTripPreservesTemporalColumnTypes(t *testing.T) {
 	}
 }
 
+func TestCatalogRoundTripPreservesTemporalTimezoneMetadata(t *testing.T) {
+	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_temporal_timezone.db"))
+	if err != nil {
+		t.Fatalf("OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() error = %v", err)
+	}
+
+	want := &CatalogData{
+		DefaultTimezone:      "America/New_York",
+		TimezoneBasisVersion: "embedded-tzdata-v1",
+		TimezoneDictionary:   []string{"America/New_York", "UTC"},
+		Tables: []CatalogTable{
+			{
+				Name:       "events",
+				TableID:    1,
+				RootPageID: 1,
+				Columns: []CatalogColumn{
+					{Name: "recorded_at", Type: CatalogColumnTypeTimestamp},
+				},
+			},
+		},
+	}
+	if err := SaveCatalog(pager, want); err != nil {
+		t.Fatalf("SaveCatalog() error = %v", err)
+	}
+	if err := pager.Flush(); err != nil {
+		t.Fatalf("pager.Flush() error = %v", err)
+	}
+
+	reopenPager, err := NewPager(dbFile.file)
+	if err != nil {
+		t.Fatalf("NewPager() reload error = %v", err)
+	}
+	got, err := LoadCatalog(reopenPager)
+	if err != nil {
+		t.Fatalf("LoadCatalog() error = %v", err)
+	}
+
+	if got.DefaultTimezone != want.DefaultTimezone {
+		t.Fatalf("got.DefaultTimezone = %q, want %q", got.DefaultTimezone, want.DefaultTimezone)
+	}
+	if got.TimezoneBasisVersion != want.TimezoneBasisVersion {
+		t.Fatalf("got.TimezoneBasisVersion = %q, want %q", got.TimezoneBasisVersion, want.TimezoneBasisVersion)
+	}
+	if fmt.Sprintf("%v", got.TimezoneDictionary) != fmt.Sprintf("%v", want.TimezoneDictionary) {
+		t.Fatalf("got.TimezoneDictionary = %v, want %v", got.TimezoneDictionary, want.TimezoneDictionary)
+	}
+}
+
 func TestCatalogRoundTripPreservesTemporalDefaults(t *testing.T) {
 	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_temporal_defaults.db"))
 	if err != nil {
@@ -540,6 +594,9 @@ func TestLoadCatalogRejectsMalformedColumnDefaultMetadata(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			payload := make([]byte, 0, PageSize)
 			payload = appendUint32(payload, catalogVersion)
+			payload = appendString(payload, "")
+			payload = appendString(payload, "")
+			payload = appendUint32(payload, 0)
 			payload = appendUint32(payload, 1)
 			payload = appendString(payload, "users")
 			payload = appendUint32(payload, 1)
@@ -566,6 +623,60 @@ func TestLoadCatalogRejectsMalformedColumnDefaultMetadata(t *testing.T) {
 			copy(page, payload)
 
 			_, err = loadCatalogPageData(page)
+			if !errors.Is(err, errCorruptedCatalogPage) {
+				t.Fatalf("loadCatalogPageData() error = %v, want %v", err, errCorruptedCatalogPage)
+			}
+		})
+	}
+}
+
+func TestLoadCatalogRejectsMalformedTemporalTimezoneMetadata(t *testing.T) {
+	tests := []struct {
+		name                 string
+		defaultTimezone      string
+		timezoneBasisVersion string
+		timezoneDictionary   []string
+	}{
+		{
+			name:               "missing basis version",
+			defaultTimezone:    "America/New_York",
+			timezoneDictionary: []string{"America/New_York"},
+		},
+		{
+			name:                 "missing dictionary",
+			defaultTimezone:      "America/New_York",
+			timezoneBasisVersion: "embedded-tzdata-v1",
+		},
+		{
+			name:                 "default timezone not first",
+			defaultTimezone:      "America/New_York",
+			timezoneBasisVersion: "embedded-tzdata-v1",
+			timezoneDictionary:   []string{"UTC", "America/New_York"},
+		},
+		{
+			name:                 "duplicate dictionary entry",
+			defaultTimezone:      "America/New_York",
+			timezoneBasisVersion: "embedded-tzdata-v1",
+			timezoneDictionary:   []string{"America/New_York", "America/New_York"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := make([]byte, 0, PageSize)
+			payload = appendUint32(payload, catalogVersion)
+			payload = appendString(payload, tc.defaultTimezone)
+			payload = appendString(payload, tc.timezoneBasisVersion)
+			payload = appendUint32(payload, uint32(len(tc.timezoneDictionary)))
+			for _, zone := range tc.timezoneDictionary {
+				payload = appendString(payload, zone)
+			}
+			payload = appendUint32(payload, 0)
+
+			page := make([]byte, PageSize)
+			copy(page, payload)
+
+			_, err := loadCatalogPageData(page)
 			if !errors.Is(err, errCorruptedCatalogPage) {
 				t.Fatalf("loadCatalogPageData() error = %v, want %v", err, errCorruptedCatalogPage)
 			}

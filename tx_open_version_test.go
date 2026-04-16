@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Khorlane/RovaDB/internal/storage"
+	"github.com/Khorlane/RovaDB/internal/temporal"
 )
 
 func TestOpenRejectsOrphanWALWhenDBFileIsMissing(t *testing.T) {
@@ -72,6 +73,15 @@ func TestOpenWithOptionsAcceptsValidDefaultTimezone(t *testing.T) {
 	if db.defaultLocation.String() != "America/New_York" {
 		t.Fatalf("db.defaultLocation.String() = %q, want %q", db.defaultLocation.String(), "America/New_York")
 	}
+	if db.catalogDefaultTimezone != "America/New_York" {
+		t.Fatalf("db.catalogDefaultTimezone = %q, want %q", db.catalogDefaultTimezone, "America/New_York")
+	}
+	if db.catalogTimezoneBasisVersion != temporal.CurrentTimezoneBasisVersion {
+		t.Fatalf("db.catalogTimezoneBasisVersion = %q, want %q", db.catalogTimezoneBasisVersion, temporal.CurrentTimezoneBasisVersion)
+	}
+	if len(db.catalogTimezoneDictionary) != 1 || db.catalogTimezoneDictionary[0] != "America/New_York" {
+		t.Fatalf("db.catalogTimezoneDictionary = %v, want [%q]", db.catalogTimezoneDictionary, "America/New_York")
+	}
 }
 
 func TestOpenWithOptionsRejectsInvalidDefaultTimezone(t *testing.T) {
@@ -100,6 +110,84 @@ func TestOpenDelegatesThroughOptionsPathWithoutChangingLegacyBehavior(t *testing
 	}
 	if db.defaultLocation != nil {
 		t.Fatalf("db.defaultLocation = %#v, want nil", db.defaultLocation)
+	}
+	if db.catalogDefaultTimezone != "" {
+		t.Fatalf("db.catalogDefaultTimezone = %q, want empty", db.catalogDefaultTimezone)
+	}
+	if db.catalogTimezoneBasisVersion != "" {
+		t.Fatalf("db.catalogTimezoneBasisVersion = %q, want empty", db.catalogTimezoneBasisVersion)
+	}
+	if len(db.catalogTimezoneDictionary) != 0 {
+		t.Fatalf("len(db.catalogTimezoneDictionary) = %d, want 0", len(db.catalogTimezoneDictionary))
+	}
+}
+
+func TestOpenWithOptionsPersistsTemporalTimezoneMetadataInCatalog(t *testing.T) {
+	path := testDBPath(t)
+	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	if err != nil {
+		t.Fatalf("OpenWithOptions() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close() error = %v", err)
+	}
+
+	dbFile, err := storage.OpenOrCreate(path)
+	if err != nil {
+		t.Fatalf("storage.OpenOrCreate() error = %v", err)
+	}
+	defer dbFile.Close()
+
+	pager, err := storage.NewPager(dbFile.File())
+	if err != nil {
+		t.Fatalf("storage.NewPager() error = %v", err)
+	}
+	catalog, err := storage.LoadCatalog(pager)
+	if err != nil {
+		t.Fatalf("storage.LoadCatalog() error = %v", err)
+	}
+
+	if catalog.DefaultTimezone != "America/New_York" {
+		t.Fatalf("catalog.DefaultTimezone = %q, want %q", catalog.DefaultTimezone, "America/New_York")
+	}
+	if catalog.TimezoneBasisVersion != temporal.CurrentTimezoneBasisVersion {
+		t.Fatalf("catalog.TimezoneBasisVersion = %q, want %q", catalog.TimezoneBasisVersion, temporal.CurrentTimezoneBasisVersion)
+	}
+	if len(catalog.TimezoneDictionary) != 1 || catalog.TimezoneDictionary[0] != "America/New_York" {
+		t.Fatalf("catalog.TimezoneDictionary = %v, want [%q]", catalog.TimezoneDictionary, "America/New_York")
+	}
+}
+
+func TestOpenReloadsPersistedTemporalTimezoneMetadata(t *testing.T) {
+	path := testDBPath(t)
+	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	if err != nil {
+		t.Fatalf("OpenWithOptions() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close() error = %v", err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() reopen error = %v", err)
+	}
+	defer reopened.Close()
+
+	if reopened.defaultTimezone != "America/New_York" {
+		t.Fatalf("reopened.defaultTimezone = %q, want %q", reopened.defaultTimezone, "America/New_York")
+	}
+	if reopened.defaultLocation == nil || reopened.defaultLocation.String() != "America/New_York" {
+		t.Fatalf("reopened.defaultLocation = %#v, want America/New_York", reopened.defaultLocation)
+	}
+	if reopened.catalogDefaultTimezone != "America/New_York" {
+		t.Fatalf("reopened.catalogDefaultTimezone = %q, want %q", reopened.catalogDefaultTimezone, "America/New_York")
+	}
+	if reopened.catalogTimezoneBasisVersion != temporal.CurrentTimezoneBasisVersion {
+		t.Fatalf("reopened.catalogTimezoneBasisVersion = %q, want %q", reopened.catalogTimezoneBasisVersion, temporal.CurrentTimezoneBasisVersion)
+	}
+	if len(reopened.catalogTimezoneDictionary) != 1 || reopened.catalogTimezoneDictionary[0] != "America/New_York" {
+		t.Fatalf("reopened.catalogTimezoneDictionary = %v, want [%q]", reopened.catalogTimezoneDictionary, "America/New_York")
 	}
 }
 

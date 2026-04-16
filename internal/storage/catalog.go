@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	catalogVersion = 8
+	catalogVersion = 9
 	catalogPageID  = 0
 
 	CatalogColumnTypeInt       = 1
@@ -22,8 +22,11 @@ const (
 
 // CatalogData is the tiny storage-side catalog DTO persisted through CAT/DIR storage.
 type CatalogData struct {
-	Version uint32
-	Tables  []CatalogTable
+	Version              uint32
+	DefaultTimezone      string
+	TimezoneBasisVersion string
+	TimezoneDictionary   []string
+	Tables               []CatalogTable
 }
 
 // CatalogTable is a persisted table schema entry.
@@ -147,8 +150,17 @@ func encodeCatalogPayload(cat *CatalogData) ([]byte, error) {
 	if cat == nil {
 		cat = &CatalogData{}
 	}
+	if err := validateCatalogTemporalMetadata(cat.DefaultTimezone, cat.TimezoneBasisVersion, cat.TimezoneDictionary); err != nil {
+		return nil, err
+	}
 	buf := make([]byte, 0, embeddedDirectoryCatalogPayloadCapacity(0))
 	buf = appendUint32(buf, catalogVersion)
+	buf = appendString(buf, cat.DefaultTimezone)
+	buf = appendString(buf, cat.TimezoneBasisVersion)
+	buf = appendUint32(buf, uint32(len(cat.TimezoneDictionary)))
+	for _, zone := range cat.TimezoneDictionary {
+		buf = appendString(buf, zone)
+	}
 	buf = appendUint32(buf, uint32(len(cat.Tables)))
 
 	for _, table := range cat.Tables {
@@ -210,12 +222,41 @@ func decodeCatalogPayload(pageData []byte) (int, *CatalogData, error) {
 	if version != catalogVersion {
 		return 0, nil, errUnsupportedCatalogPage
 	}
+	defaultTimezone, ok := readString(pageData, &offset)
+	if !ok {
+		return 0, nil, errCorruptedCatalogPage
+	}
+	timezoneBasisVersion, ok := readString(pageData, &offset)
+	if !ok {
+		return 0, nil, errCorruptedCatalogPage
+	}
+	timezoneDictionaryCount, ok := readUint32(pageData, &offset)
+	if !ok {
+		return 0, nil, errCorruptedCatalogPage
+	}
+	timezoneDictionary := make([]string, 0, timezoneDictionaryCount)
+	for i := uint32(0); i < timezoneDictionaryCount; i++ {
+		zone, ok := readString(pageData, &offset)
+		if !ok {
+			return 0, nil, errCorruptedCatalogPage
+		}
+		timezoneDictionary = append(timezoneDictionary, zone)
+	}
+	if err := validateCatalogTemporalMetadata(defaultTimezone, timezoneBasisVersion, timezoneDictionary); err != nil {
+		return 0, nil, err
+	}
 	tableCount, ok := readUint32(pageData, &offset)
 	if !ok {
 		return 0, nil, errCorruptedCatalogPage
 	}
 
-	cat := &CatalogData{Version: version, Tables: make([]CatalogTable, 0, tableCount)}
+	cat := &CatalogData{
+		Version:              version,
+		DefaultTimezone:      defaultTimezone,
+		TimezoneBasisVersion: timezoneBasisVersion,
+		TimezoneDictionary:   append([]string(nil), timezoneDictionary...),
+		Tables:               make([]CatalogTable, 0, tableCount),
+	}
 	for i := uint32(0); i < tableCount; i++ {
 		name, ok := readString(pageData, &offset)
 		if !ok || name == "" {
@@ -299,6 +340,29 @@ func decodeCatalogPayload(pageData []byte) (int, *CatalogData, error) {
 	}
 
 	return offset, cat, nil
+}
+
+func validateCatalogTemporalMetadata(defaultTimezone string, timezoneBasisVersion string, timezoneDictionary []string) error {
+	if defaultTimezone == "" && timezoneBasisVersion == "" && len(timezoneDictionary) == 0 {
+		return nil
+	}
+	if defaultTimezone == "" || timezoneBasisVersion == "" || len(timezoneDictionary) == 0 {
+		return errCorruptedCatalogPage
+	}
+	if timezoneDictionary[0] != defaultTimezone {
+		return errCorruptedCatalogPage
+	}
+	seen := make(map[string]struct{}, len(timezoneDictionary))
+	for _, zone := range timezoneDictionary {
+		if zone == "" {
+			return errCorruptedCatalogPage
+		}
+		if _, exists := seen[zone]; exists {
+			return errCorruptedCatalogPage
+		}
+		seen[zone] = struct{}{}
+	}
+	return nil
 }
 
 // SaveCatalog encodes the catalog into the smallest valid CAT/DIR representation.

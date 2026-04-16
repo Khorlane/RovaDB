@@ -75,6 +75,10 @@ type DB struct {
 	defaultTimezone string
 	defaultLocation *time.Location
 
+	catalogDefaultTimezone      string
+	catalogTimezoneBasisVersion string
+	catalogTimezoneDictionary   []string
+
 	afterJournalWriteHook func() error
 	afterDatabaseSyncHook func() error
 
@@ -110,6 +114,14 @@ func Open(path string) (*DB, error) {
 func OpenWithOptions(path string, opts OpenOptions) (*DB, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, ErrInvalidArgument
+	}
+	creatingNewDB := false
+	if _, err := os.Stat(path); err == nil {
+		creatingNewDB = false
+	} else if errors.Is(err, os.ErrNotExist) {
+		creatingNewDB = true
+	} else {
+		return nil, wrapStorageError(err)
 	}
 	defaultTimezone, defaultLocation, err := resolveDefaultTimezone(opts)
 	if err != nil {
@@ -240,6 +252,21 @@ func OpenWithOptions(path string, opts OpenOptions) (*DB, error) {
 		_ = file.Close()
 		return nil, wrapStorageError(err)
 	}
+	catalogDefaultTimezone, catalogTimezoneBasisVersion, catalogTimezoneDictionary, err := catalogTemporalMetadataForOpen(catalog, creatingNewDB, defaultTimezone)
+	if err != nil {
+		_ = pager.Close()
+		_ = file.Close()
+		return nil, err
+	}
+	if catalogDefaultTimezone != "" {
+		defaultLocation, err = temporal.LoadLocation(catalogDefaultTimezone)
+		if err != nil {
+			_ = pager.Close()
+			_ = file.Close()
+			return nil, fmt.Errorf("open: invalid persisted default timezone %q: %w", catalogDefaultTimezone, newStorageError("corrupted catalog page"))
+		}
+		defaultTimezone = catalogDefaultTimezone
+	}
 	tables, err := tablesFromCatalog(catalog)
 	if err != nil {
 		_ = pager.Close()
@@ -252,16 +279,19 @@ func OpenWithOptions(path string, opts OpenOptions) (*DB, error) {
 		return nil, err
 	}
 	db := &DB{
-		path:                    path,
-		file:                    file,
-		pager:                   pager,
-		pool:                    pool,
-		tables:                  tables,
-		defaultTimezone:         defaultTimezone,
-		defaultLocation:         defaultLocation,
-		freeListHead:            freeListHead,
-		lastCheckpointLSN:       checkpointMeta.LastCheckpointLSN,
-		lastCheckpointPageCount: checkpointMeta.LastCheckpointPageCount,
+		path:                        path,
+		file:                        file,
+		pager:                       pager,
+		pool:                        pool,
+		tables:                      tables,
+		defaultTimezone:             defaultTimezone,
+		defaultLocation:             defaultLocation,
+		catalogDefaultTimezone:      catalogDefaultTimezone,
+		catalogTimezoneBasisVersion: catalogTimezoneBasisVersion,
+		catalogTimezoneDictionary:   append([]string(nil), catalogTimezoneDictionary...),
+		freeListHead:                freeListHead,
+		lastCheckpointLSN:           checkpointMeta.LastCheckpointLSN,
+		lastCheckpointPageCount:     checkpointMeta.LastCheckpointPageCount,
 	}
 	if err := db.reconcileSystemCatalogOnOpen(tables); err != nil {
 		_ = pager.Close()
@@ -311,6 +341,16 @@ func resolveDefaultTimezone(opts OpenOptions) (string, *time.Location, error) {
 		return "", nil, fmt.Errorf("open: invalid default timezone %q: %s: %w", opts.DefaultTimezone, err, ErrInvalidArgument)
 	}
 	return location.String(), location, nil
+}
+
+func catalogTemporalMetadataForOpen(cat *storage.CatalogData, creatingNewDB bool, configuredDefaultTimezone string) (string, string, []string, error) {
+	if cat != nil && cat.DefaultTimezone != "" {
+		return cat.DefaultTimezone, cat.TimezoneBasisVersion, append([]string(nil), cat.TimezoneDictionary...), nil
+	}
+	if !creatingNewDB || configuredDefaultTimezone == "" {
+		return "", "", nil, nil
+	}
+	return configuredDefaultTimezone, temporal.CurrentTimezoneBasisVersion, []string{configuredDefaultTimezone}, nil
 }
 
 func rejectOrphanWALOnCreate(path string) error {
@@ -1974,7 +2014,7 @@ func (db *DB) buildCatalogPageData(stagedTables map[string]*executor.Table, page
 		freeListHead = allocator.FreePage.HeadPageID
 		return storage.PageID(allocated), !reused, nil
 	}
-	return storage.PrepareCatalogWritePlanWithRootMappings(catalogFromTables(stagedTables), directoryRootMappingsFromTables(stagedTables), currentMode, currentOverflowHead, currentOverflowCount, db.pager, storage.CurrentDBFormatVersion, &freeListHead, storage.DirectoryCheckpointMetadata{
+	return storage.PrepareCatalogWritePlanWithRootMappings(db.catalogFromTables(stagedTables), directoryRootMappingsFromTables(stagedTables), currentMode, currentOverflowHead, currentOverflowCount, db.pager, storage.CurrentDBFormatVersion, &freeListHead, storage.DirectoryCheckpointMetadata{
 		LastCheckpointLSN:       db.lastCheckpointLSN,
 		LastCheckpointPageCount: db.lastCheckpointPageCount,
 	}, allocateOverflowPage)
@@ -3029,14 +3069,19 @@ func clearLoadedRows(tables map[string]*executor.Table) {
 	}
 }
 
-func catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
+func (db *DB) catalogFromTables(tables map[string]*executor.Table) *storage.CatalogData {
 	names := make([]string, 0, len(tables))
 	for name := range tables {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
-	catalog := &storage.CatalogData{Tables: make([]storage.CatalogTable, 0, len(names))}
+	catalog := &storage.CatalogData{
+		DefaultTimezone:      db.catalogDefaultTimezone,
+		TimezoneBasisVersion: db.catalogTimezoneBasisVersion,
+		TimezoneDictionary:   append([]string(nil), db.catalogTimezoneDictionary...),
+		Tables:               make([]storage.CatalogTable, 0, len(names)),
+	}
 	for _, name := range names {
 		table := tables[name]
 		entry := storage.CatalogTable{
