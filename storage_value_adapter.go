@@ -1,12 +1,50 @@
 package rovadb
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/planner"
 	"github.com/Khorlane/RovaDB/internal/storage"
 )
+
+type timestampNormalizationContext struct {
+	defaultTimezone string
+	location        *time.Location
+	dictionary      []string
+	resolvedZoneID  int16
+	zoneIDReady     bool
+}
+
+func newTimestampNormalizationContext(defaultTimezone string, location *time.Location, dictionary []string) *timestampNormalizationContext {
+	return &timestampNormalizationContext{
+		defaultTimezone: defaultTimezone,
+		location:        location,
+		dictionary:      dictionary,
+	}
+}
+
+func (ctx *timestampNormalizationContext) defaultZoneID() (int16, error) {
+	if ctx == nil || ctx.defaultTimezone == "" || ctx.location == nil {
+		return 0, newExecError("unresolved TIMESTAMP requires configured database timezone")
+	}
+	if ctx.zoneIDReady {
+		return ctx.resolvedZoneID, nil
+	}
+	for i, zone := range ctx.dictionary {
+		if zone != ctx.defaultTimezone {
+			continue
+		}
+		if i > 32767 {
+			return 0, fmt.Errorf("timestamp normalization: timezone dictionary exceeds zone_id range: %w", newStorageError("corrupted catalog page"))
+		}
+		ctx.resolvedZoneID = int16(i)
+		ctx.zoneIDReady = true
+		return ctx.resolvedZoneID, nil
+	}
+	return 0, fmt.Errorf("timestamp normalization: default timezone %q missing from catalog dictionary: %w", ctx.defaultTimezone, newStorageError("corrupted catalog page"))
+}
 
 func storageValueFromParser(value parser.Value) storage.Value {
 	switch value.Kind {
@@ -115,96 +153,164 @@ func publicValueFromParser(value parser.Value) any {
 	}
 }
 
-func normalizeStatementTimestampValues(stmt any, location *time.Location) {
+func normalizeStatementTimestampValues(stmt any, ctx *timestampNormalizationContext) error {
 	switch stmt := stmt.(type) {
 	case *parser.CreateTableStmt:
 		for i := range stmt.Columns {
-			normalizeParserValueTimestamp(&stmt.Columns[i].DefaultValue, location)
+			if err := normalizeParserValueTimestamp(&stmt.Columns[i].DefaultValue, ctx); err != nil {
+				return err
+			}
 		}
 	case *parser.AlterTableAddColumnStmt:
-		normalizeParserValueTimestamp(&stmt.Column.DefaultValue, location)
+		if err := normalizeParserValueTimestamp(&stmt.Column.DefaultValue, ctx); err != nil {
+			return err
+		}
 	case *parser.InsertStmt:
 		for i := range stmt.Values {
-			normalizeParserValueTimestamp(&stmt.Values[i], location)
+			if err := normalizeParserValueTimestamp(&stmt.Values[i], ctx); err != nil {
+				return err
+			}
 		}
 		for _, expr := range stmt.ValueExprs {
-			normalizeParserValueExprTimestamps(expr, location)
+			if err := normalizeParserValueExprTimestamps(expr, ctx); err != nil {
+				return err
+			}
 		}
 	case *parser.UpdateStmt:
 		for i := range stmt.Assignments {
-			normalizeParserValueTimestamp(&stmt.Assignments[i].Value, location)
-			normalizeParserValueExprTimestamps(stmt.Assignments[i].Expr, location)
+			if err := normalizeParserValueTimestamp(&stmt.Assignments[i].Value, ctx); err != nil {
+				return err
+			}
+			if err := normalizeParserValueExprTimestamps(stmt.Assignments[i].Expr, ctx); err != nil {
+				return err
+			}
 		}
-		normalizeParserPredicateTimestamps(stmt.Predicate, location)
-		normalizeParserWhereTimestamps(stmt.Where, location)
+		if err := normalizeParserPredicateTimestamps(stmt.Predicate, ctx); err != nil {
+			return err
+		}
+		if err := normalizeParserWhereTimestamps(stmt.Where, ctx); err != nil {
+			return err
+		}
 	case *parser.DeleteStmt:
-		normalizeParserPredicateTimestamps(stmt.Predicate, location)
-		normalizeParserWhereTimestamps(stmt.Where, location)
+		if err := normalizeParserPredicateTimestamps(stmt.Predicate, ctx); err != nil {
+			return err
+		}
+		if err := normalizeParserWhereTimestamps(stmt.Where, ctx); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func normalizeSelectPlanTimestampValues(plan *planner.SelectPlan, location *time.Location) {
+func normalizeSelectPlanTimestampValues(plan *planner.SelectPlan, ctx *timestampNormalizationContext) error {
 	if plan == nil {
-		return
+		return nil
 	}
 	if plan.Query != nil {
-		normalizePlannerQueryTimestampValues(plan.Query, location)
+		if err := normalizePlannerQueryTimestampValues(plan.Query, ctx); err != nil {
+			return err
+		}
 	}
 	if plan.IndexScan != nil {
-		normalizePlannerValueTimestamp(&plan.IndexScan.LookupValue, location)
+		if err := normalizePlannerValueTimestamp(&plan.IndexScan.LookupValue, ctx); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func normalizePlannerQueryTimestampValues(query *planner.SelectQuery, location *time.Location) {
+func normalizePlannerQueryTimestampValues(query *planner.SelectQuery, ctx *timestampNormalizationContext) error {
 	if query == nil {
-		return
+		return nil
 	}
 	for _, expr := range query.ProjectionExprs {
-		normalizePlannerValueExprTimestamps(expr, location)
+		if err := normalizePlannerValueExprTimestamps(expr, ctx); err != nil {
+			return err
+		}
 	}
-	normalizePlannerPredicateTimestamps(query.Predicate, location)
-	normalizePlannerWhereTimestamps(query.Where, location)
+	if err := normalizePlannerPredicateTimestamps(query.Predicate, ctx); err != nil {
+		return err
+	}
+	if err := normalizePlannerWhereTimestamps(query.Where, ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
-func normalizePlannerWhereTimestamps(where *planner.WhereClause, location *time.Location) {
+func normalizePlannerWhereTimestamps(where *planner.WhereClause, ctx *timestampNormalizationContext) error {
 	if where == nil {
-		return
+		return nil
 	}
 	for i := range where.Items {
-		normalizePlannerValueTimestamp(&where.Items[i].Condition.Right, location)
-		normalizePlannerValueExprTimestamps(where.Items[i].Condition.LeftExpr, location)
-		normalizePlannerValueExprTimestamps(where.Items[i].Condition.RightExpr, location)
+		if err := normalizePlannerValueTimestamp(&where.Items[i].Condition.Right, ctx); err != nil {
+			return err
+		}
+		if err := normalizePlannerValueExprTimestamps(where.Items[i].Condition.LeftExpr, ctx); err != nil {
+			return err
+		}
+		if err := normalizePlannerValueExprTimestamps(where.Items[i].Condition.RightExpr, ctx); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func normalizePlannerPredicateTimestamps(predicate *planner.PredicateExpr, location *time.Location) {
+func normalizePlannerPredicateTimestamps(predicate *planner.PredicateExpr, ctx *timestampNormalizationContext) error {
 	if predicate == nil {
-		return
+		return nil
 	}
 	if predicate.Comparison != nil {
-		normalizePlannerValueTimestamp(&predicate.Comparison.Right, location)
-		normalizePlannerValueExprTimestamps(predicate.Comparison.LeftExpr, location)
-		normalizePlannerValueExprTimestamps(predicate.Comparison.RightExpr, location)
+		if err := normalizePlannerValueTimestamp(&predicate.Comparison.Right, ctx); err != nil {
+			return err
+		}
+		if err := normalizePlannerValueExprTimestamps(predicate.Comparison.LeftExpr, ctx); err != nil {
+			return err
+		}
+		if err := normalizePlannerValueExprTimestamps(predicate.Comparison.RightExpr, ctx); err != nil {
+			return err
+		}
 	}
-	normalizePlannerPredicateTimestamps(predicate.Left, location)
-	normalizePlannerPredicateTimestamps(predicate.Right, location)
-	normalizePlannerPredicateTimestamps(predicate.Inner, location)
+	if err := normalizePlannerPredicateTimestamps(predicate.Left, ctx); err != nil {
+		return err
+	}
+	if err := normalizePlannerPredicateTimestamps(predicate.Right, ctx); err != nil {
+		return err
+	}
+	if err := normalizePlannerPredicateTimestamps(predicate.Inner, ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
-func normalizePlannerValueExprTimestamps(expr *planner.ValueExpr, location *time.Location) {
+func normalizePlannerValueExprTimestamps(expr *planner.ValueExpr, ctx *timestampNormalizationContext) error {
 	if expr == nil {
-		return
+		return nil
 	}
-	normalizePlannerValueTimestamp(&expr.Value, location)
-	normalizePlannerValueExprTimestamps(expr.Left, location)
-	normalizePlannerValueExprTimestamps(expr.Right, location)
-	normalizePlannerValueExprTimestamps(expr.Arg, location)
-	normalizePlannerValueExprTimestamps(expr.Inner, location)
+	if err := normalizePlannerValueTimestamp(&expr.Value, ctx); err != nil {
+		return err
+	}
+	if err := normalizePlannerValueExprTimestamps(expr.Left, ctx); err != nil {
+		return err
+	}
+	if err := normalizePlannerValueExprTimestamps(expr.Right, ctx); err != nil {
+		return err
+	}
+	if err := normalizePlannerValueExprTimestamps(expr.Arg, ctx); err != nil {
+		return err
+	}
+	if err := normalizePlannerValueExprTimestamps(expr.Inner, ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
-func normalizePlannerValueTimestamp(value *planner.Value, location *time.Location) {
+func normalizePlannerValueTimestamp(value *planner.Value, ctx *timestampNormalizationContext) error {
 	if value == nil || value.Kind != planner.ValueKindTimestampUnresolved {
-		return
+		return nil
+	}
+	zoneID, err := ctx.defaultZoneID()
+	if err != nil {
+		return err
 	}
 	millis := resolveTimestampComponentsMillis(
 		value.TimestampYear,
@@ -213,50 +319,86 @@ func normalizePlannerValueTimestamp(value *planner.Value, location *time.Locatio
 		value.TimestampHour,
 		value.TimestampMinute,
 		value.TimestampSecond,
-		location,
+		ctx.location,
 	)
-	*value = planner.TimestampValue(millis, 0)
+	*value = planner.TimestampValue(millis, zoneID)
+	return nil
 }
 
-func normalizeParserWhereTimestamps(where *parser.WhereClause, location *time.Location) {
+func normalizeParserWhereTimestamps(where *parser.WhereClause, ctx *timestampNormalizationContext) error {
 	if where == nil {
-		return
+		return nil
 	}
 	for i := range where.Items {
-		normalizeParserValueTimestamp(&where.Items[i].Condition.Right, location)
-		normalizeParserValueExprTimestamps(where.Items[i].Condition.LeftExpr, location)
-		normalizeParserValueExprTimestamps(where.Items[i].Condition.RightExpr, location)
+		if err := normalizeParserValueTimestamp(&where.Items[i].Condition.Right, ctx); err != nil {
+			return err
+		}
+		if err := normalizeParserValueExprTimestamps(where.Items[i].Condition.LeftExpr, ctx); err != nil {
+			return err
+		}
+		if err := normalizeParserValueExprTimestamps(where.Items[i].Condition.RightExpr, ctx); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func normalizeParserPredicateTimestamps(predicate *parser.PredicateExpr, location *time.Location) {
+func normalizeParserPredicateTimestamps(predicate *parser.PredicateExpr, ctx *timestampNormalizationContext) error {
 	if predicate == nil {
-		return
+		return nil
 	}
 	if predicate.Comparison != nil {
-		normalizeParserValueTimestamp(&predicate.Comparison.Right, location)
-		normalizeParserValueExprTimestamps(predicate.Comparison.LeftExpr, location)
-		normalizeParserValueExprTimestamps(predicate.Comparison.RightExpr, location)
+		if err := normalizeParserValueTimestamp(&predicate.Comparison.Right, ctx); err != nil {
+			return err
+		}
+		if err := normalizeParserValueExprTimestamps(predicate.Comparison.LeftExpr, ctx); err != nil {
+			return err
+		}
+		if err := normalizeParserValueExprTimestamps(predicate.Comparison.RightExpr, ctx); err != nil {
+			return err
+		}
 	}
-	normalizeParserPredicateTimestamps(predicate.Left, location)
-	normalizeParserPredicateTimestamps(predicate.Right, location)
-	normalizeParserPredicateTimestamps(predicate.Inner, location)
+	if err := normalizeParserPredicateTimestamps(predicate.Left, ctx); err != nil {
+		return err
+	}
+	if err := normalizeParserPredicateTimestamps(predicate.Right, ctx); err != nil {
+		return err
+	}
+	if err := normalizeParserPredicateTimestamps(predicate.Inner, ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
-func normalizeParserValueExprTimestamps(expr *parser.ValueExpr, location *time.Location) {
+func normalizeParserValueExprTimestamps(expr *parser.ValueExpr, ctx *timestampNormalizationContext) error {
 	if expr == nil {
-		return
+		return nil
 	}
-	normalizeParserValueTimestamp(&expr.Value, location)
-	normalizeParserValueExprTimestamps(expr.Left, location)
-	normalizeParserValueExprTimestamps(expr.Right, location)
-	normalizeParserValueExprTimestamps(expr.Arg, location)
-	normalizeParserValueExprTimestamps(expr.Inner, location)
+	if err := normalizeParserValueTimestamp(&expr.Value, ctx); err != nil {
+		return err
+	}
+	if err := normalizeParserValueExprTimestamps(expr.Left, ctx); err != nil {
+		return err
+	}
+	if err := normalizeParserValueExprTimestamps(expr.Right, ctx); err != nil {
+		return err
+	}
+	if err := normalizeParserValueExprTimestamps(expr.Arg, ctx); err != nil {
+		return err
+	}
+	if err := normalizeParserValueExprTimestamps(expr.Inner, ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
-func normalizeParserValueTimestamp(value *parser.Value, location *time.Location) {
+func normalizeParserValueTimestamp(value *parser.Value, ctx *timestampNormalizationContext) error {
 	if value == nil || value.Kind != parser.ValueKindTimestampUnresolved {
-		return
+		return nil
+	}
+	zoneID, err := ctx.defaultZoneID()
+	if err != nil {
+		return err
 	}
 	millis := resolveTimestampComponentsMillis(
 		value.TimestampYear,
@@ -265,12 +407,16 @@ func normalizeParserValueTimestamp(value *parser.Value, location *time.Location)
 		value.TimestampHour,
 		value.TimestampMinute,
 		value.TimestampSecond,
-		location,
+		ctx.location,
 	)
-	*value = parser.TimestampValue(millis, 0)
+	*value = parser.TimestampValue(millis, zoneID)
+	return nil
 }
 
-func resolveTimestampComponentsMillis(year, month, day, hour, minute, second int32, _ *time.Location) int64 {
+func resolveTimestampComponentsMillis(year, month, day, hour, minute, second int32, location *time.Location) int64 {
+	if location == nil {
+		location = time.UTC
+	}
 	return time.Date(
 		int(year),
 		time.Month(month),
@@ -279,6 +425,6 @@ func resolveTimestampComponentsMillis(year, month, day, hour, minute, second int
 		int(minute),
 		int(second),
 		0,
-		time.UTC,
+		location,
 	).UnixMilli()
 }

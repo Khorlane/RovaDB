@@ -5,7 +5,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/storage"
 	"github.com/Khorlane/RovaDB/internal/temporal"
 )
@@ -188,6 +190,44 @@ func TestOpenReloadsPersistedTemporalTimezoneMetadata(t *testing.T) {
 	}
 	if len(reopened.catalogTimezoneDictionary) != 1 || reopened.catalogTimezoneDictionary[0] != "America/New_York" {
 		t.Fatalf("reopened.catalogTimezoneDictionary = %v, want [%q]", reopened.catalogTimezoneDictionary, "America/New_York")
+	}
+}
+
+func TestTxExecAndQueryNormalizeTimestampsThroughDatabaseTimezoneContext(t *testing.T) {
+	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
+	if err != nil {
+		t.Fatalf("OpenWithOptions() error = %v", err)
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	if _, err := tx.Exec("CREATE TABLE events (id INT, recorded_at TIMESTAMP)"); err != nil {
+		t.Fatalf("Tx.Exec(create) error = %v", err)
+	}
+	if _, err := tx.Exec("INSERT INTO events VALUES (?, ?)", int32(1), "2026-04-10 13:45:21"); err != nil {
+		t.Fatalf("Tx.Exec(insert) error = %v", err)
+	}
+
+	location, err := temporal.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("LoadLocation() error = %v", err)
+	}
+	wantTimestamp := time.Date(2026, time.April, 10, 13, 45, 21, 0, location).UTC()
+	wantValue := parser.TimestampValue(wantTimestamp.UnixMilli(), 0)
+
+	if got := tx.tables["events"].Rows[0][1]; got != wantValue {
+		t.Fatalf("tx.tables[events].Rows[0][1] = %#v, want %#v", got, wantValue)
+	}
+
+	var got time.Time
+	if err := tx.QueryRow("SELECT recorded_at FROM events WHERE recorded_at = '2026-04-10 13:45:21'").Scan(&got); err != nil {
+		t.Fatalf("Tx.QueryRow().Scan() error = %v", err)
+	}
+	if !got.Equal(wantTimestamp) {
+		t.Fatalf("Tx.QueryRow().Scan() = %v, want %v", got, wantTimestamp)
 	}
 }
 

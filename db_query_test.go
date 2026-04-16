@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Khorlane/RovaDB/internal/storage"
+	"github.com/Khorlane/RovaDB/internal/temporal"
 )
 
 // General query behavior
@@ -3006,7 +3007,7 @@ func TestQuerySelectOrderByStringDesc(t *testing.T) {
 }
 
 func TestQuerySelectOrderByTemporalFamilies(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -3379,7 +3380,7 @@ func TestQuerySelectWhereRealTypeMismatch(t *testing.T) {
 }
 
 func TestQuerySelectWhereTemporalComparisons(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -3423,7 +3424,7 @@ func TestQuerySelectWhereTemporalComparisons(t *testing.T) {
 }
 
 func TestQuerySelectWhereTemporalTypeMismatch(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -3462,7 +3463,7 @@ func TestQuerySelectWhereTemporalTypeMismatch(t *testing.T) {
 }
 
 func TestQueryTemporalMaterializationAndScan(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -3476,7 +3477,11 @@ func TestQueryTemporalMaterializationAndScan(t *testing.T) {
 	}
 
 	wantDate := time.Date(2026, time.April, 15, 0, 0, 0, 0, time.UTC)
-	wantTimestamp := time.Date(2026, time.April, 15, 16, 17, 18, 0, time.UTC)
+	location, err := temporal.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("LoadLocation() error = %v", err)
+	}
+	wantTimestamp := time.Date(2026, time.April, 15, 16, 17, 18, 0, location).UTC()
 	wantTime, err := NewTime(12, 34, 56)
 	if err != nil {
 		t.Fatalf("NewTime() error = %v", err)
@@ -3526,7 +3531,7 @@ func TestQueryTemporalMaterializationAndScan(t *testing.T) {
 }
 
 func TestQueryTemporalScanTypeMismatch(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}

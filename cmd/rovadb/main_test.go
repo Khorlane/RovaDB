@@ -889,9 +889,15 @@ func TestRunSelectFormatsDateUsingColumnTypes(t *testing.T) {
 	var errOut bytes.Buffer
 
 	path := filepath.Join(t.TempDir(), "test.db")
+	db, err := rovadb.OpenWithOptions(path, rovadb.OpenOptions{DefaultTimezone: "UTC"})
+	if err != nil {
+		t.Fatalf("OpenWithOptions() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close() error = %v", err)
+	}
 	input := strings.Join([]string{
 		"open " + path,
-		"y",
 		"CREATE TABLE events (id INT, event_date DATE, event_time TIME, recorded_at TIMESTAMP)",
 		"INSERT INTO events VALUES (1, '2026-04-15', '13:14:15', '2026-04-15 13:14:15')",
 		"SELECT id, event_date, event_time, recorded_at FROM events",

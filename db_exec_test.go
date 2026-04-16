@@ -2,9 +2,12 @@ package rovadb
 
 import (
 	"errors"
-	"github.com/Khorlane/RovaDB/internal/parser"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Khorlane/RovaDB/internal/parser"
+	"github.com/Khorlane/RovaDB/internal/temporal"
 )
 
 func TestExecCreateTable(t *testing.T) {
@@ -680,7 +683,7 @@ func TestExecEngineOwnedIntegerLiteralsAndDefaultsRemainValidForTypedIntegerWrit
 }
 
 func TestExecTemporalWritesAcceptMatchingFamiliesAndCanonicalPlaceholderStrings(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "UTC"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -739,7 +742,7 @@ func TestExecTemporalWritesAcceptMatchingFamiliesAndCanonicalPlaceholderStrings(
 }
 
 func TestExecTemporalWritesRejectMismatchedAndMalformedPlaceholderValues(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "UTC"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -827,6 +830,62 @@ func TestExecTemporalWritesRejectMismatchedAndMalformedPlaceholderValues(t *test
 			}
 		})
 	}
+}
+
+func TestExecTimestampWritesNormalizeThroughDatabaseTimezoneContext(t *testing.T) {
+	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
+	if err != nil {
+		t.Fatalf("OpenWithOptions() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE events (id INT, recorded_at TIMESTAMP)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO events VALUES (1, '2026-04-10 13:45:21')"); err != nil {
+		t.Fatalf("Exec(insert literal) error = %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO events VALUES (?, ?)", int32(2), "2026-04-10 13:45:21"); err != nil {
+		t.Fatalf("Exec(insert placeholder) error = %v", err)
+	}
+	if err := db.loadRowsIntoTables(db.tables, "events"); err != nil {
+		t.Fatalf("loadRowsIntoTables() error = %v", err)
+	}
+
+	location, err := temporal.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("LoadLocation() error = %v", err)
+	}
+	wantMillis := time.Date(2026, time.April, 10, 13, 45, 21, 0, location).UnixMilli()
+	wantTimestamp := parser.TimestampValue(wantMillis, 0)
+
+	rows := db.tables["events"].Rows
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2", len(rows))
+	}
+	for i, row := range rows {
+		if len(row) != 2 {
+			t.Fatalf("row %d width = %d, want 2", i, len(row))
+		}
+		if row[1] != wantTimestamp {
+			t.Fatalf("row %d recorded_at = %#v, want %#v", i, row[1], wantTimestamp)
+		}
+	}
+}
+
+func TestExecTimestampWritesFailWithoutDatabaseTimezoneContext(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE events (id INT, recorded_at TIMESTAMP)"); err != nil {
+		t.Fatalf("Exec(create) error = %v", err)
+	}
+
+	_, err = db.Exec("INSERT INTO events VALUES (1, '2026-04-10 13:45:21')")
+	assertErrorContainsAll(t, err, "unresolved TIMESTAMP", "configured database timezone")
 }
 
 func TestExecTypedIntegerWritesRejectOutOfRangeSQLLiteralsByTargetWidth(t *testing.T) {

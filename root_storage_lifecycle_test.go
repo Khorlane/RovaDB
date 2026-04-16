@@ -10,6 +10,7 @@ import (
 	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/planner"
 	"github.com/Khorlane/RovaDB/internal/storage"
+	"github.com/Khorlane/RovaDB/internal/temporal"
 	"github.com/Khorlane/RovaDB/internal/txn"
 	"os"
 	"path/filepath"
@@ -110,7 +111,7 @@ func TestTableNamesForSelectUsesExecutorAccessPathForIndexScan(t *testing.T) {
 func TestCommitFlushesDirtyPages(t *testing.T) {
 	path := testDBPath(t)
 
-	db, err := Open(path)
+	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -174,7 +175,7 @@ func TestCommitFlushesDirtyPages(t *testing.T) {
 func TestExecMutatingStatementRollbackKeepsCommittedStateAcrossReopen(t *testing.T) {
 	path := testDBPath(t)
 
-	db, err := Open(path)
+	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -273,7 +274,7 @@ func TestCommitErrorPropagates(t *testing.T) {
 func TestJournaledCommitCreatesAndRemovesJournal(t *testing.T) {
 	path := testDBPath(t)
 
-	db, err := Open(path)
+	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -2023,7 +2024,7 @@ func TestTypedIntegerCloseReopenPreservesExactWidthsAcrossMaterializeAndScan(t *
 func TestTemporalCloseReopenPreservesPublicMaterializationAndScan(t *testing.T) {
 	path := testDBPath(t)
 
-	db, err := Open(path)
+	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -2041,7 +2042,11 @@ func TestTemporalCloseReopenPreservesPublicMaterializationAndScan(t *testing.T) 
 	defer db.Close()
 
 	wantDate := time.Date(2026, time.April, 15, 0, 0, 0, 0, time.UTC)
-	wantTimestamp := time.Date(2026, time.April, 15, 16, 17, 18, 0, time.UTC)
+	location, err := temporal.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("LoadLocation() error = %v", err)
+	}
+	wantTimestamp := time.Date(2026, time.April, 15, 16, 17, 18, 0, location).UTC()
 	wantTime, err := NewTime(12, 34, 56)
 	if err != nil {
 		t.Fatalf("NewTime() error = %v", err)
