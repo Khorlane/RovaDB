@@ -1042,8 +1042,7 @@ func sortSelectRows(rows [][]parser.Value, sel *runtimeSelectQuery, table *Table
 			return false
 		}
 		for idxPos, resolver := range resolvers {
-			left := parser.Value{}
-			right := parser.Value{}
+			var left, right parser.Value
 			var err error
 			if resolver.expr != nil {
 				left, err = evalSelectValueExpr(rows[i], sel, table, resolver.expr)

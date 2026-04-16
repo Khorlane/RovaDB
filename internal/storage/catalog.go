@@ -757,15 +757,6 @@ func catalogColumnTypeValid(columnType uint8) bool {
 	}
 }
 
-func catalogColumnTypeIsInteger(columnType uint8) bool {
-	switch columnType {
-	case CatalogColumnTypeSmallInt, CatalogColumnTypeInt, CatalogColumnTypeBigInt:
-		return true
-	default:
-		return false
-	}
-}
-
 func readCatalogIndex(data []byte, offset *int, columnNames map[string]struct{}, indexNames map[string]struct{}) (CatalogIndex, error) {
 	name, ok := readString(data, offset)
 	if !ok || name == "" {

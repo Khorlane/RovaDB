@@ -285,11 +285,6 @@ func normalizeTypedIntegerValueForColumn(value parser.Value, exactType parser.Bo
 	}
 }
 
-func validateColumnValue(table *Table, columnIndex int, value parser.Value) error {
-	_, err := normalizeColumnValue(table, columnIndex, value)
-	return err
-}
-
 func newNotNullConstraintError(tableName, columnName string) error {
 	if tableName == "" && columnName == "" {
 		return newExecError("NOT NULL constraint failed")

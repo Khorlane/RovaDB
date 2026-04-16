@@ -7,13 +7,11 @@ import (
 
 var (
 	errTableAlreadyExists      = newExecError("table already exists")
-	errTableDoesNotExist       = newExecError("table not found")
 	errWrongValueCount         = newExecError("column count mismatch")
 	errColumnDoesNotExist      = newExecError("column not found")
 	errTypeMismatch            = newExecError("type mismatch")
 	errUnresolvedTimestamp     = newExecError("unresolved TIMESTAMP requires database-context normalization")
 	errUnsupportedStatement    = newExecError("unsupported query form")
-	errNotImplemented          = newExecError("not implemented")
 	errCountOrderByUnsupported = newExecError("unsupported query form")
 	errInvalidSelectPlan       = newExecError("invalid select plan")
 )

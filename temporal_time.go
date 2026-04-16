@@ -32,13 +32,6 @@ func NewTime(hour, minute, second int) (Time, error) {
 	}, nil
 }
 
-func newTimeFromSecondsSinceMidnight(seconds int32) (Time, error) {
-	if seconds < 0 || seconds > maxSecondsInSQLTime {
-		return Time{}, errInvalidTime
-	}
-	return Time{secondsSinceMidnight: seconds}, nil
-}
-
 func (t Time) Hour() int {
 	return int(t.secondsSinceMidnight) / secondsPerHour
 }

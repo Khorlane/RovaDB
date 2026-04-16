@@ -398,7 +398,7 @@ func (db *DB) insertRowIntoPhysicalStorageState(table *executor.Table, row []par
 	if targetDataPage == 0 {
 		var spaceMapPage []byte
 		if firstSpaceMapID == 0 {
-			targetSpaceMapPage, spaceMapPage, err = db.allocatePageImage(nextFreshID, staged, order, func(pageID storage.PageID) []byte {
+			targetSpaceMapPage, _, err = db.allocatePageImage(nextFreshID, staged, order, func(pageID storage.PageID) []byte {
 				return storage.InitSpaceMapPage(uint32(pageID), table.TableID)
 			})
 			if err != nil {
@@ -430,10 +430,6 @@ func (db *DB) insertRowIntoPhysicalStorageState(table *executor.Table, row []par
 				if err := storage.SetSpaceMapNextPageID(spaceMapPage, uint32(targetSpaceMapPage)); err != nil {
 					return storage.RowLocator{}, wrapStorageError(err)
 				}
-				spaceMapPage, err = db.mutablePageImage(staged, order, targetSpaceMapPage)
-				if err != nil {
-					return storage.RowLocator{}, err
-				}
 				if err := storage.SetTableHeaderOwnedSpaceMapPageCount(headerPage, table.OwnedSpaceMapPageCount()+1); err != nil {
 					return storage.RowLocator{}, wrapStorageError(err)
 				}
@@ -461,14 +457,13 @@ func (db *DB) insertRowIntoPhysicalStorageState(table *executor.Table, row []par
 		if err != nil {
 			return storage.RowLocator{}, err
 		}
-		entryID, err := storage.AppendSpaceMapEntry(spaceMapPage, storage.SpaceMapEntry{
+		_, err = storage.AppendSpaceMapEntry(spaceMapPage, storage.SpaceMapEntry{
 			DataPageID:      targetDataPage,
 			FreeSpaceBucket: bucket,
 		})
 		if err != nil {
 			return storage.RowLocator{}, wrapStorageError(err)
 		}
-		targetEntryID = entryID
 		if err := storage.SetTableHeaderOwnedDataPageCount(headerPage, table.OwnedDataPageCount()+1); err != nil {
 			return storage.RowLocator{}, wrapStorageError(err)
 		}

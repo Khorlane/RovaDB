@@ -4190,18 +4190,6 @@ func wrapStorageError(err error) error {
 	return newStorageError(err.Error())
 }
 
-func padRowToSchema(row []parser.Value, width int) []parser.Value {
-	if len(row) >= width {
-		return row
-	}
-
-	padded := append([]parser.Value(nil), row...)
-	for len(padded) < width {
-		padded = append(padded, parser.NullValue())
-	}
-	return padded
-}
-
 func validateTables(tables map[string]*executor.Table) error {
 	for _, table := range tables {
 		if err := validateIndexConsistency(table); err != nil {

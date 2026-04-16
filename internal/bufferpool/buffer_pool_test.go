@@ -142,7 +142,7 @@ func TestGetCommittedPageLoadsDistinctPagesSeparately(t *testing.T) {
 func TestGetCommittedPageRejectsInvalidPageSize(t *testing.T) {
 	pool := New(2, &stubLoader{
 		pages: map[PageID][]byte{
-			3: []byte{0x01, 0x02},
+			3: {0x01, 0x02},
 		},
 	})
 

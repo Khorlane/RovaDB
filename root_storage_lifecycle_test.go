@@ -2811,7 +2811,7 @@ func TestCATDIROverflowRewriteReclaimsAndPagesBecomeReusable(t *testing.T) {
 		t.Fatalf("Close() largeA error = %v", err)
 	}
 
-	mode, head, count, freeListHead := readCATDIRStateForPath(t, path)
+	mode, head, count, _ := readCATDIRStateForPath(t, path)
 	if mode != storage.DirectoryCATDIRStorageModeOverflow {
 		t.Fatalf("CAT/DIR mode after largeA = %d, want %d", mode, storage.DirectoryCATDIRStorageModeOverflow)
 	}
@@ -2819,6 +2819,7 @@ func TestCATDIROverflowRewriteReclaimsAndPagesBecomeReusable(t *testing.T) {
 	if len(oldChainIDs) == 0 {
 		t.Fatal("old CAT/DIR overflow chain ids = empty, want non-empty")
 	}
+	var freeListHead uint32
 
 	db, err = Open(path)
 	if err != nil {
@@ -2832,7 +2833,7 @@ func TestCATDIROverflowRewriteReclaimsAndPagesBecomeReusable(t *testing.T) {
 		t.Fatalf("Close() largeB error = %v", err)
 	}
 
-	mode, head, count, freeListHead = readCATDIRStateForPath(t, path)
+	mode, _, _, freeListHead = readCATDIRStateForPath(t, path)
 	if mode != storage.DirectoryCATDIRStorageModeOverflow {
 		t.Fatalf("CAT/DIR mode after largeB = %d, want %d", mode, storage.DirectoryCATDIRStorageModeOverflow)
 	}

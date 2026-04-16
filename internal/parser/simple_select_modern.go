@@ -435,7 +435,7 @@ func (p *selectLiteralTokenParser) parseExprTokens(allowParen bool) (*Expr, bool
 		}
 		p.pos++
 
-		op := BinaryOpInvalid
+		var op BinaryOp
 		switch opTok.Kind {
 		case tokenPlus:
 			op = BinaryOpAdd
