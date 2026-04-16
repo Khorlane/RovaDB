@@ -357,12 +357,25 @@ Supported schema datatypes:
 - `TIME` materializes to the public `rovadb.Time` value
 - no implicit coercion exists between temporal families or between temporal and non-temporal types
 
+### Temporal Timezone Contract
+
+RovaDB requires an explicit database timezone context for temporal behavior that depends on timezone resolution.
+
+Required behavior:
+
+- the application must set the database default timezone using an IANA zone name
+- no implicit fallback to machine local timezone is allowed
+- UTC is recommended but not required
+- invalid or unsupported timezones are rejected
+- within the current canonical literal and binding surface, timezone-free `TIMESTAMP` payloads are interpreted using the configured database timezone context
+
 ### Temporal Write, Comparison, and Ordering Contract
 
 - `DATE` columns accept only `DATE` or `NULL`
 - `TIME` columns accept only `TIME` or `NULL`
 - `TIMESTAMP` columns accept only `TIMESTAMP` or `NULL`
 - temporal writes enforce exact family matching
+- timezone-free canonical `TIMESTAMP` inputs use the configured database timezone context before persistence
 - temporal predicates support `=`, `!=`, `<>`, `<`, `<=`, `>`, and `>=` only when both sides are the same temporal family
 - temporal `ORDER BY` is supported within the current query subset
 

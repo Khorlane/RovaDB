@@ -433,6 +433,100 @@ Required behavior:
 - catalog metadata must preserve the original declared temporal type exactly
 - reopen must preserve temporal values and declared temporal schema identity exactly
 
+### 3.11.1 Persisted Timezone Basis Contract
+
+Temporal durable correctness depends on persisted timezone metadata that can be validated at reopen time.
+
+Required behavior:
+
+- temporal storage that depends on timezone resolution must persist enough metadata to validate reopen against the same timezone-rule basis
+- timezone resolution uses Go timezone support with embedded tzdata rather than host OS timezone files
+- the storage engine does not accept best-effort reopen under a different timezone-rule basis
+- reopen under a mismatched timezone-rule basis is a hard failure
+
+### 3.11.2 Locked Physical Temporal Encodings
+
+The physical encodings are locked as follows.
+
+#### DATE
+
+`DATE` is stored as:
+
+- `int32 days_since_epoch`
+
+Locked meaning:
+
+- epoch is `1970-01-01`
+- day `0` is `1970-01-01`
+- the value represents a calendar-only date
+- no timezone component is stored
+- no time-of-day component is stored
+
+#### TIME
+
+`TIME` is stored as:
+
+- `int32 seconds_since_midnight`
+
+Locked meaning:
+
+- valid range is `0` through `86399`
+- the value represents a timezone-free clock time-of-day
+- no timezone component is stored
+- no date component is stored
+- no conversion through Unix epoch time is part of the `TIME` storage model
+
+#### TIMESTAMP
+
+`TIMESTAMP` is stored as:
+
+- `int64 milliseconds_since_epoch`
+- `int16 zone_id`
+
+Locked meaning:
+
+- epoch is `1970-01-01T00:00:00Z`
+- milliseconds are always UTC-based absolute time
+- the logical model is absolute time plus persisted timezone identity
+- `zone_id` preserves the resolved timezone identity used for the value
+- `zone_id` does not affect chronological ordering or comparison
+
+### 3.11.3 Timezone Dictionary Contract
+
+Persisted `TIMESTAMP` timezone identity uses a database-persisted timezone dictionary snapshot.
+
+Required behavior:
+
+- IANA zone names map to canonical `int16` IDs
+- the dictionary snapshot is part of the database's durable contract
+- persisted values reference that database-owned mapping through `zone_id`
+- zone IDs within a database snapshot must remain stable once written
+- zone IDs within a database snapshot must not be renumbered, reused, or silently repurposed
+- unknown or unsupported zones are rejected
+- the dictionary snapshot records the timezone-rule basis used when it was created
+
+### 3.11.4 Comparison and Ordering Truth
+
+Temporal durable truth must preserve the SQL-visible comparison model.
+
+That means:
+
+- `DATE` compares by calendar value
+- `TIME` compares numerically by `seconds_since_midnight`
+- `TIMESTAMP` compares by absolute chronological value using `milliseconds_since_epoch`
+- `zone_id` does not change comparison or ordering outcome for `TIMESTAMP`
+
+### 3.11.5 Determinism and Reproducibility
+
+Temporal durable behavior must remain deterministic.
+
+Required behavior:
+
+- stored timezone identity and the persisted timezone-rule basis are sufficient to preserve reproducible timestamp interpretation
+- embedded tzdata is part of the intended consistency model
+- the storage engine does not depend on host OS timezone files or network access for temporal correctness
+- reopen under a mismatched persisted timezone-rule basis is a hard failure rather than a silent reinterpretation
+
 Current non-goals remain:
 
 - fractional seconds

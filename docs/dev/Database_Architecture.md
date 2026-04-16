@@ -202,6 +202,19 @@ Storage owns:
 
 Upper layers must not treat storage-owned physical details as general engine currency.
 
+
+### Temporal Ownership Note
+
+Temporal values participate in the normal layered pipeline as typed logical values.
+
+The architectural ownership split is:
+
+- the SQL language specification defines temporal literal forms, type-family rules, public materialization, and user-visible semantics
+- the storage-engine design defines temporal physical encodings, database-persisted timezone dictionary snapshot rules, timezone-basis compatibility checks, and durable round-trip guarantees
+- architecture does not redefine temporal semantics or storage encodings; it only preserves the ownership boundary that keeps those concerns in the correct documents
+
+This preserves the general rule that user-visible semantics belong in the language contract and durable encodings belong in the storage contract.
+
 ## Planner-to-Execution Boundary
 
 The planner-to-execution boundary is a locked architectural seam.
