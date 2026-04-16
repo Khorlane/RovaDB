@@ -12,7 +12,7 @@ func main() {
 	path := "pkfk_example.db"
 	_ = os.Remove(path)
 
-	db, err := rovadb.Open(path)
+	db, err := rovadb.Create(path)
 	if err != nil {
 		log.Fatal(err)
 	}

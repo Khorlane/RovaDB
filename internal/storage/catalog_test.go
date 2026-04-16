@@ -10,9 +10,9 @@ import (
 )
 
 func TestCatalogRoundTripOmitsPhysicalRootsInLatestVersion(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "catalog.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -97,9 +97,9 @@ func TestCatalogRoundTripOmitsPhysicalRootsInLatestVersion(t *testing.T) {
 }
 
 func TestCatalogRoundTripIncludesRealType(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_real.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "catalog_real.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -143,9 +143,9 @@ func TestCatalogRoundTripIncludesRealType(t *testing.T) {
 }
 
 func TestCatalogRoundTripPreservesDeclaredIntegerWidths(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_integer_widths.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "catalog_integer_widths.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -203,9 +203,9 @@ func TestCatalogRoundTripPreservesDeclaredIntegerWidths(t *testing.T) {
 }
 
 func TestCatalogRoundTripPreservesTemporalColumnTypes(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_temporal_types.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "catalog_temporal_types.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -263,9 +263,9 @@ func TestCatalogRoundTripPreservesTemporalColumnTypes(t *testing.T) {
 }
 
 func TestCatalogRoundTripPreservesTemporalTimezoneMetadata(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_temporal_timezone.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "catalog_temporal_timezone.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -317,9 +317,9 @@ func TestCatalogRoundTripPreservesTemporalTimezoneMetadata(t *testing.T) {
 }
 
 func TestCatalogRoundTripPreservesTemporalDefaults(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_temporal_defaults.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "catalog_temporal_defaults.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -372,9 +372,9 @@ func TestCatalogRoundTripPreservesTemporalDefaults(t *testing.T) {
 }
 
 func TestCatalogRoundTripPreservesColumnNullabilityAndDefaults(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_coldefs.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "catalog_coldefs.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -433,9 +433,9 @@ func TestCatalogRoundTripPreservesColumnNullabilityAndDefaults(t *testing.T) {
 }
 
 func TestCatalogRoundTripPreservesTypedIntegerDefaults(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_integer_defaults.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "catalog_integer_defaults.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -487,9 +487,9 @@ func TestCatalogRoundTripPreservesTypedIntegerDefaults(t *testing.T) {
 }
 
 func TestSaveCatalogRejectsInconsistentColumnDefaultMetadata(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog_invalid_defaults.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "catalog_invalid_defaults.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -862,9 +862,9 @@ func buildLegacyCatalogPageDataForTest(version uint32, cat *CatalogData) []byte 
 }
 
 func TestSaveCatalogPromotesToOverflowWhenEmbeddedCapacityExceeded(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "catalog.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -948,9 +948,9 @@ func TestSaveCatalogPromotesToOverflowWhenEmbeddedCapacityExceeded(t *testing.T)
 }
 
 func TestSaveCatalogDemotesOverflowBackToEmbeddedWhenPayloadFits(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog-demote.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "catalog-demote.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -1068,9 +1068,9 @@ func TestSaveCatalogDemotesOverflowBackToEmbeddedWhenPayloadFits(t *testing.T) {
 }
 
 func TestSaveCatalogDemotionReclaimsSupersededOverflowChain(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog-reclaim-demote.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "catalog-reclaim-demote.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -1147,9 +1147,9 @@ func TestSaveCatalogDemotionReclaimsSupersededOverflowChain(t *testing.T) {
 }
 
 func TestSaveCatalogOverflowRewriteReclaimsPriorOverflowChain(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "catalog-reclaim-overflow.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "catalog-reclaim-overflow.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -1307,9 +1307,9 @@ func containsPageID(pageIDs []PageID, target PageID) bool {
 
 func TestSaveCatalogOverflowAllocationFailureLeavesCommittedMetadataIntact(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalog-intact.db")
-	dbFile, err := OpenOrCreate(path)
+	dbFile, err := Create(path)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -1365,9 +1365,9 @@ func TestSaveCatalogOverflowAllocationFailureLeavesCommittedMetadataIntact(t *te
 		t.Fatalf("dbFile.Close() error = %v", err)
 	}
 
-	dbFile, err = OpenOrCreate(path)
+	dbFile, err = Open(path)
 	if err != nil {
-		t.Fatalf("reopen OpenOrCreate() error = %v", err)
+		t.Fatalf("reopen Open() error = %v", err)
 	}
 	defer dbFile.Close()
 	reopenPager, err := NewPager(dbFile.file)
@@ -1384,9 +1384,9 @@ func TestSaveCatalogOverflowAllocationFailureLeavesCommittedMetadataIntact(t *te
 }
 
 func TestMutationPathsMarkPagesDirty(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "dirty.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "dirty.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 

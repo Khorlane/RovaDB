@@ -2857,3 +2857,4 @@ func TestEngineReportOnClosedDBReturnsErrClosed(t *testing.T) {
 		t.Fatalf("EngineReport() error = %v, want ErrClosed", err)
 	}
 }
+

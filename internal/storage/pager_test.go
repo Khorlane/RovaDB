@@ -49,9 +49,9 @@ func TestPagerFlushAndReload(t *testing.T) {
 	}
 
 	var err error
-	dbFile, err = OpenOrCreate(path)
+	dbFile, err = Open(path)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Open() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -136,9 +136,9 @@ func TestFlushDirtyWritesOnlyDirtyPages(t *testing.T) {
 		t.Fatalf("dbFile.Close() error = %v", err)
 	}
 
-	dbFile, err := OpenOrCreate(path)
+	dbFile, err := Open(path)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Open() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -200,9 +200,9 @@ func openTestPager(t *testing.T) (*DBFile, *Pager, string) {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "pager.db")
-	dbFile, err := OpenOrCreate(path)
+	dbFile, err := Create(path)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 
 	pager, err := NewPager(dbFile.file)

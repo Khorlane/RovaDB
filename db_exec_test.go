@@ -683,7 +683,7 @@ func TestExecEngineOwnedIntegerLiteralsAndDefaultsRemainValidForTypedIntegerWrit
 }
 
 func TestExecTemporalWritesAcceptMatchingFamiliesAndCanonicalPlaceholderStrings(t *testing.T) {
-	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "UTC"})
+	db, err := CreateWithOptions(freshDBPath(t), OpenOptions{DefaultTimezone: "UTC"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -742,7 +742,7 @@ func TestExecTemporalWritesAcceptMatchingFamiliesAndCanonicalPlaceholderStrings(
 }
 
 func TestExecTemporalWritesRejectMismatchedAndMalformedPlaceholderValues(t *testing.T) {
-	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "UTC"})
+	db, err := CreateWithOptions(freshDBPath(t), OpenOptions{DefaultTimezone: "UTC"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -833,7 +833,7 @@ func TestExecTemporalWritesRejectMismatchedAndMalformedPlaceholderValues(t *test
 }
 
 func TestExecTimestampWritesNormalizeThroughDatabaseTimezoneContext(t *testing.T) {
-	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(freshDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("OpenWithOptions() error = %v", err)
 	}

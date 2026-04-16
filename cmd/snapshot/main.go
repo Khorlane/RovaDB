@@ -718,8 +718,11 @@ func buildRootExportSurface(pkg packageInfo) []string {
 	}
 
 	primaryFuncs := map[string]bool{
-		"Open(path string) (*DB, error)": true,
-		"Version() string":               true,
+		"Open(path string) (*DB, error)":                                true,
+		"Create(path string) (*DB, error)":                              true,
+		"OpenWithOptions(path string, opts OpenOptions) (*DB, error)":   true,
+		"CreateWithOptions(path string, opts OpenOptions) (*DB, error)": true,
+		"Version() string": true,
 	}
 
 	primaryMethodPrefixes := []string{
@@ -1036,6 +1039,12 @@ func collectRootPublicSignatures(pkg packageInfo) []string {
 
 		switch {
 		case entry.Signature == "Open(path string) (*DB, error)":
+			out = append(out, entry.Signature)
+		case entry.Signature == "Create(path string) (*DB, error)":
+			out = append(out, entry.Signature)
+		case entry.Signature == "OpenWithOptions(path string, opts OpenOptions) (*DB, error)":
+			out = append(out, entry.Signature)
+		case entry.Signature == "CreateWithOptions(path string, opts OpenOptions) (*DB, error)":
 			out = append(out, entry.Signature)
 		case entry.Signature == "Version() string":
 			out = append(out, entry.Signature)

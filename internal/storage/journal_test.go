@@ -145,9 +145,9 @@ func TestRecoverFromRollbackJournalRestoresMultipleEntries(t *testing.T) {
 		t.Fatalf("journal stat error = %v, want not exists", err)
 	}
 
-	dbFile, err := OpenOrCreate(path)
+	dbFile, err := Open(path)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Open() error = %v", err)
 	}
 	defer dbFile.Close()
 

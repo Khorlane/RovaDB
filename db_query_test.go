@@ -3008,7 +3008,7 @@ func TestQuerySelectOrderByStringDesc(t *testing.T) {
 }
 
 func TestQuerySelectOrderByTemporalFamilies(t *testing.T) {
-	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(freshDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -3381,7 +3381,7 @@ func TestQuerySelectWhereRealTypeMismatch(t *testing.T) {
 }
 
 func TestQuerySelectWhereTemporalComparisons(t *testing.T) {
-	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(freshDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -3425,7 +3425,7 @@ func TestQuerySelectWhereTemporalComparisons(t *testing.T) {
 }
 
 func TestQuerySelectWhereTemporalTypeMismatch(t *testing.T) {
-	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(freshDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -3464,7 +3464,7 @@ func TestQuerySelectWhereTemporalTypeMismatch(t *testing.T) {
 }
 
 func TestQueryTemporalMaterializationAndScan(t *testing.T) {
-	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(freshDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -3538,9 +3538,9 @@ func TestQueryTemporalMaterializationAndScan(t *testing.T) {
 }
 
 func TestQueryTemporalMaterializationAndScanAfterReopen(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -3576,9 +3576,9 @@ func TestQueryTemporalMaterializationAndScanAfterReopen(t *testing.T) {
 }
 
 func TestQueryTimestampMaterializationFailsForOutOfRangeZoneID(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("OpenWithOptions() error = %v", err)
 	}
@@ -3617,9 +3617,9 @@ func TestQueryTimestampMaterializationFailsForOutOfRangeZoneID(t *testing.T) {
 }
 
 func TestOpenRejectsPersistedInvalidTimezoneDictionaryEntry(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("OpenWithOptions() error = %v", err)
 	}
@@ -3661,7 +3661,7 @@ func TestOpenRejectsPersistedInvalidTimezoneDictionaryEntry(t *testing.T) {
 }
 
 func TestQueryTemporalScanTypeMismatch(t *testing.T) {
-	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(freshDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}

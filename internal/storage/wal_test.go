@@ -684,9 +684,9 @@ func createReplayTestDB(t *testing.T) string {
 	t.Helper()
 
 	dbPath := filepath.Join(t.TempDir(), "replay.db")
-	dbFile, err := OpenOrCreate(dbPath)
+	dbFile, err := Create(dbPath)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	if err := dbFile.Close(); err != nil {
 		t.Fatalf("dbFile.Close() error = %v", err)

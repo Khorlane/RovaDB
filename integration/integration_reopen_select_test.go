@@ -515,3 +515,4 @@ func assertSelectRealRows(t *testing.T, db *DB, sql string, want [][3]any) {
 		}
 	}
 }
+

@@ -918,3 +918,4 @@ func TestRowsScanClosedRows(t *testing.T) {
 		t.Fatalf("Scan() on closed rows = %v, want ErrRowsClosed", err)
 	}
 }
+

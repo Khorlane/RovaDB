@@ -151,9 +151,9 @@ func TestOlderWrappedDirectoryPayloadRejectsLegacyCatalogPayload(t *testing.T) {
 func TestReadDirectoryCheckpointMetadataPersistsAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "directory-checkpoint.db")
 
-	dbFile, err := OpenOrCreate(path)
+	dbFile, err := Create(path)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
 		t.Fatalf("EnsureDirectoryPage() error = %v", err)
@@ -194,9 +194,9 @@ func TestReadDirectoryCheckpointMetadataPersistsAcrossReopen(t *testing.T) {
 		t.Fatalf("dbFile.Close() error = %v", err)
 	}
 
-	dbFile, err = OpenOrCreate(path)
+	dbFile, err = Open(path)
 	if err != nil {
-		t.Fatalf("reopen OpenOrCreate() error = %v", err)
+		t.Fatalf("reopen Open() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -285,9 +285,9 @@ func TestValidateDirectoryPageRejectsUnsupportedFormatVersion(t *testing.T) {
 }
 
 func TestEnsureDirectoryPageInitializesMissingPage(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "directory.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "directory.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -305,9 +305,9 @@ func TestEnsureDirectoryPageInitializesMissingPage(t *testing.T) {
 }
 
 func TestEnsureDirectoryPageRejectsLegacyCatalogPage(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "legacy-directory.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "legacy-directory.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -381,9 +381,9 @@ func TestValidateDirectoryPageAcceptsValidCATDIROverflowMode(t *testing.T) {
 }
 
 func TestDirectoryFreeListHeadRoundTripDurably(t *testing.T) {
-	dbFile, err := OpenOrCreate(filepath.Join(t.TempDir(), "directory-head.db"))
+	dbFile, err := Create(filepath.Join(t.TempDir(), "directory-head.db"))
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -406,9 +406,9 @@ func TestDirectoryFreeListHeadRoundTripDurably(t *testing.T) {
 func TestDirectoryFreeListHeadPersistsAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "directory-reopen.db")
 
-	dbFile, err := OpenOrCreate(path)
+	dbFile, err := Create(path)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
 		t.Fatalf("EnsureDirectoryPage() error = %v", err)
@@ -420,9 +420,9 @@ func TestDirectoryFreeListHeadPersistsAcrossReopen(t *testing.T) {
 		t.Fatalf("dbFile.Close() error = %v", err)
 	}
 
-	dbFile, err = OpenOrCreate(path)
+	dbFile, err = Open(path)
 	if err != nil {
-		t.Fatalf("reopen OpenOrCreate() error = %v", err)
+		t.Fatalf("reopen Open() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -631,9 +631,9 @@ func TestBuildCatalogPageDataWritesIDMappingsOnly(t *testing.T) {
 func TestWriteDirectoryRootIDMappingsPersistsDurably(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "directory-root-id-map.db")
 
-	dbFile, err := OpenOrCreate(path)
+	dbFile, err := Create(path)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
 		t.Fatalf("EnsureDirectoryPage() error = %v", err)
@@ -671,9 +671,9 @@ func TestWriteDirectoryRootIDMappingsPersistsDurably(t *testing.T) {
 		t.Fatalf("dbFile.Close() error = %v", err)
 	}
 
-	dbFile, err = OpenOrCreate(path)
+	dbFile, err = Open(path)
 	if err != nil {
-		t.Fatalf("reopen OpenOrCreate() error = %v", err)
+		t.Fatalf("reopen Open() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -778,9 +778,9 @@ func TestApplyDirectoryRootIDMappingsIgnoresCatalogCarriedRoots(t *testing.T) {
 
 func TestValidateDirectoryControlStateRejectsInvalidFreeListHeadPageType(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "directory-validate-free-head.db")
-	dbFile, err := OpenOrCreate(path)
+	dbFile, err := Create(path)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
@@ -800,9 +800,9 @@ func TestValidateDirectoryControlStateRejectsInvalidFreeListHeadPageType(t *test
 
 func TestValidateDirectoryControlStateAcceptsValidCATDIROverflowChain(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "directory-validate-overflow.db")
-	dbFile, err := OpenOrCreate(path)
+	dbFile, err := Create(path)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
@@ -831,9 +831,9 @@ func TestValidateDirectoryControlStateAcceptsValidCATDIROverflowChain(t *testing
 
 func TestValidateDirectoryControlStateRejectsInvalidTableRootPageType(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "directory-validate-table-root.db")
-	dbFile, err := OpenOrCreate(path)
+	dbFile, err := Create(path)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
@@ -857,9 +857,9 @@ func TestValidateDirectoryControlStateRejectsInvalidTableRootPageType(t *testing
 
 func TestValidateDirectoryControlStateRejectsInvalidIndexRootPageType(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "directory-validate-index-root.db")
-	dbFile, err := OpenOrCreate(path)
+	dbFile, err := Create(path)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
@@ -883,9 +883,9 @@ func TestValidateDirectoryControlStateRejectsInvalidIndexRootPageType(t *testing
 
 func TestValidateDirectoryControlStateRejectsUnsupportedObjectType(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "directory-validate-object-type.db")
-	dbFile, err := OpenOrCreate(path)
+	dbFile, err := Create(path)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 	if err := EnsureDirectoryPage(dbFile.File()); err != nil {
@@ -909,9 +909,9 @@ func TestValidateDirectoryControlStateRejectsUnsupportedObjectType(t *testing.T)
 
 func TestValidateDirectoryControlStateRejectsDuplicateIDMappings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "directory-validate-id-duplicates.db")
-	dbFile, err := OpenOrCreate(path)
+	dbFile, err := Create(path)
 	if err != nil {
-		t.Fatalf("OpenOrCreate() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer dbFile.Close()
 	if err := EnsureDirectoryPage(dbFile.File()); err != nil {

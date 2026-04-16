@@ -14,7 +14,7 @@ import (
 )
 
 func TestOpenRejectsOrphanWALWhenDBFileIsMissing(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 	walPath := storage.WALPath(path)
 
 	if err := storage.EnsureWALFile(path, storage.DBFormatVersion()); err != nil {
@@ -35,17 +35,19 @@ func TestOpenRejectsOrphanWALWhenDBFileIsMissing(t *testing.T) {
 }
 
 func TestVersionReturnsCurrentProductVersion(t *testing.T) {
-	if got := Version(); got != "v0.48.0" {
-		t.Fatalf("Version() = %q, want %q", got, "v0.48.0")
+	if got := Version(); got != "v0.48.2" {
+		t.Fatalf("Version() = %q, want %q", got, "v0.48.2")
 	}
 }
 
 func TestPublicOpenAPIMethodShapesCompile(t *testing.T) {
 	var open func(string) (*DB, error) = Open
+	var create func(string) (*DB, error) = Create
 	var openWithOptions func(string, OpenOptions) (*DB, error) = OpenWithOptions
+	var createWithOptions func(string, OpenOptions) (*DB, error) = CreateWithOptions
 	opts := OpenOptions{DefaultTimezone: "UTC"}
 
-	_, _, _ = open, openWithOptions, opts
+	_, _, _, _, _ = open, create, openWithOptions, createWithOptions, opts
 }
 
 func TestPublicTransactionAPIMethodShapesCompile(t *testing.T) {
@@ -60,10 +62,10 @@ func TestPublicTransactionAPIMethodShapesCompile(t *testing.T) {
 	_, _, _, _, _, _ = begin, commit, rollback, exec, query, queryRow
 }
 
-func TestOpenWithOptionsAcceptsValidDefaultTimezone(t *testing.T) {
-	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
+func TestCreateWithOptionsAcceptsValidDefaultTimezone(t *testing.T) {
+	db, err := CreateWithOptions(freshDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
-		t.Fatalf("OpenWithOptions() error = %v", err)
+		t.Fatalf("CreateWithOptions() error = %v", err)
 	}
 	defer db.Close()
 
@@ -87,24 +89,24 @@ func TestOpenWithOptionsAcceptsValidDefaultTimezone(t *testing.T) {
 	}
 }
 
-func TestOpenWithOptionsRejectsInvalidDefaultTimezone(t *testing.T) {
-	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "Mars/Olympus"})
+func TestCreateWithOptionsRejectsInvalidDefaultTimezone(t *testing.T) {
+	db, err := CreateWithOptions(freshDBPath(t), OpenOptions{DefaultTimezone: "Mars/Olympus"})
 	if err == nil {
 		_ = db.Close()
-		t.Fatal("OpenWithOptions() error = nil, want non-nil")
+		t.Fatal("CreateWithOptions() error = nil, want non-nil")
 	}
 	if !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("OpenWithOptions() error = %v, want %v", err, ErrInvalidArgument)
+		t.Fatalf("CreateWithOptions() error = %v, want %v", err, ErrInvalidArgument)
 	}
 	if !strings.Contains(err.Error(), `invalid default timezone "Mars/Olympus"`) {
-		t.Fatalf("OpenWithOptions() error = %q, want invalid timezone detail", err.Error())
+		t.Fatalf("CreateWithOptions() error = %q, want invalid timezone detail", err.Error())
 	}
 }
 
-func TestOpenDelegatesThroughOptionsPathWithoutChangingLegacyBehavior(t *testing.T) {
-	db, err := Open(testDBPath(t))
+func TestCreateUsesDefaultOptionsWhenNoExplicitOptionsAreProvided(t *testing.T) {
+	db, err := Create(freshDBPath(t))
 	if err != nil {
-		t.Fatalf("Open() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer db.Close()
 
@@ -126,18 +128,18 @@ func TestOpenDelegatesThroughOptionsPathWithoutChangingLegacyBehavior(t *testing
 }
 
 func TestOpenWithOptionsPersistsTemporalTimezoneMetadataInCatalog(t *testing.T) {
-	path := testDBPath(t)
-	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	path := freshDBPath(t)
+	db, err := CreateWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
-		t.Fatalf("OpenWithOptions() error = %v", err)
+		t.Fatalf("CreateWithOptions() error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("db.Close() error = %v", err)
 	}
 
-	dbFile, err := storage.OpenOrCreate(path)
+	dbFile, err := storage.Open(path)
 	if err != nil {
-		t.Fatalf("storage.OpenOrCreate() error = %v", err)
+		t.Fatalf("storage.Open() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -162,10 +164,10 @@ func TestOpenWithOptionsPersistsTemporalTimezoneMetadataInCatalog(t *testing.T) 
 }
 
 func TestOpenReloadsPersistedTemporalTimezoneMetadata(t *testing.T) {
-	path := testDBPath(t)
-	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	path := freshDBPath(t)
+	db, err := CreateWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
-		t.Fatalf("OpenWithOptions() error = %v", err)
+		t.Fatalf("CreateWithOptions() error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("db.Close() error = %v", err)
@@ -195,11 +197,11 @@ func TestOpenReloadsPersistedTemporalTimezoneMetadata(t *testing.T) {
 }
 
 func TestOpenRejectsPersistedMismatchedTimezoneBasisVersion(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
-		t.Fatalf("OpenWithOptions() error = %v", err)
+		t.Fatalf("CreateWithOptions() error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -216,11 +218,11 @@ func TestOpenRejectsPersistedMismatchedTimezoneBasisVersion(t *testing.T) {
 }
 
 func TestOpenReloadsPersistedTemporalTimezoneMetadataWithMatchingBasisVersion(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
-		t.Fatalf("OpenWithOptions() error = %v", err)
+		t.Fatalf("CreateWithOptions() error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -249,11 +251,11 @@ func TestOpenReloadsPersistedTemporalTimezoneMetadataWithMatchingBasisVersion(t 
 }
 
 func TestOpenRejectsPersistedDefaultTimezoneMissingFromDictionary(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
-		t.Fatalf("OpenWithOptions() error = %v", err)
+		t.Fatalf("CreateWithOptions() error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -270,11 +272,11 @@ func TestOpenRejectsPersistedDefaultTimezoneMissingFromDictionary(t *testing.T) 
 }
 
 func TestOpenRejectsPersistedEmptyTimezoneDictionaryEntry(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
-		t.Fatalf("OpenWithOptions() error = %v", err)
+		t.Fatalf("CreateWithOptions() error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -291,11 +293,11 @@ func TestOpenRejectsPersistedEmptyTimezoneDictionaryEntry(t *testing.T) {
 }
 
 func TestOpenRejectsPersistedDuplicateTimezoneDictionaryEntry(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
-		t.Fatalf("OpenWithOptions() error = %v", err)
+		t.Fatalf("CreateWithOptions() error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -312,9 +314,9 @@ func TestOpenRejectsPersistedDuplicateTimezoneDictionaryEntry(t *testing.T) {
 }
 
 func TestTxExecAndQueryNormalizeTimestampsThroughDatabaseTimezoneContext(t *testing.T) {
-	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(freshDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
-		t.Fatalf("OpenWithOptions() error = %v", err)
+		t.Fatalf("CreateWithOptions() error = %v", err)
 	}
 	defer db.Close()
 
@@ -353,7 +355,7 @@ func TestTxExecAndQueryNormalizeTimestampsThroughDatabaseTimezoneContext(t *test
 }
 
 func TestBeginOnOpenDBReturnsActiveTx(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := Create(freshDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -522,7 +524,7 @@ func TestBeginOnNilDBReturnsInvalidArgument(t *testing.T) {
 }
 
 func TestBeginOnClosedDBReturnsClosed(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := Create(freshDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -565,7 +567,7 @@ func TestNilTxExecQueryAndQueryRowUsePublicMisuseErrors(t *testing.T) {
 }
 
 func TestSecondBeginWhileTxActiveIsRejected(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := Create(freshDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -589,7 +591,7 @@ func TestSecondBeginWhileTxActiveIsRejected(t *testing.T) {
 }
 
 func TestCommitAppliesTransactionLocalStateToLaterDBReads(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := Create(freshDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -665,7 +667,7 @@ func TestCommitAppliesTransactionLocalStateToLaterDBReads(t *testing.T) {
 }
 
 func TestRollbackDiscardsTransactionLocalStateFromLaterDBReads(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := Create(freshDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -733,7 +735,7 @@ func TestRollbackDiscardsTransactionLocalStateFromLaterDBReads(t *testing.T) {
 }
 
 func TestActiveTxRejectedAfterDBClose(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := Create(freshDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -758,7 +760,7 @@ func TestActiveTxRejectedAfterDBClose(t *testing.T) {
 }
 
 func TestTxOwnershipMismatchIsRejectedAsInactive(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := Create(freshDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -788,7 +790,7 @@ func TestTxOwnershipMismatchIsRejectedAsInactive(t *testing.T) {
 }
 
 func TestTxExecAndQueryOperateWithinExplicitTransactionSnapshot(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := Create(freshDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -840,7 +842,7 @@ func TestTxExecAndQueryOperateWithinExplicitTransactionSnapshot(t *testing.T) {
 }
 
 func TestTxQueryRowOperatesWithinExplicitTransactionSnapshot(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := Create(freshDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -867,7 +869,7 @@ func TestTxQueryRowOperatesWithinExplicitTransactionSnapshot(t *testing.T) {
 }
 
 func TestDBAutocommitBehaviorRemainsUnchangedWithoutBegin(t *testing.T) {
-	db, err := Open(testDBPath(t))
+	db, err := Create(freshDBPath(t))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -890,9 +892,9 @@ func TestDBAutocommitBehaviorRemainsUnchangedWithoutBegin(t *testing.T) {
 }
 
 func TestTxCommitPersistsLifecycleStateAcrossCloseAndReopen(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := Open(path)
+	db, err := Create(path)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -960,9 +962,9 @@ func TestTxCommitPersistsLifecycleStateAcrossCloseAndReopen(t *testing.T) {
 }
 
 func TestTxRollbackDiscardsLifecycleStateAcrossCloseAndReopen(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := Open(path)
+	db, err := Create(path)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -1030,9 +1032,9 @@ func TestTxRollbackDiscardsLifecycleStateAcrossCloseAndReopen(t *testing.T) {
 }
 
 func TestTxCommitPersistsMultiPagePhysicalStorageAcrossReopen(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := Open(path)
+	db, err := Create(path)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}

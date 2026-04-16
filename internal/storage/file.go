@@ -23,23 +23,8 @@ func (f *DBFile) File() *os.File {
 	return f.file
 }
 
-// OpenOrCreate opens an existing database file or creates a new one with a header.
-func OpenOrCreate(path string) (*DBFile, error) {
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
-		if err != nil {
-			return nil, err
-		}
-		if err := writeHeader(file); err != nil {
-			file.Close()
-			_ = os.Remove(path)
-			return nil, err
-		}
-		return &DBFile{path: path, file: file}, nil
-	} else if err != nil {
-		return nil, err
-	}
-
+// Open opens an existing database file and validates its durable header.
+func Open(path string) (*DBFile, error) {
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return nil, err
@@ -49,6 +34,26 @@ func OpenOrCreate(path string) (*DBFile, error) {
 		return nil, err
 	}
 
+	return &DBFile{path: path, file: file}, nil
+}
+
+// Create creates a new database file and initializes its durable header.
+func Create(path string) (*DBFile, error) {
+	if _, err := os.Stat(path); err == nil {
+		return nil, os.ErrExist
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeHeader(file); err != nil {
+		file.Close()
+		_ = os.Remove(path)
+		return nil, err
+	}
 	return &DBFile{path: path, file: file}, nil
 }
 

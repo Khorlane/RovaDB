@@ -109,17 +109,36 @@ func Open(path string) (*DB, error) {
 	return OpenWithOptions(path, OpenOptions{})
 }
 
+// Create creates a new database handle at the given path.
+func Create(path string) (*DB, error) {
+	return CreateWithOptions(path, OpenOptions{})
+}
+
 // OpenWithOptions returns a database handle for the given path and validates
 // any explicit open-time configuration that is available in this slice.
 func OpenWithOptions(path string, opts OpenOptions) (*DB, error) {
+	return openWithOptions(path, opts, false)
+}
+
+// CreateWithOptions creates a new database handle at the given path and
+// validates any explicit open-time configuration that is available in this
+// slice.
+func CreateWithOptions(path string, opts OpenOptions) (*DB, error) {
+	return openWithOptions(path, opts, true)
+}
+
+func openWithOptions(path string, opts OpenOptions, create bool) (*DB, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, ErrInvalidArgument
 	}
-	creatingNewDB := false
+	creatingNewDB := create
+	pathExists := false
 	if _, err := os.Stat(path); err == nil {
-		creatingNewDB = false
+		pathExists = true
+		if create {
+			return nil, wrapStorageError(os.ErrExist)
+		}
 	} else if errors.Is(err, os.ErrNotExist) {
-		creatingNewDB = true
 	} else {
 		return nil, wrapStorageError(err)
 	}
@@ -136,8 +155,16 @@ func OpenWithOptions(path string, opts OpenOptions) (*DB, error) {
 	if err := rejectOrphanWALOnCreate(path); err != nil {
 		return nil, err
 	}
+	if !create && !pathExists {
+		return nil, wrapStorageError(os.ErrNotExist)
+	}
 
-	file, err := storage.OpenOrCreate(path)
+	var file *storage.DBFile
+	if create {
+		file, err = storage.Create(path)
+	} else {
+		file, err = storage.Open(path)
+	}
 	if err != nil {
 		return nil, wrapStorageError(err)
 	}

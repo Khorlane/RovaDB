@@ -150,3 +150,4 @@ func assertRow(t *testing.T, rows *Rows, wantID int, wantName string) {
 		t.Fatalf("row = (%d, %q), want (%d, %q)", id, name, wantID, wantName)
 	}
 }
+

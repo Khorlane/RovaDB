@@ -519,8 +519,8 @@ func TestRunOpenNewDatabase(t *testing.T) {
 	if !strings.Contains(output, "create "+path+"? [y/n]") {
 		t.Fatalf("output missing create confirmation:\n%s", output)
 	}
-	if !strings.Contains(output, "opened new "+path) {
-		t.Fatalf("output missing new-open message:\n%s", output)
+	if !strings.Contains(output, "created "+path) {
+		t.Fatalf("output missing create message:\n%s", output)
 	}
 }
 
@@ -693,8 +693,8 @@ func TestRunOpenMissingDatabaseRepromptsOnInvalidConfirmation(t *testing.T) {
 	if !strings.Contains(output, "please answer y or n") {
 		t.Fatalf("output missing invalid confirmation prompt:\n%s", output)
 	}
-	if !strings.Contains(output, "opened new "+path) {
-		t.Fatalf("output missing eventual open message:\n%s", output)
+	if !strings.Contains(output, "created "+path) {
+		t.Fatalf("output missing eventual create message:\n%s", output)
 	}
 }
 
@@ -906,9 +906,9 @@ func TestRunSelectFormatsDateUsingColumnTypes(t *testing.T) {
 	var errOut bytes.Buffer
 
 	path := filepath.Join(t.TempDir(), "test.db")
-	db, err := rovadb.OpenWithOptions(path, rovadb.OpenOptions{DefaultTimezone: "UTC"})
+	db, err := rovadb.CreateWithOptions(path, rovadb.OpenOptions{DefaultTimezone: "UTC"})
 	if err != nil {
-		t.Fatalf("OpenWithOptions() error = %v", err)
+		t.Fatalf("CreateWithOptions() error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("db.Close() error = %v", err)

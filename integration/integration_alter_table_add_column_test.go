@@ -286,3 +286,4 @@ func TestAlterTableAddColumnDefaultsAndNotNullPersistAcrossReopen(t *testing.T) 
 		t.Fatalf("Rows.Err() after insert = %v", err)
 	}
 }
+

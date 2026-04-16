@@ -18,6 +18,19 @@ import (
 
 func testDBPath(t *testing.T) string {
 	t.Helper()
+	path := freshDBPath(t)
+	db, err := Create(path)
+	if err != nil {
+		t.Fatalf("Create(%q) error = %v", path, err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close(%q) error = %v", path, err)
+	}
+	return path
+}
+
+func freshDBPath(t *testing.T) string {
+	t.Helper()
 	return filepath.Join(t.TempDir(), "test.db")
 }
 
@@ -1153,9 +1166,19 @@ const (
 func openRawStorage(t testFataler, path string) (*storage.DBFile, *storage.Pager) {
 	t.Helper()
 
-	dbFile, err := storage.OpenOrCreate(path)
+	var (
+		dbFile *storage.DBFile
+		err    error
+	)
+	if _, statErr := os.Stat(path); errors.Is(statErr, os.ErrNotExist) {
+		dbFile, err = storage.Create(path)
+	} else if statErr != nil {
+		t.Fatalf("os.Stat(%q) error = %v", path, statErr)
+	} else {
+		dbFile, err = storage.Open(path)
+	}
 	if err != nil {
-		t.Fatalf("storage.OpenOrCreate() error = %v", err)
+		t.Fatalf("storage open/create error = %v", err)
 	}
 	pager, err := storage.NewPager(dbFile.File())
 	if err != nil {

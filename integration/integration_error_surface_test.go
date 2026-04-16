@@ -97,3 +97,4 @@ func mustError(t *testing.T, _ any, err error) error {
 	}
 	return err
 }
+

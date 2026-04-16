@@ -289,6 +289,7 @@ Destructive DDL behavior:
 ### Public API
 
 - `Open(path string) (*DB, error)`
+- `Create(path string) (*DB, error)`
 - `(*DB).Close() error`
 - `(*DB).Exec(query string, args ...any) (Result, error)`
 - `(*DB).Query(query string, args ...any) (*Rows, error)`
@@ -302,6 +303,8 @@ Destructive DDL behavior:
 - `(*Tx).Commit() error`
 - `(*Tx).Rollback() error`
 - `Version() string`
+
+`Open` requires an existing database file. `Create` creates a new database and fails if the target path already exists.
 
 ### Supported data types
 
@@ -422,7 +425,7 @@ RovaDB exposes a small public catalog API for listing tables and reading table s
 ## Canonical Example
 
 ```go
-db, err := rovadb.Open("app.db")
+db, err := rovadb.Create("app.db")
 if err != nil {
 	log.Fatal(err)
 }

@@ -40,10 +40,19 @@ func Open(path string) (*DB, error) {
 	return rovadb.Open(path)
 }
 
+func Create(path string) (*DB, error) {
+	return rovadb.Create(path)
+}
+
 func OpenWithOptions(path string, opts OpenOptions) (*DB, error) {
 	return rovadb.OpenWithOptions(path, opts)
+}
+
+func CreateWithOptions(path string, opts OpenOptions) (*DB, error) {
+	return rovadb.CreateWithOptions(path, opts)
 }
 
 func Version() string {
 	return rovadb.Version()
 }
+

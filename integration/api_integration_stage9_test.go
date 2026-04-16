@@ -307,3 +307,4 @@ func TestStage9APIPositionalArgsExampleFlow(t *testing.T) {
 		t.Fatalf("QueryRow().Scan() = (%q, %v), want (%q, false)", name, active, "Bob")
 	}
 }
+

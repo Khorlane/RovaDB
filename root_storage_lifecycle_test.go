@@ -109,9 +109,9 @@ func TestTableNamesForSelectUsesExecutorAccessPathForIndexScan(t *testing.T) {
 }
 
 func TestCommitFlushesDirtyPages(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -173,9 +173,9 @@ func TestCommitFlushesDirtyPages(t *testing.T) {
 }
 
 func TestExecMutatingStatementRollbackKeepsCommittedStateAcrossReopen(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -272,9 +272,9 @@ func TestCommitErrorPropagates(t *testing.T) {
 }
 
 func TestJournaledCommitCreatesAndRemovesJournal(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -1887,9 +1887,9 @@ func TestTemporalPhysicalRowsRoundTripAcrossRewriteAndReopen(t *testing.T) {
 		t.Fatalf("second Close() error = %v", err)
 	}
 
-	dbFile, err := storage.OpenOrCreate(path)
+	dbFile, err := storage.Open(path)
 	if err != nil {
-		t.Fatalf("storage.OpenOrCreate() error = %v", err)
+		t.Fatalf("storage.Open() error = %v", err)
 	}
 	defer dbFile.Close()
 
@@ -2022,9 +2022,9 @@ func TestTypedIntegerCloseReopenPreservesExactWidthsAcrossMaterializeAndScan(t *
 }
 
 func TestTemporalCloseReopenPreservesPublicMaterializationAndScan(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
-	db, err := OpenWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
+	db, err := CreateWithOptions(path, OpenOptions{DefaultTimezone: "America/New_York"})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -4082,7 +4082,7 @@ func TestCatalogRoundTripPreservesIndexMetadataForOpen(t *testing.T) {
 }
 
 func TestOpenRetainsUnsupportedIndexDefinitions(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
 	dbFile, pager := openRawStorage(t, path)
 	rootPage := pager.NewPage()
@@ -5142,7 +5142,7 @@ func TestOpenFailsWhenPersistedIndexRootHasWrongPageType(t *testing.T) {
 }
 
 func TestOpenRejectsPersistedOutOfRangeInt(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
 	dbFile, pager := openRawStorage(t, path)
 	defer dbFile.Close()
@@ -5184,7 +5184,7 @@ func TestOpenRejectsPersistedOutOfRangeInt(t *testing.T) {
 }
 
 func TestOpenRejectsExactStorageRowCountMismatch(t *testing.T) {
-	path := testDBPath(t)
+	path := freshDBPath(t)
 
 	dbFile, pager := openRawStorage(t, path)
 	defer dbFile.Close()
@@ -5534,9 +5534,9 @@ func TestOpenCreatesFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
 	_ = os.Remove(path)
 
-	db, err := Open(path)
+	db, err := Create(path)
 	if err != nil {
-		t.Fatalf("Open() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	defer db.Close()
 
@@ -5583,9 +5583,9 @@ func TestOpenCreatesFile(t *testing.T) {
 func TestOpenExistingValidFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
 
-	db, err := Open(path)
+	db, err := Create(path)
 	if err != nil {
-		t.Fatalf("first Open() error = %v", err)
+		t.Fatalf("first Create() error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("first Close() error = %v", err)
@@ -5601,9 +5601,9 @@ func TestOpenExistingValidFile(t *testing.T) {
 func TestOpenExistingValidFileWithValidWAL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
 
-	db, err := Open(path)
+	db, err := Create(path)
 	if err != nil {
-		t.Fatalf("first Open() error = %v", err)
+		t.Fatalf("first Create() error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("first Close() error = %v", err)
@@ -5619,9 +5619,9 @@ func TestOpenExistingValidFileWithValidWAL(t *testing.T) {
 func TestOpenRevalidatesDirectoryPageOnReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
 
-	db, err := Open(path)
+	db, err := Create(path)
 	if err != nil {
-		t.Fatalf("first Open() error = %v", err)
+		t.Fatalf("first Create() error = %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("first Close() error = %v", err)
@@ -6023,9 +6023,9 @@ func TestOpenRejectsMalformedCATDIROverflowChainPageType(t *testing.T) {
 func TestOpenWithHeaderOnlyWALSucceeds(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
 
-	db, err := Open(path)
+	db, err := Create(path)
 	if err != nil {
-		t.Fatalf("first Open() error = %v", err)
+		t.Fatalf("first Create() error = %v", err)
 	}
 	if err := storage.ResetWALFile(path, storage.DBFormatVersion()); err != nil {
 		t.Fatalf("ResetWALFile() error = %v", err)
@@ -8659,9 +8659,9 @@ func TestInsertPersistsRowsToOwnedDataPage(t *testing.T) {
 		t.Fatalf("second Close() error = %v", err)
 	}
 
-	dbFile, err := storage.OpenOrCreate(path)
+	dbFile, err := storage.Open(path)
 	if err != nil {
-		t.Fatalf("storage.OpenOrCreate() error = %v", err)
+		t.Fatalf("storage.Open() error = %v", err)
 	}
 	defer dbFile.Close()
 

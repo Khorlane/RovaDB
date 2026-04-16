@@ -730,7 +730,7 @@ func handleCreateConfirmation(out io.Writer, session *cliSession, input string) 
 		session.pendingCreatePath = ""
 		return writeResponse(out, "did not create %s", path)
 	case "y", "yes":
-		db, err := rovadb.Open(path)
+		db, err := rovadb.Create(path)
 		if err != nil {
 			session.pendingCreatePath = ""
 			return err
@@ -738,7 +738,7 @@ func handleCreateConfirmation(out io.Writer, session *cliSession, input string) 
 		session.db = db
 		session.path = path
 		session.pendingCreatePath = ""
-		return writeResponse(out, "opened new %s", path)
+		return writeResponse(out, "created %s", path)
 	default:
 		return writeResponse(out, "please answer y or n")
 	}
@@ -755,7 +755,15 @@ func openExistingPath(session *cliSession, path string) error {
 }
 
 func createSampleDatabase(session *cliSession, path string) error {
-	db, err := rovadb.Open(path)
+	var (
+		db  *rovadb.DB
+		err error
+	)
+	if fileExists(path) {
+		db, err = rovadb.Open(path)
+	} else {
+		db, err = rovadb.Create(path)
+	}
 	if err != nil {
 		return err
 	}

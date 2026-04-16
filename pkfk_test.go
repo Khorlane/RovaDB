@@ -1097,3 +1097,4 @@ func applyForeignKeyMetadata(t *testing.T, child *executor.Table, parent *execut
 		OnDeleteAction:       onDelete,
 	})
 }
+
