@@ -17,6 +17,7 @@ import (
 	"github.com/Khorlane/RovaDB/internal/parser"
 	"github.com/Khorlane/RovaDB/internal/planner"
 	"github.com/Khorlane/RovaDB/internal/storage"
+	"github.com/Khorlane/RovaDB/internal/temporal"
 	"github.com/Khorlane/RovaDB/internal/txn"
 )
 
@@ -71,6 +72,9 @@ type DB struct {
 	tx     *Tx
 	txView bool
 
+	defaultTimezone string
+	defaultLocation *time.Location
+
 	afterJournalWriteHook func() error
 	afterDatabaseSyncHook func() error
 
@@ -91,10 +95,25 @@ type stagedPage struct {
 	isNew bool
 }
 
+// OpenOptions configures database open behavior.
+type OpenOptions struct {
+	DefaultTimezone string
+}
+
 // Open returns a database handle for the given path.
 func Open(path string) (*DB, error) {
+	return OpenWithOptions(path, OpenOptions{})
+}
+
+// OpenWithOptions returns a database handle for the given path and validates
+// any explicit open-time configuration that is available in this slice.
+func OpenWithOptions(path string, opts OpenOptions) (*DB, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, ErrInvalidArgument
+	}
+	defaultTimezone, defaultLocation, err := resolveDefaultTimezone(opts)
+	if err != nil {
+		return nil, err
 	}
 
 	// A surviving rollback journal implies an interrupted commit. Recovery
@@ -238,6 +257,8 @@ func Open(path string) (*DB, error) {
 		pager:                   pager,
 		pool:                    pool,
 		tables:                  tables,
+		defaultTimezone:         defaultTimezone,
+		defaultLocation:         defaultLocation,
 		freeListHead:            freeListHead,
 		lastCheckpointLSN:       checkpointMeta.LastCheckpointLSN,
 		lastCheckpointPageCount: checkpointMeta.LastCheckpointPageCount,
@@ -278,6 +299,18 @@ func Open(path string) (*DB, error) {
 
 	db.nextWALLSN = nextWALLSN
 	return db, nil
+}
+
+func resolveDefaultTimezone(opts OpenOptions) (string, *time.Location, error) {
+	if opts.DefaultTimezone == "" {
+		return "", nil, nil
+	}
+
+	location, err := temporal.LoadLocation(opts.DefaultTimezone)
+	if err != nil {
+		return "", nil, fmt.Errorf("open: invalid default timezone %q: %s: %w", opts.DefaultTimezone, err, ErrInvalidArgument)
+	}
+	return location.String(), location, nil
 }
 
 func rejectOrphanWALOnCreate(path string) error {

@@ -31,9 +31,17 @@ func TestOpenRejectsOrphanWALWhenDBFileIsMissing(t *testing.T) {
 }
 
 func TestVersionReturnsCurrentProductVersion(t *testing.T) {
-	if got := Version(); got != "v0.47.0-temporal-core-basics" {
-		t.Fatalf("Version() = %q, want %q", got, "v0.47.0-temporal-core-basics")
+	if got := Version(); got != "v0.47.0" {
+		t.Fatalf("Version() = %q, want %q", got, "v0.47.0")
 	}
+}
+
+func TestPublicOpenAPIMethodShapesCompile(t *testing.T) {
+	var open func(string) (*DB, error) = Open
+	var openWithOptions func(string, OpenOptions) (*DB, error) = OpenWithOptions
+	opts := OpenOptions{DefaultTimezone: "UTC"}
+
+	_, _, _ = open, openWithOptions, opts
 }
 
 func TestPublicTransactionAPIMethodShapesCompile(t *testing.T) {
@@ -46,6 +54,53 @@ func TestPublicTransactionAPIMethodShapesCompile(t *testing.T) {
 
 	// Keep explicit references so method-shape compatibility is checked at compile time.
 	_, _, _, _, _, _ = begin, commit, rollback, exec, query, queryRow
+}
+
+func TestOpenWithOptionsAcceptsValidDefaultTimezone(t *testing.T) {
+	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "America/New_York"})
+	if err != nil {
+		t.Fatalf("OpenWithOptions() error = %v", err)
+	}
+	defer db.Close()
+
+	if db.defaultTimezone != "America/New_York" {
+		t.Fatalf("db.defaultTimezone = %q, want %q", db.defaultTimezone, "America/New_York")
+	}
+	if db.defaultLocation == nil {
+		t.Fatal("db.defaultLocation = nil, want non-nil")
+	}
+	if db.defaultLocation.String() != "America/New_York" {
+		t.Fatalf("db.defaultLocation.String() = %q, want %q", db.defaultLocation.String(), "America/New_York")
+	}
+}
+
+func TestOpenWithOptionsRejectsInvalidDefaultTimezone(t *testing.T) {
+	db, err := OpenWithOptions(testDBPath(t), OpenOptions{DefaultTimezone: "Mars/Olympus"})
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("OpenWithOptions() error = nil, want non-nil")
+	}
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("OpenWithOptions() error = %v, want %v", err, ErrInvalidArgument)
+	}
+	if !strings.Contains(err.Error(), `invalid default timezone "Mars/Olympus"`) {
+		t.Fatalf("OpenWithOptions() error = %q, want invalid timezone detail", err.Error())
+	}
+}
+
+func TestOpenDelegatesThroughOptionsPathWithoutChangingLegacyBehavior(t *testing.T) {
+	db, err := Open(testDBPath(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if db.defaultTimezone != "" {
+		t.Fatalf("db.defaultTimezone = %q, want empty", db.defaultTimezone)
+	}
+	if db.defaultLocation != nil {
+		t.Fatalf("db.defaultLocation = %#v, want nil", db.defaultLocation)
+	}
 }
 
 func TestBeginOnOpenDBReturnsActiveTx(t *testing.T) {

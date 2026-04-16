@@ -18,6 +18,7 @@ type EngineIndexInfo = rovadb.EngineIndexInfo
 type EngineSchemaInventory = rovadb.EngineSchemaInventory
 type EnginePageUsage = rovadb.EnginePageUsage
 type ErrorKind = rovadb.ErrorKind
+type OpenOptions = rovadb.OpenOptions
 
 const (
 	ErrParse   = rovadb.ErrParse
@@ -37,6 +38,10 @@ var (
 
 func Open(path string) (*DB, error) {
 	return rovadb.Open(path)
+}
+
+func OpenWithOptions(path string, opts OpenOptions) (*DB, error) {
+	return rovadb.OpenWithOptions(path, opts)
 }
 
 func Version() string {
